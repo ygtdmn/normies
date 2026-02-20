@@ -1,6 +1,6 @@
 {
-    "name": "ephemera-solidity-starter-template",
-    "description": "Solidity Starter Template for Ephemera contracts",
+    "name": "normies",
+    "description": "On-chain generative faces",
     "version": "1.0.0",
     "dependencies": {
         "@manifoldxyz/creator-core-solidity": "^3.0.0",
