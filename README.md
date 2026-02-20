@@ -3,6 +3,9 @@
 Fully on-chain generative NFT collection — 10,000 unique 40x40 monochrome pixel art faces with encrypted pre-reveal
 storage and on-chain SVG rendering.
 
+A project by [Serc](https://x.com/serc1n). Smart contracts, mint site, and API server by
+[Yigit Duman](https://x.com/yigitduman).
+
 ## Architecture
 
 ```
