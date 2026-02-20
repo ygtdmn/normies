@@ -1,0 +1,31 @@
+{
+    "name": "ephemera-solidity-starter-template",
+    "description": "Solidity Starter Template for Ephemera contracts",
+    "version": "1.0.0",
+    "dependencies": {
+        "@manifoldxyz/creator-core-solidity": "^3.0.0",
+        "@openzeppelin/contracts": "4.9.2",
+        "@openzeppelin/contracts-upgradeable": "4.9.2",
+        "ethfs": "holic/ethfs",
+        "solady": "^0.1.26",
+        "@limitbreak/creator-token-standards": "^5.0.0",
+        "@limitbreak/permit-c": "^1.0.0"
+    },
+    "devDependencies": {
+        "forge-std": "github:foundry-rs/forge-std#v1.14.0",
+        "prettier": "^3.8.1",
+        "solhint": "^6.0.3"
+    },
+    "private": true,
+    "scripts": {
+        "clean": "rm -rf cache out",
+        "build": "forge build",
+        "lint": "bun run lint:sol && bun run prettier:check",
+        "lint:sol": "forge fmt --check && bun solhint \"{script,src,test}/**/*.sol\"",
+        "prettier:check": "prettier --check \"**/*.{json,md,yml}\" --ignore-path \".prettierignore\"",
+        "prettier:write": "prettier --write \"**/*.{json,md,yml}\" --ignore-path \".prettierignore\"",
+        "test": "forge test",
+        "test:coverage": "forge coverage",
+        "test:coverage:report": "forge coverage --report lcov && genhtml lcov.info --branch-coverage --output-dir coverage"
+    }
+}

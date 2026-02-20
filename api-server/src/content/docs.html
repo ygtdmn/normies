@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Normies API</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #e3e5e4;
+            color: #48494b;
+            line-height: 1.6;
+            padding: 2rem 1rem;
+        }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 900;
+            margin-bottom: 0.25rem;
+            letter-spacing: -0.02em;
+        }
+        .subtitle {
+            font-size: 1.1rem;
+            color: #6b6d6f;
+            margin-bottom: 2rem;
+        }
+        h2 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            margin: 2.5rem 0 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #48494b;
+        }
+        h3 { font-size: 1.1rem; font-weight: 600; margin: 1.5rem 0 0.5rem; }
+        .endpoint {
+            background: #fff;
+            border: 1px solid #d0d2d3;
+            border-radius: 8px;
+            padding: 1.25rem;
+            margin-bottom: 1rem;
+        }
+        .method {
+            display: inline-block;
+            background: #48494b;
+            color: #e3e5e4;
+            padding: 0.15rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            font-family: monospace;
+            margin-right: 0.5rem;
+        }
+        .path {
+            font-family: monospace;
+            font-size: 1rem;
+            font-weight: 600;
+        }
+        .desc { margin-top: 0.5rem; color: #6b6d6f; }
+        code {
+            background: #f4f4f4;
+            padding: 0.15rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+        pre {
+            background: #2d2e30;
+            color: #e3e5e4;
+            padding: 1rem;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            margin: 0.75rem 0;
+        }
+        pre code { background: none; padding: 0; color: inherit; }
+        .response-type {
+            display: inline-block;
+            font-size: 0.75rem;
+            color: #6b6d6f;
+            border: 1px solid #d0d2d3;
+            padding: 0.1rem 0.4rem;
+            border-radius: 3px;
+            margin-left: 0.5rem;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0.75rem 0;
+        }
+        th, td {
+            text-align: left;
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid #d0d2d3;
+        }
+        th { font-weight: 600; background: #f4f4f4; }
+        a { color: #48494b; font-weight: 600; }
+        .note {
+            background: #f9f9f9;
+            border-left: 3px solid #48494b;
+            padding: 0.75rem 1rem;
+            margin: 1rem 0;
+            font-size: 0.9rem;
+        }
+        .footer {
+            margin-top: 3rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #d0d2d3;
+            font-size: 0.85rem;
+            color: #6b6d6f;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Normies API</h1>
+        <p class="subtitle">On-Chain Normies Data for Builders</p>
+
+        <p>
+            The Normies API provides programmatic access to on-chain Normies NFT data.
+            Retrieve pixel data, traits, images, and metadata for any minted Normie.
+        </p>
+
+        <div class="note">
+            All data is sourced directly from the Ethereum mainnet smart contracts.
+            Token IDs range from <code>0</code> to <code>9999</code>.
+            See also: <a href="/llms.txt">/llms.txt</a> for LLM-friendly documentation.
+        </div>
+
+        <h2>Endpoints</h2>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/normie/:id/pixels</span>
+            <span class="response-type">text/plain</span>
+            <p class="desc">
+                Returns the 40x40 monochrome bitmap as a 1600-character binary string of <code>0</code>s and <code>1</code>s.
+                Row-major order, top-left to bottom-right.
+                <code>1</code> = pixel on (#48494b), <code>0</code> = pixel off (#e3e5e4 background).
+            </p>
+            <pre><code>curl https://your-api-domain.com/normie/0/pixels
+
+# Response: 1600 characters
+# 0000000000000000000000000000000000000000
+# 0000000001111111111111100000000000000000
+# ...</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/normie/:id/traits/binary</span>
+            <span class="response-type">text/plain</span>
+            <p class="desc">
+                Returns the raw <code>bytes8</code> trait data as a hex string.
+                Each byte is an index into a trait category (8 categories total).
+            </p>
+            <pre><code>curl https://your-api-domain.com/normie/0/traits/binary
+
+# Response: 0x0001000305010200</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/normie/:id/traits</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Returns decoded traits as a JSON object with human-readable labels.
+            </p>
+            <pre><code>curl https://your-api-domain.com/normie/0/traits
+
+# Response:
+{
+  "raw": "0x0001000305010200",
+  "attributes": [
+    { "trait_type": "Type", "value": "Human" },
+    { "trait_type": "Gender", "value": "Female" },
+    { "trait_type": "Age", "value": "Young" },
+    { "trait_type": "Hair Style", "value": "Straight Hair" },
+    { "trait_type": "Facial Feature", "value": "Shadow Beard" },
+    { "trait_type": "Eyes", "value": "Big Shades" },
+    { "trait_type": "Expression", "value": "Serious" },
+    { "trait_type": "Accessory", "value": "Top Hat" }
+  ]
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/normie/:id/image.svg</span>
+            <span class="response-type">image/svg+xml</span>
+            <p class="desc">
+                Returns the Normie image as an SVG. 1000x1000 output with a 40x40 viewBox.
+                Matches the on-chain renderer output exactly (RLE row-scan optimization).
+            </p>
+            <pre><code>curl https://your-api-domain.com/normie/0/image.svg -o normie.svg
+
+# Or use directly in HTML:
+# &lt;img src="https://your-api-domain.com/normie/0/image.svg" /&gt;</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/normie/:id/image.png</span>
+            <span class="response-type">image/png</span>
+            <p class="desc">
+                Returns the Normie image as a 1000x1000 PNG. Rasterized from the SVG with pixel-perfect rendering.
+            </p>
+            <pre><code>curl https://your-api-domain.com/normie/0/image.png -o normie.png</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/normie/:id/metadata</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Returns the full NFT metadata JSON, matching the on-chain <code>tokenURI()</code> output.
+                Includes name, attributes, SVG image (as data URI), and animation URL (HTML canvas data URI).
+            </p>
+            <pre><code>curl https://your-api-domain.com/normie/0/metadata
+
+# Response:
+{
+  "name": "Normie #0",
+  "attributes": [
+    { "trait_type": "Type", "value": "Human" },
+    ...
+    { "display_type": "number", "trait_type": "Level", "value": 1 },
+    { "display_type": "number", "trait_type": "Pixel Count", "value": 527 }
+  ],
+  "image": "data:image/svg+xml;base64,...",
+  "animation_url": "data:text/html;base64,..."
+}</code></pre>
+        </div>
+
+        <h2>Trait Categories</h2>
+
+        <table>
+            <tr><th>Category</th><th>Byte Index</th><th>Possible Values</th></tr>
+            <tr><td>Type</td><td>0</td><td>Human, Cat, Alien, Agent</td></tr>
+            <tr><td>Gender</td><td>1</td><td>Male, Female, Non-Binary</td></tr>
+            <tr><td>Age</td><td>2</td><td>Young, Middle-Aged, Old</td></tr>
+            <tr><td>Hair Style</td><td>3</td><td>21 options (Short Hair, Long Hair, Curly Hair, ...)</td></tr>
+            <tr><td>Facial Feature</td><td>4</td><td>17 options (Full Beard, Mustache, Goatee, ...)</td></tr>
+            <tr><td>Eyes</td><td>5</td><td>14 options (Classic Shades, Big Shades, ...)</td></tr>
+            <tr><td>Expression</td><td>6</td><td>7 options (Neutral, Slight Smile, Serious, ...)</td></tr>
+            <tr><td>Accessory</td><td>7</td><td>15 options (Top Hat, Fedora, Cowboy Hat, ...)</td></tr>
+        </table>
+
+        <h2>Pixel Data Format</h2>
+
+        <p>Each Normie is a 40x40 monochrome bitmap stored as 200 bytes on-chain (1 bit per pixel, MSB first).</p>
+
+        <table>
+            <tr><th>Property</th><th>Value</th></tr>
+            <tr><td>Grid Size</td><td>40 x 40 pixels</td></tr>
+            <tr><td>Bit Order</td><td>MSB first (most significant bit = leftmost pixel)</td></tr>
+            <tr><td>Layout</td><td>Row-major (top-left to bottom-right)</td></tr>
+            <tr><td>Pixel On</td><td><code>1</code> — dark gray (#48494b)</td></tr>
+            <tr><td>Pixel Off</td><td><code>0</code> — light gray (#e3e5e4)</td></tr>
+            <tr><td>Storage Size</td><td>200 bytes (1600 bits)</td></tr>
+        </table>
+
+        <h3>Pixel Access Formula</h3>
+        <pre><code>flatIndex = y * 40 + x
+byteIndex = flatIndex >> 3        // divide by 8
+bitPos    = 7 - (flatIndex & 7)   // MSB first
+pixel     = (data[byteIndex] >> bitPos) & 1</code></pre>
+
+        <h2>Rate Limiting</h2>
+
+        <p>Requests are rate-limited per IP address using a sliding window.</p>
+
+        <table>
+            <tr><th>Limit</th><th>Value</th></tr>
+            <tr><td>Requests</td><td>60 per minute</td></tr>
+            <tr><td>Window</td><td>Sliding 60 seconds</td></tr>
+        </table>
+
+        <p>Rate limit headers are included in every response:</p>
+        <ul style="margin: 0.5rem 0 0.5rem 1.5rem;">
+            <li><code>X-RateLimit-Limit</code> — Max requests per window</li>
+            <li><code>X-RateLimit-Remaining</code> — Remaining requests in current window</li>
+            <li><code>Retry-After</code> — Seconds until window resets (only on 429)</li>
+        </ul>
+
+        <h2>Errors</h2>
+
+        <table>
+            <tr><th>Status</th><th>Meaning</th></tr>
+            <tr><td>400</td><td>Invalid token ID (must be integer 0-9999)</td></tr>
+            <tr><td>404</td><td>Token not found or data not set on-chain</td></tr>
+            <tr><td>429</td><td>Rate limit exceeded</td></tr>
+            <tr><td>500</td><td>Internal server error</td></tr>
+        </table>
+
+        <p>Error responses are JSON:</p>
+        <pre><code>{ "error": "Invalid token ID: \"abc\". Must be an integer 0-9999." }</code></pre>
+
+        <h2>Smart Contracts (Ethereum Mainnet)</h2>
+
+        <table>
+            <tr><th>Contract</th><th>Address</th><th>Description</th></tr>
+            <tr>
+                <td>Normies</td>
+                <td><code>0x9Eb6E2025B64f340691e424b7fe7022fFDE12438</code></td>
+                <td>Core ERC721C token with ERC-2981 royalties</td>
+            </tr>
+            <tr>
+                <td>NormiesStorage</td>
+                <td><code>0x1B976bAf51cF51F0e369C070d47FBc47A706e602</code></td>
+                <td>SSTORE2 bitmap &amp; trait storage with XOR encryption</td>
+            </tr>
+            <tr>
+                <td>NormiesRenderer</td>
+                <td><code>0xBe57fC4D0c729b8e8d33b638Dd441F57365e4c25</code></td>
+                <td>V1 — Animated noise pre-reveal, static SVG post-reveal</td>
+            </tr>
+            <tr>
+                <td>NormiesRendererV2</td>
+                <td><code>0x7818f24d3239c945510e0a1a523dd9971812c6c0</code></td>
+                <td>V2 — Static noise pre-reveal</td>
+            </tr>
+            <tr>
+                <td>NormiesRendererV3</td>
+                <td><code>0x1af01b902256d77cf9499a14ef4e494897380b05</code></td>
+                <td>V3 — RLE-optimized SVG, Pixel Count trait, canvas animation_url</td>
+            </tr>
+            <tr>
+                <td>NormiesMinter</td>
+                <td><code>0xC74994dD70FFb621CC514cE18a4F6F52124e296d</code></td>
+                <td>V1 — EIP-191 signature-verified minting</td>
+            </tr>
+            <tr>
+                <td>NormiesMinterV2</td>
+                <td><code>0xc513272597d3022D77b3d7EEBA92cea5D7fb2808</code></td>
+                <td>V2 — Adds delegate.xyz v1/v2 cold wallet delegation</td>
+            </tr>
+        </table>
+
+        <div class="footer">
+            <p>Normies — On-Chain Generative Faces</p>
+            <p>
+                <a href="https://x.com/serc1n" target="_blank">@serc1n</a> &middot;
+                <a href="https://x.com/yigitduman" target="_blank">@yigitduman</a>
+            </p>
+        </div>
+    </div>
+    <script>
+        document.querySelectorAll('pre code').forEach(function (el) {
+            el.textContent = el.textContent.replace(/https:\/\/your-api-domain\.com/g, location.origin);
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,138 @@
+# Normies API
+
+> On-Chain Normies Data for Builders
+
+Normies is a 10,000-piece on-chain generative NFT collection on Ethereum.
+Each Normie is a 40x40 monochrome bitmap stored entirely on-chain.
+
+## Base URL
+
+Replace `{base}` with the deployed API URL.
+
+## Endpoints
+
+### GET /normie/{id}/pixels
+Returns the 40x40 bitmap as a 1600-character string of 0s and 1s.
+- Content-Type: text/plain
+- Parameters: id (integer, 0-9999)
+- Response: 1600 characters, row-major order, top-left to bottom-right
+- 1 = pixel on (dark gray #48494b), 0 = pixel off (light gray #e3e5e4)
+- Example: `curl {base}/normie/0/pixels`
+
+### GET /normie/{id}/traits/binary
+Returns the raw bytes8 trait data as a hex string.
+- Content-Type: text/plain
+- Parameters: id (integer, 0-9999)
+- Response: hex string like 0x0001000305010200 (8 bytes = 16 hex chars)
+- Each byte is an index into a trait category
+- Example: `curl {base}/normie/0/traits/binary`
+
+### GET /normie/{id}/traits
+Returns decoded traits as JSON with human-readable labels.
+- Content-Type: application/json
+- Parameters: id (integer, 0-9999)
+- Response format:
+  {
+    "raw": "0x0001000305010200",
+    "attributes": [
+      { "trait_type": "Type", "value": "Human" },
+      { "trait_type": "Gender", "value": "Female" },
+      { "trait_type": "Age", "value": "Young" },
+      { "trait_type": "Hair Style", "value": "Straight Hair" },
+      { "trait_type": "Facial Feature", "value": "Shadow Beard" },
+      { "trait_type": "Eyes", "value": "Big Shades" },
+      { "trait_type": "Expression", "value": "Serious" },
+      { "trait_type": "Accessory", "value": "Top Hat" }
+    ]
+  }
+
+### GET /normie/{id}/image.svg
+Returns the Normie as an SVG image.
+- Content-Type: image/svg+xml
+- Parameters: id (integer, 0-9999)
+- Output: 1000x1000 SVG with 40x40 viewBox, crispEdges rendering
+- Background: #e3e5e4 (light gray), Pixels: #48494b (dark gray)
+- Example: `curl {base}/normie/0/image.svg -o normie.svg`
+
+### GET /normie/{id}/image.png
+Returns the Normie as a PNG image.
+- Content-Type: image/png
+- Parameters: id (integer, 0-9999)
+- Output: 1000x1000 PNG, pixel-perfect rasterization
+- Example: `curl {base}/normie/0/image.png -o normie.png`
+
+### GET /normie/{id}/metadata
+Returns full NFT metadata JSON matching on-chain tokenURI().
+- Content-Type: application/json
+- Parameters: id (integer, 0-9999)
+- Response format:
+  {
+    "name": "Normie #0",
+    "attributes": [
+      { "trait_type": "Type", "value": "Human" },
+      { "trait_type": "Gender", "value": "Female" },
+      { "trait_type": "Age", "value": "Young" },
+      { "trait_type": "Hair Style", "value": "Straight Hair" },
+      { "trait_type": "Facial Feature", "value": "Shadow Beard" },
+      { "trait_type": "Eyes", "value": "Big Shades" },
+      { "trait_type": "Expression", "value": "Serious" },
+      { "trait_type": "Accessory", "value": "Top Hat" },
+      { "display_type": "number", "trait_type": "Level", "value": 1 },
+      { "display_type": "number", "trait_type": "Pixel Count", "value": 527 }
+    ],
+    "image": "data:image/svg+xml;base64,...",
+    "animation_url": "data:text/html;base64,..."
+  }
+
+### GET /health
+Health check endpoint.
+- Response: { "status": "ok" }
+
+## Bitmap Data Format
+
+Each Normie is a 40x40 monochrome bitmap stored as 200 bytes on-chain.
+
+- Grid: 40 x 40 pixels (1600 total)
+- Encoding: 1 bit per pixel, MSB first
+- Layout: Row-major (top-left to bottom-right)
+- Storage: 200 bytes via SSTORE2
+
+Pixel access formula:
+  flatIndex = y * 40 + x
+  byteIndex = flatIndex >> 3
+  bitPos = 7 - (flatIndex & 7)
+  pixel = (data[byteIndex] >> bitPos) & 1
+
+## Trait Categories
+
+Byte 0 - Type: Human, Cat, Alien, Agent
+Byte 1 - Gender: Male, Female, Non-Binary
+Byte 2 - Age: Young, Middle-Aged, Old
+Byte 3 - Hair Style: Short Hair, Long Hair, Curly Hair, Straight Hair, Wavy Hair, Spiky Hair, Wild Hair, Messy Hair, Mohawk, Crazy Hair, Braided Hair, Bald, Ponytail, Pigtails, Afro, Buzz Cut, Frumpy Hair, Stringy Hair, Peak Spike, Half Shaved, Knitted Cap
+Byte 4 - Facial Feature: Full Beard, Mustache, Goatee, Chin Strap, Muttonchops, Shadow Beard, Luxurious Beard, Handlebars, Big Beard, Normal Beard, Clean Shaven, Freckles, Mole, Rosy Cheeks, Dimples, High Cheekbones, Spots
+Byte 5 - Eyes: Classic Shades, Big Shades, Regular Shades, Small Shades, Horned Rim Glasses, Nerd Glasses, VR Headset, 3D Glasses, Eye Mask, Eye Patch, Round Glasses, Square Glasses, Aviators, No Glasses
+Byte 6 - Expression: Neutral, Slight Smile, Serious, Content, Peaceful, Confident, Friendly
+Byte 7 - Accessory: Top Hat, Fedora, Cowboy Hat, Beanie, Cap, Cap Forward, Bandana, Headband, Do-Rag, Hoodie, Earring, Gold Chain, Silver Chain, Bow Tie, No Accessories
+
+## Rate Limiting
+
+- 60 requests per minute per IP (sliding window)
+- Headers: X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After (on 429)
+
+## Error Responses
+
+All errors return JSON: { "error": "message" }
+- 400: Invalid token ID
+- 404: Token not found or data not set
+- 429: Rate limit exceeded
+- 500: Internal server error
+
+## Smart Contracts (Ethereum Mainnet)
+
+- Normies (ERC721): 0x9Eb6E2025B64f340691e424b7fe7022fFDE12438 — Core ERC721C token with ERC-2981 royalties
+- NormiesStorage: 0x1B976bAf51cF51F0e369C070d47FBc47A706e602 — SSTORE2 bitmap & trait storage with XOR encryption
+- NormiesRenderer: 0xBe57fC4D0c729b8e8d33b638Dd441F57365e4c25 — V1: Animated noise pre-reveal, static SVG post-reveal
+- NormiesRendererV2: 0x7818f24d3239c945510e0a1a523dd9971812c6c0 — V2: Static noise pre-reveal
+- NormiesRendererV3: 0x1af01b902256d77cf9499a14ef4e494897380b05 — V3: RLE-optimized SVG, Pixel Count trait, canvas animation_url
+- NormiesMinter: 0xC74994dD70FFb621CC514cE18a4F6F52124e296d — V1: EIP-191 signature-verified minting
+- NormiesMinterV2: 0xc513272597d3022D77b3d7EEBA92cea5D7fb2808 — V2: Adds delegate.xyz v1/v2 cold wallet delegation

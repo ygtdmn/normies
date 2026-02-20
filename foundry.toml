@@ -1,0 +1,44 @@
+# Full reference https://github.com/foundry-rs/foundry/tree/master/crates/config
+
+[profile.default]
+auto_detect_solc = false
+bytecode_hash = "none"
+evm_version = "prague"
+fuzz = { runs = 1_000 }
+gas_reports = ["*"]
+optimizer = true
+optimizer_runs = 10_000
+ignored_warnings_from = ["node_modules"]
+out = "out"
+script = "script"
+solc = "0.8.33"
+src = "src"
+test = "test"
+
+[profile.ci]
+fuzz = { runs = 10_000 }
+verbosity = 4
+
+[etherscan]
+mainnet = { key = "${API_KEY_ETHERSCAN}" }
+sepolia = { key = "${API_KEY_ETHERSCAN}" }
+
+[fmt]
+bracket_spacing = true
+int_types = "long"
+line_length = 120
+multiline_func_header = "params_first_multi"
+number_underscore = "thousands"
+quote_style = "double"
+tab_width = 4
+wrap_comments = false
+single_line_imports = true
+
+[rpc_endpoints]
+localhost = "http://localhost:8545"
+mainnet = "https://eth-mainnet.g.alchemy.com/v2/${API_KEY_ALCHEMY}"
+sepolia = "https://eth-sepolia.g.alchemy.com/v2/${API_KEY_ALCHEMY}"
+
+[lint]
+ignore = ["node_modules"]
+exclude_lints = ["unwrapped-modifier-logic"]
