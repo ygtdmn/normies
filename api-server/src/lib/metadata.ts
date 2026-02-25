@@ -1,18 +1,28 @@
 import { renderSvg } from "./svg.js";
 import { decodeTraits, countPixels } from "./traits.js";
 
+export interface CanvasMetadataInfo {
+    actionPoints: number;
+    level: number;
+    customized: boolean;
+    originalPixelCount: number;
+}
+
 /**
- * Build full NFT metadata JSON matching NormiesRendererV3.tokenURI output.
+ * Build full NFT metadata JSON matching NormiesRendererV4.tokenURI output.
+ * When canvasInfo is provided, includes canvas-aware attributes (Level, Action Points, Customized).
+ * The imageData should be the composited bitmap (original XOR transform) when customized.
  */
 export function buildMetadata(
     tokenId: number,
     imageData: Uint8Array,
-    traitsHex: `0x${string}`
+    traitsHex: `0x${string}`,
+    canvasInfo?: CanvasMetadataInfo
 ): object {
     const svg = renderSvg(imageData);
     const svgBase64 = Buffer.from(svg).toString("base64");
     const { attributes } = decodeTraits(traitsHex);
-    const pixelCount = countPixels(imageData);
+    const pixelCount = canvasInfo?.originalPixelCount ?? countPixels(imageData);
 
     // Build animation_url HTML (matching on-chain _buildAnimationUrl)
     const imageHex = Buffer.from(imageData).toString("hex");
@@ -34,8 +44,10 @@ export function buildMetadata(
         name: `Normie #${tokenId}`,
         attributes: [
             ...attributes.map((a) => ({ trait_type: a.trait_type, value: a.value })),
-            { display_type: "number", trait_type: "Level", value: 1 },
+            { display_type: "number", trait_type: "Level", value: canvasInfo?.level ?? 1 },
             { display_type: "number", trait_type: "Pixel Count", value: pixelCount },
+            { display_type: "number", trait_type: "Action Points", value: canvasInfo?.actionPoints ?? 0 },
+            { trait_type: "Customized", value: canvasInfo?.customized ? "Yes" : "No" },
         ],
         image: `data:image/svg+xml;base64,${svgBase64}`,
         animation_url: `data:text/html;base64,${htmlBase64}`,

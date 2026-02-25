@@ -129,6 +129,13 @@
 
         <h2>Endpoints</h2>
 
+        <div class="note">
+            <strong>Canvas Support:</strong> The <code>/normie/:id/pixels</code>, <code>/normie/:id/image.svg</code>,
+            <code>/normie/:id/image.png</code>, and <code>/normie/:id/metadata</code> endpoints now return
+            composited (customized) data when a Normie has been edited via NormiesCanvas.
+            Use the <code>/normie/:id/original/*</code> endpoints to access pre-transform data.
+        </div>
+
         <div class="endpoint">
             <span class="method">GET</span>
             <span class="path">/normie/:id/pixels</span>
@@ -137,6 +144,7 @@
                 Returns the 40x40 monochrome bitmap as a 1600-character binary string of <code>0</code>s and <code>1</code>s.
                 Row-major order, top-left to bottom-right.
                 <code>1</code> = pixel on (#48494b), <code>0</code> = pixel off (#e3e5e4 background).
+                If the Normie has been customized, returns the composited (original XOR transform) bitmap.
             </p>
             <pre><code>curl https://your-api-domain.com/normie/0/pixels
 
@@ -191,6 +199,7 @@
             <p class="desc">
                 Returns the Normie image as an SVG. 1000x1000 output with a 40x40 viewBox.
                 Matches the on-chain renderer output exactly (RLE row-scan optimization).
+                If customized, returns the composited image.
             </p>
             <pre><code>curl https://your-api-domain.com/normie/0/image.svg -o normie.svg
 
@@ -204,6 +213,7 @@
             <span class="response-type">image/png</span>
             <p class="desc">
                 Returns the Normie image as a 1000x1000 PNG. Rasterized from the SVG with pixel-perfect rendering.
+                If customized, returns the composited image.
             </p>
             <pre><code>curl https://your-api-domain.com/normie/0/image.png -o normie.png</code></pre>
         </div>
@@ -213,8 +223,9 @@
             <span class="path">/normie/:id/metadata</span>
             <span class="response-type">application/json</span>
             <p class="desc">
-                Returns the full NFT metadata JSON, matching the on-chain <code>tokenURI()</code> output.
-                Includes name, attributes, SVG image (as data URI), and animation URL (HTML canvas data URI).
+                Returns the full NFT metadata JSON, matching the on-chain <code>tokenURI()</code> output (V4 renderer).
+                Includes name, attributes (with canvas-aware Level, Action Points, Customized), SVG image, and animation URL.
+                If customized, uses the composited image.
             </p>
             <pre><code>curl https://your-api-domain.com/normie/0/metadata
 
@@ -225,10 +236,109 @@
     { "trait_type": "Type", "value": "Human" },
     ...
     { "display_type": "number", "trait_type": "Level", "value": 1 },
-    { "display_type": "number", "trait_type": "Pixel Count", "value": 527 }
+    { "display_type": "number", "trait_type": "Pixel Count", "value": 527 },
+    { "display_type": "number", "trait_type": "Action Points", "value": 0 },
+    { "trait_type": "Customized", "value": "No" }
   ],
   "image": "data:image/svg+xml;base64,...",
   "animation_url": "data:text/html;base64,..."
+}</code></pre>
+        </div>
+
+        <h2>Original Endpoints (Pre-Transform)</h2>
+
+        <p>These endpoints always return the original Normie data, ignoring any Canvas customizations.</p>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/normie/:id/original/pixels</span>
+            <span class="response-type">text/plain</span>
+            <p class="desc">Returns the original 40x40 bitmap as a 1600-character binary string, before any Canvas edits.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/normie/:id/original/image.svg</span>
+            <span class="response-type">image/svg+xml</span>
+            <p class="desc">Returns the original Normie SVG image, before any Canvas edits.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/normie/:id/original/image.png</span>
+            <span class="response-type">image/png</span>
+            <p class="desc">Returns the original Normie PNG image, before any Canvas edits.</p>
+        </div>
+
+        <h2>Canvas Endpoints</h2>
+
+        <p>These endpoints expose NormiesCanvas data: transform layers, pixel diffs, action points, delegations, and contract status.</p>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/normie/:id/canvas/pixels</span>
+            <span class="response-type">text/plain</span>
+            <p class="desc">
+                Returns the transform layer (XOR overlay) as a 1600-character binary string.
+                Each <code>1</code> represents a pixel that was flipped by the Canvas edit.
+                Returns all <code>0</code>s if the Normie has not been customized.
+            </p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/normie/:id/canvas/diff</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Returns a pixel-level diff between the original and the Canvas edits.
+                Lists which pixels were added (turned on) and removed (turned off).
+            </p>
+            <pre><code>curl https://your-api-domain.com/normie/42/canvas/diff
+
+# Response:
+{
+  "added": [{ "x": 10, "y": 5 }, { "x": 11, "y": 5 }],
+  "removed": [{ "x": 20, "y": 15 }],
+  "addedCount": 2,
+  "removedCount": 1,
+  "netChange": 1
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/normie/:id/canvas/info</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Returns Canvas metadata for a Normie: action points, level, customization status, and delegate info.
+            </p>
+            <pre><code>curl https://your-api-domain.com/normie/42/canvas/info
+
+# Response:
+{
+  "actionPoints": 25,
+  "level": 3,
+  "customized": true,
+  "delegate": "0x0000000000000000000000000000000000000000",
+  "delegateSetBy": "0x0000000000000000000000000000000000000000"
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/canvas/status</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Returns the global NormiesCanvas contract status: paused state and burn tier configuration.
+            </p>
+            <pre><code>curl https://your-api-domain.com/canvas/status
+
+# Response:
+{
+  "paused": false,
+  "maxBurnPercent": 4,
+  "tierThresholds": [490, 890],
+  "tierMinPercents": [1, 2, 3]
 }</code></pre>
         </div>
 
@@ -334,6 +444,21 @@ pixel     = (data[byteIndex] >> bitPos) & 1</code></pre>
                 <td>NormiesMinterV2</td>
                 <td><code>0xc513272597d3022D77b3d7EEBA92cea5D7fb2808</code></td>
                 <td>V2 — Adds delegate.xyz v1/v2 cold wallet delegation</td>
+            </tr>
+            <tr>
+                <td>NormiesCanvas</td>
+                <td><code>0x64951d92e345C50381267380e2975f66810E869c</code></td>
+                <td>Burn-to-edit orchestrator: commit-reveal burns, action points, pixel transforms</td>
+            </tr>
+            <tr>
+                <td>NormiesCanvasStorage</td>
+                <td><code>0xC255BE0983776BAB027a156681b6925cde47B2D1</code></td>
+                <td>SSTORE2 storage for transform layer bitmaps (plaintext, no XOR)</td>
+            </tr>
+            <tr>
+                <td>NormiesRendererV4</td>
+                <td><code>0x8eC46Cc1f306652868a4dfbAAae87CBa2715A0eB</code></td>
+                <td>V4 — Canvas-aware renderer with composited SVG &amp; extra traits</td>
             </tr>
         </table>
 

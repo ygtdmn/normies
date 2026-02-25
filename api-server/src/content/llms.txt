@@ -11,8 +11,12 @@ Replace `{base}` with the deployed API URL.
 
 ## Endpoints
 
+Note: The /normie/{id}/pixels, /image.svg, /image.png, and /metadata endpoints return
+composited (customized) data when a Normie has been edited via NormiesCanvas.
+Use /normie/{id}/original/* endpoints to access pre-transform data.
+
 ### GET /normie/{id}/pixels
-Returns the 40x40 bitmap as a 1600-character string of 0s and 1s.
+Returns the 40x40 bitmap as a 1600-character string of 0s and 1s (composited if customized).
 - Content-Type: text/plain
 - Parameters: id (integer, 0-9999)
 - Response: 1600 characters, row-major order, top-left to bottom-right
@@ -47,7 +51,7 @@ Returns decoded traits as JSON with human-readable labels.
   }
 
 ### GET /normie/{id}/image.svg
-Returns the Normie as an SVG image.
+Returns the Normie as an SVG image (composited if customized).
 - Content-Type: image/svg+xml
 - Parameters: id (integer, 0-9999)
 - Output: 1000x1000 SVG with 40x40 viewBox, crispEdges rendering
@@ -55,14 +59,16 @@ Returns the Normie as an SVG image.
 - Example: `curl {base}/normie/0/image.svg -o normie.svg`
 
 ### GET /normie/{id}/image.png
-Returns the Normie as a PNG image.
+Returns the Normie as a PNG image (composited if customized).
 - Content-Type: image/png
 - Parameters: id (integer, 0-9999)
 - Output: 1000x1000 PNG, pixel-perfect rasterization
 - Example: `curl {base}/normie/0/image.png -o normie.png`
 
 ### GET /normie/{id}/metadata
-Returns full NFT metadata JSON matching on-chain tokenURI().
+Returns full NFT metadata JSON matching on-chain tokenURI() (V4 renderer).
+Includes canvas-aware attributes: Level, Action Points, Customized.
+If customized, uses the composited image.
 - Content-Type: application/json
 - Parameters: id (integer, 0-9999)
 - Response format:
@@ -78,7 +84,9 @@ Returns full NFT metadata JSON matching on-chain tokenURI().
       { "trait_type": "Expression", "value": "Serious" },
       { "trait_type": "Accessory", "value": "Top Hat" },
       { "display_type": "number", "trait_type": "Level", "value": 1 },
-      { "display_type": "number", "trait_type": "Pixel Count", "value": 527 }
+      { "display_type": "number", "trait_type": "Pixel Count", "value": 527 },
+      { "display_type": "number", "trait_type": "Action Points", "value": 0 },
+      { "trait_type": "Customized", "value": "No" }
     ],
     "image": "data:image/svg+xml;base64,...",
     "animation_url": "data:text/html;base64,..."
@@ -87,6 +95,84 @@ Returns full NFT metadata JSON matching on-chain tokenURI().
 ### GET /health
 Health check endpoint.
 - Response: { "status": "ok" }
+
+## Original Endpoints (Pre-Transform)
+
+These endpoints always return the original Normie data, ignoring Canvas customizations.
+
+### GET /normie/{id}/original/pixels
+Returns the original 40x40 bitmap before any Canvas edits.
+- Content-Type: text/plain
+- Parameters: id (integer, 0-9999)
+
+### GET /normie/{id}/original/image.svg
+Returns the original Normie SVG before any Canvas edits.
+- Content-Type: image/svg+xml
+- Parameters: id (integer, 0-9999)
+
+### GET /normie/{id}/original/image.png
+Returns the original Normie PNG before any Canvas edits.
+- Content-Type: image/png
+- Parameters: id (integer, 0-9999)
+
+## Canvas Endpoints
+
+These endpoints expose NormiesCanvas data: transform layers, pixel diffs, action points, delegations, and contract status.
+
+### GET /normie/{id}/canvas/pixels
+Returns the transform layer (XOR overlay) as a 1600-character binary string.
+Each 1 represents a pixel that was flipped by the Canvas edit.
+Returns all 0s if the Normie has not been customized.
+- Content-Type: text/plain
+- Parameters: id (integer, 0-9999)
+
+### GET /normie/{id}/canvas/diff
+Returns a pixel-level diff between the original and the Canvas edits.
+- Content-Type: application/json
+- Parameters: id (integer, 0-9999)
+- Response format:
+  {
+    "added": [{ "x": 10, "y": 5 }, { "x": 11, "y": 5 }],
+    "removed": [{ "x": 20, "y": 15 }],
+    "addedCount": 2,
+    "removedCount": 1,
+    "netChange": 1
+  }
+- added: pixels turned ON by the edit (original was off)
+- removed: pixels turned OFF by the edit (original was on)
+
+### GET /normie/{id}/canvas/info
+Returns Canvas metadata for a Normie.
+- Content-Type: application/json
+- Parameters: id (integer, 0-9999)
+- Response format:
+  {
+    "actionPoints": 25,
+    "level": 3,
+    "customized": true,
+    "delegate": "0x0000000000000000000000000000000000000000",
+    "delegateSetBy": "0x0000000000000000000000000000000000000000"
+  }
+- actionPoints: total pixel-change budget earned from burns
+- level: display level (actionPoints / 10 + 1)
+- customized: whether the Normie has been edited
+- delegate: address authorized to transform pixels (zero if none)
+- delegateSetBy: address of the owner who set the delegate
+
+### GET /canvas/status
+Returns global NormiesCanvas contract status.
+- Content-Type: application/json
+- Response format:
+  {
+    "paused": false,
+    "maxBurnPercent": 4,
+    "tierThresholds": [490, 890],
+    "tierMinPercents": [1, 2, 3]
+  }
+- paused: whether canvas operations are paused
+- maxBurnPercent: max percentage of burned pixel count earned as action points
+- tierThresholds: pixel count thresholds for burn tier escalation
+- tierMinPercents: minimum burn percentage for each tier
 
 ## Bitmap Data Format
 
@@ -136,3 +222,6 @@ All errors return JSON: { "error": "message" }
 - NormiesRendererV3: 0x1af01b902256d77cf9499a14ef4e494897380b05 — V3: RLE-optimized SVG, Pixel Count trait, canvas animation_url
 - NormiesMinter: 0xC74994dD70FFb621CC514cE18a4F6F52124e296d — V1: EIP-191 signature-verified minting
 - NormiesMinterV2: 0xc513272597d3022D77b3d7EEBA92cea5D7fb2808 — V2: Adds delegate.xyz v1/v2 cold wallet delegation
+- NormiesCanvas: 0x64951d92e345C50381267380e2975f66810E869c — Burn-to-edit orchestrator: commit-reveal burns, action points, pixel transforms
+- NormiesCanvasStorage: 0xC255BE0983776BAB027a156681b6925cde47B2D1 — SSTORE2 storage for transform layer bitmaps (plaintext, no XOR)
+- NormiesRendererV4: 0x8eC46Cc1f306652868a4dfbAAae87CBa2715A0eB — V4: Canvas-aware renderer with composited SVG & extra traits
