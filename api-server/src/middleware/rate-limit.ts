@@ -1,5 +1,8 @@
+import { timingSafeEqual } from "node:crypto";
 import type { MiddlewareHandler } from "hono";
-import { RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX_REQUESTS } from "../config.js";
+import { RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX_REQUESTS, INTERNAL_SECRET } from "../config.js";
+
+const secretBuffer = INTERNAL_SECRET ? Buffer.from(INTERNAL_SECRET) : null;
 
 const clients = new Map<string, number[]>();
 
@@ -17,6 +20,13 @@ setInterval(() => {
 }, 5 * 60_000).unref();
 
 export const rateLimiter: MiddlewareHandler = async (c, next) => {
+    if (secretBuffer) {
+        const header = c.req.header("x-internal-secret");
+        if (header && header.length === secretBuffer.length && timingSafeEqual(Buffer.from(header), secretBuffer)) {
+            return next();
+        }
+    }
+
     const ip =
         c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
         c.req.header("x-real-ip") ??

@@ -27,6 +27,9 @@ export const CANVAS_INFO_CACHE_TTL_MS = Number(process.env.CANVAS_INFO_CACHE_TTL
 export const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
 export const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX ?? 60);
 
+// Internal bypass secret (unset = bypass disabled)
+export const INTERNAL_SECRET = process.env.INTERNAL_SECRET || undefined;
+
 // SVG constants (matching on-chain renderer exactly)
 export const GRID_SIZE = 40;
 export const SVG_OUTPUT_SIZE = 1000;
