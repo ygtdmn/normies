@@ -10,17 +10,18 @@
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
-        "hono": "^4",
         "@hono/node-server": "^1",
-        "viem": "^2.45",
         "@resvg/resvg-js": "^2",
+        "dotenv": "^16",
+        "hono": "^4",
         "lru-cache": "^11",
-        "dotenv": "^16"
+        "viem": "^2.45"
     },
     "devDependencies": {
         "@types/node": "^22",
         "tsx": "^4",
-        "typescript": "^5"
+        "typescript": "^5",
+        "undici-types": "~6.21.0"
     },
     "packageManager": "pnpm@10.11.1+sha512.e519b9f7639869dc8d5c3c5dfef73b3f091094b0a006d7317353c72b124e80e1afd429732e28705ad6bfa1ee879c1fce46c128ccebd3192101f43dd67c667912"
 }
