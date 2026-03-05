@@ -30,6 +30,10 @@ export const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX ?? 60);
 // Internal bypass secret (unset = bypass disabled)
 export const INTERNAL_SECRET = process.env.INTERNAL_SECRET || undefined;
 
+// Ponder indexer API (required for history endpoints)
+export const PONDER_API_URL = process.env.PONDER_API_URL || undefined;
+export const PONDER_ENABLED = !!PONDER_API_URL;
+
 // SVG constants (matching on-chain renderer exactly)
 export const GRID_SIZE = 40;
 export const SVG_OUTPUT_SIZE = 1000;

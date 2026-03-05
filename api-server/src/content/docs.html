@@ -342,6 +342,193 @@
 }</code></pre>
         </div>
 
+        <h2>History Endpoints</h2>
+
+        <p>
+            Historical data from on-chain NormiesCanvas events, powered by the Ponder indexer.
+            Explore burn history, transform history, and view past versions of Normies.
+        </p>
+
+        <div class="note">
+            <strong>Note:</strong> History endpoints require the Ponder indexer to be running and configured.
+            Burned Normie images are still readable from on-chain SSTORE2 storage even after the token is burned.
+        </div>
+
+        <h3>Burn History</h3>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/history/burns</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Lists all burn commitments (newest first).
+                Supports pagination via <code>?limit=50&amp;offset=0</code> (max 100 per page).
+            </p>
+            <pre><code>curl https://your-api-domain.com/history/burns?limit=10
+
+# Response:
+[
+  {
+    "commitId": "0",
+    "owner": "0x1234...abcd",
+    "receiverTokenId": "42",
+    "tokenCount": 3,
+    "transferredActionPoints": "0",
+    "blockNumber": "12345678",
+    "timestamp": "1700000000",
+    "txHash": "0xabc...def",
+    "revealed": true,
+    "totalActions": "15",
+    "expired": false
+  }
+]</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/history/burns/:commitId</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Returns a single burn commitment with its array of burned tokens.
+                Each burned token includes the token ID and its pixel count at the time of burn.
+            </p>
+            <pre><code>curl https://your-api-domain.com/history/burns/0
+
+# Response:
+{
+  "commitId": "0",
+  "owner": "0x1234...abcd",
+  "receiverTokenId": "42",
+  "tokenCount": 3,
+  "revealed": true,
+  "totalActions": "15",
+  "burnedTokens": [
+    { "tokenId": "100", "pixelCount": 527 },
+    { "tokenId": "200", "pixelCount": 490 },
+    { "tokenId": "300", "pixelCount": 612 }
+  ]
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/history/burns/address/:address</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">Returns burn commitments by owner address. Paginated.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/history/burns/receiver/:tokenId</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">Returns burn commitments where the specified token was the receiver of action points. Paginated.</p>
+        </div>
+
+        <h3>Burned Tokens</h3>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/history/burned-tokens</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">Lists all individually burned tokens (newest first). Paginated.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/history/burned/:tokenId</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">Returns burn info for a specific token: which commitment it was burned in, pixel count at time of burn.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/history/burned/:tokenId/image.svg</span>
+            <span class="response-type">image/svg+xml</span>
+            <p class="desc">
+                Returns the SVG image of a burned Normie. SSTORE2 data persists on-chain even after the token is burned,
+                so the original image is still readable.
+            </p>
+            <pre><code>curl https://your-api-domain.com/history/burned/100/image.svg -o burned-normie.svg</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/history/burned/:tokenId/image.png</span>
+            <span class="response-type">image/png</span>
+            <p class="desc">Returns the PNG image of a burned Normie.</p>
+        </div>
+
+        <h3>Transform History &amp; Historical Versions</h3>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/history/normie/:id/versions</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Lists all transform versions for a token. Each entry represents a <code>setTransformBitmap</code> call
+                with metadata about pixel changes. Versions are 0-indexed chronologically.
+            </p>
+            <pre><code>curl https://your-api-domain.com/history/normie/42/versions
+
+# Response:
+[
+  {
+    "version": 0,
+    "changeCount": 12,
+    "newPixelCount": 535,
+    "transformer": "0x1234...abcd",
+    "blockNumber": "12345678",
+    "timestamp": "1700000000",
+    "txHash": "0xabc...def"
+  }
+]</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/history/normie/:id/version/:version/image.svg</span>
+            <span class="response-type">image/svg+xml</span>
+            <p class="desc">
+                Returns the SVG image for a historical version. Reconstructed by XOR-compositing the original
+                image with the stored transform bitmap from that version.
+            </p>
+            <pre><code>curl https://your-api-domain.com/history/normie/42/version/0/image.svg -o version-0.svg</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/history/normie/:id/version/:version/image.png</span>
+            <span class="response-type">image/png</span>
+            <p class="desc">Returns the PNG image for a historical version.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/history/normie/:id/version/:version/pixels</span>
+            <span class="response-type">text/plain</span>
+            <p class="desc">Returns the composited 1600-character pixel string for a historical version.</p>
+        </div>
+
+        <h3>Statistics</h3>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/history/stats</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Returns global Canvas activity statistics.
+            </p>
+            <pre><code>curl https://your-api-domain.com/history/stats
+
+# Response:
+{
+  "totalBurnCommitments": 25,
+  "totalBurnedTokens": 100,
+  "totalTransforms": 50,
+  "totalActionPointsDistributed": "1500"
+}</code></pre>
+        </div>
+
         <h2>Trait Categories</h2>
 
         <table>

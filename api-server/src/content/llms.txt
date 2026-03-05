@@ -174,6 +174,149 @@ Returns global NormiesCanvas contract status.
 - tierThresholds: pixel count thresholds for burn tier escalation
 - tierMinPercents: minimum burn percentage for each tier
 
+## History Endpoints
+
+Historical data from on-chain events, powered by the Ponder indexer.
+These endpoints let you explore burn history, transform history, and view past versions of Normies.
+
+Note: History endpoints require the Ponder indexer to be running and configured via PONDER_API_URL.
+Burned Normie images are still readable from on-chain SSTORE2 storage even after the token is burned.
+
+### GET /history/burns
+Lists all burn commitments (newest first).
+- Content-Type: application/json
+- Query: ?limit=50&offset=0 (pagination, max 100)
+- Response: array of burn commitment objects
+- Example: `curl {base}/history/burns?limit=10`
+- Response format:
+  [
+    {
+      "commitId": "0",
+      "owner": "0x1234...abcd",
+      "receiverTokenId": "42",
+      "tokenCount": 3,
+      "transferredActionPoints": "0",
+      "blockNumber": "12345678",
+      "timestamp": "1700000000",
+      "txHash": "0xabc...def",
+      "revealed": true,
+      "totalActions": "15",
+      "expired": false,
+      "revealBlockNumber": "12345690",
+      "revealTimestamp": "1700000120",
+      "revealTxHash": "0x123...456"
+    }
+  ]
+
+### GET /history/burns/{commitId}
+Returns a single burn commitment with its burned tokens.
+- Content-Type: application/json
+- Parameters: commitId (integer)
+- Response: commitment object with burnedTokens array
+- Example: `curl {base}/history/burns/0`
+- Response format:
+  {
+    "commitId": "0",
+    "owner": "0x1234...abcd",
+    "receiverTokenId": "42",
+    "tokenCount": 3,
+    ...
+    "burnedTokens": [
+      { "id": "0-100", "commitId": "0", "tokenId": "100", "pixelCount": 527, ... },
+      { "id": "0-200", "commitId": "0", "tokenId": "200", "pixelCount": 490, ... }
+    ]
+  }
+
+### GET /history/burns/address/{address}
+Returns burn commitments by owner address.
+- Content-Type: application/json
+- Parameters: address (Ethereum address)
+- Query: ?limit=50&offset=0
+
+### GET /history/burns/receiver/{tokenId}
+Returns burn commitments where tokenId was the receiver of action points.
+- Content-Type: application/json
+- Parameters: tokenId (integer, 0-9999)
+- Query: ?limit=50&offset=0
+
+### GET /history/burned-tokens
+Lists all burned tokens (newest first).
+- Content-Type: application/json
+- Query: ?limit=50&offset=0
+- Response: array of burned token objects with commitId, tokenId, pixelCount, blockNumber, timestamp
+
+### GET /history/burned/{tokenId}
+Returns burn info for a specific token (which commitment it was burned in, pixel count).
+- Content-Type: application/json
+- Parameters: tokenId (integer, 0-9999)
+
+### GET /history/burned/{tokenId}/image.svg
+Returns the SVG image of a burned Normie. SSTORE2 data persists after burn.
+- Content-Type: image/svg+xml
+- Parameters: tokenId (integer, 0-9999)
+- Example: `curl {base}/history/burned/100/image.svg -o burned-normie.svg`
+
+### GET /history/burned/{tokenId}/image.png
+Returns the PNG image of a burned Normie.
+- Content-Type: image/png
+- Parameters: tokenId (integer, 0-9999)
+
+### GET /history/normie/{id}/versions
+Lists all transform versions for a token (newest first). Each entry represents a
+setTransformBitmap call with metadata about pixel changes.
+- Content-Type: application/json
+- Parameters: id (integer, 0-9999)
+- Query: ?limit=50&offset=0
+- Response format:
+  [
+    {
+      "version": 0,
+      "changeCount": 12,
+      "newPixelCount": 535,
+      "transformer": "0x1234...abcd",
+      "blockNumber": "12345678",
+      "timestamp": "1700000000",
+      "txHash": "0xabc...def"
+    }
+  ]
+
+### GET /history/normie/{id}/version/{version}/pixels
+Returns the composited pixel string for a historical version.
+Each version is the result of XOR-compositing the original image with the stored transform bitmap.
+- Content-Type: text/plain
+- Parameters: id (integer, 0-9999), version (integer, 0-indexed)
+
+### GET /history/normie/{id}/version/{version}/image.svg
+Returns the SVG image for a historical version.
+- Content-Type: image/svg+xml
+- Parameters: id (integer, 0-9999), version (integer, 0-indexed)
+- Example: `curl {base}/history/normie/42/version/0/image.svg -o version-0.svg`
+
+### GET /history/normie/{id}/version/{version}/image.png
+Returns the PNG image for a historical version.
+- Content-Type: image/png
+- Parameters: id (integer, 0-9999), version (integer, 0-indexed)
+
+### GET /history/stats
+Returns global Canvas activity statistics.
+- Content-Type: application/json
+- Response format:
+  {
+    "totalBurnCommitments": 25,
+    "totalBurnedTokens": 100,
+    "totalTransforms": 50,
+    "totalActionPointsDistributed": "1500"
+  }
+
+## How Historical Versions Work
+
+Each Canvas edit calls setTransformBitmap(tokenId, bitmap) which stores a 200-byte XOR overlay.
+The transform bitmap is decoded from the transaction calldata and stored by the Ponder indexer.
+To reconstruct any historical version:
+  composited = original XOR transformBitmap
+The original image data persists on-chain via SSTORE2 (never deleted, even after burn).
+Version numbers are 0-indexed in chronological order (version 0 = first edit).
+
 ## Bitmap Data Format
 
 Each Normie is a 40x40 monochrome bitmap stored as 200 bytes on-chain.

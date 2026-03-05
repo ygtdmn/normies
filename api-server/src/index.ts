@@ -8,6 +8,7 @@ import { cacheHeaders } from "./middleware/cache-headers.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { normie } from "./routes/normie.js";
 import { canvas } from "./routes/canvas.js";
+import { history } from "./routes/history.js";
 import { docs } from "./routes/docs.js";
 import { llms } from "./routes/llms.js";
 
@@ -18,6 +19,7 @@ app.use("*", cors());
 app.use("*", rateLimiter);
 app.use("/normie/*", cacheHeaders);
 app.use("/canvas/*", cacheHeaders);
+app.use("/history/*", cacheHeaders);
 
 app.onError(errorHandler);
 
@@ -25,6 +27,7 @@ app.route("/", docs);
 app.route("/", llms);
 app.route("/normie", normie);
 app.route("/canvas", canvas);
+app.route("/history", history);
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 
