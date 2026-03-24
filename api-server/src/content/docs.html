@@ -245,6 +245,49 @@
 }</code></pre>
         </div>
 
+        <h2>Ownership Endpoints</h2>
+
+        <p>
+            Look up current NFT ownership, powered by the Ponder indexer.
+            Tracks all Transfer events to maintain a real-time ownership index.
+        </p>
+
+        <div class="note">
+            <strong>Note:</strong> Ownership endpoints require the Ponder indexer to be running and configured.
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/normie/:id/owner</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Returns the current owner of a Normie. Returns 404 if the token has been burned or was never minted.
+            </p>
+            <pre><code>curl https://your-api-domain.com/normie/42/owner
+
+# Response:
+{
+  "tokenId": "42",
+  "owner": "0x1234...abcd"
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/holders/:address</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Returns all Normie token IDs currently owned by the given wallet address.
+            </p>
+            <pre><code>curl https://your-api-domain.com/holders/0x1234...abcd
+
+# Response:
+{
+  "address": "0x1234...abcd",
+  "tokenIds": ["42", "100", "1337"]
+}</code></pre>
+        </div>
+
         <h2>Original Endpoints (Pre-Transform)</h2>
 
         <p>These endpoints always return the original Normie data, ignoring any Canvas customizations.</p>

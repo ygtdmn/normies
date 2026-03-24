@@ -96,6 +96,33 @@ If customized, uses the composited image.
 Health check endpoint.
 - Response: { "status": "ok" }
 
+## Ownership Endpoints
+
+Look up current NFT ownership, powered by the Ponder indexer.
+Tracks all Transfer events to maintain a real-time ownership index.
+
+Note: Ownership endpoints require the Ponder indexer to be running and configured via PONDER_API_URL.
+
+### GET /normie/{id}/owner
+Returns the current owner of a Normie. Returns 404 if burned or never minted.
+- Content-Type: application/json
+- Parameters: id (integer, 0-9999)
+- Response format:
+  {
+    "tokenId": "42",
+    "owner": "0x1234...abcd"
+  }
+
+### GET /holders/{address}
+Returns all Normie token IDs currently owned by the given wallet address.
+- Content-Type: application/json
+- Parameters: address (Ethereum address, 0x-prefixed)
+- Response format:
+  {
+    "address": "0x1234...abcd",
+    "tokenIds": ["42", "100", "1337"]
+  }
+
 ## Original Endpoints (Pre-Transform)
 
 These endpoints always return the original Normie data, ignoring Canvas customizations.
