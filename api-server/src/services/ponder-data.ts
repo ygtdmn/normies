@@ -67,6 +67,23 @@ export interface StatsData {
 }
 
 // ──────────────────────────────────────────────
+//  Ownership
+// ──────────────────────────────────────────────
+
+export interface TokenOwnerData {
+    tokenId: string;
+    owner: string;
+}
+
+export async function getTokenOwner(tokenId: number): Promise<TokenOwnerData> {
+    return ponderFetch(`/owner/${tokenId}`);
+}
+
+export async function getTokensByHolder(address: string): Promise<string[]> {
+    return ponderFetch(`/tokens/${address.toLowerCase()}`);
+}
+
+// ──────────────────────────────────────────────
 //  Burns
 // ──────────────────────────────────────────────
 

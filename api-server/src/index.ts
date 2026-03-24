@@ -9,6 +9,7 @@ import { errorHandler } from "./middleware/error-handler.js";
 import { normie } from "./routes/normie.js";
 import { canvas } from "./routes/canvas.js";
 import { history } from "./routes/history.js";
+import { holders } from "./routes/holders.js";
 import { docs } from "./routes/docs.js";
 import { llms } from "./routes/llms.js";
 
@@ -20,6 +21,7 @@ app.use("*", rateLimiter);
 app.use("/normie/*", cacheHeaders);
 app.use("/canvas/*", cacheHeaders);
 app.use("/history/*", cacheHeaders);
+app.use("/holders/*", cacheHeaders);
 
 app.onError(errorHandler);
 
@@ -28,6 +30,7 @@ app.route("/", llms);
 app.route("/normie", normie);
 app.route("/canvas", canvas);
 app.route("/history", history);
+app.route("/holders", holders);
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 

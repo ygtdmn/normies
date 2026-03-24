@@ -27,6 +27,20 @@ function serializeBigints<T extends Record<string, unknown>>(row: T): Record<str
 //  Existing: Ownership & Delegation
 // ──────────────────────────────────────────────
 
+app.get("/owner/:tokenId", async (c) => {
+  const tokenId = BigInt(c.req.param("tokenId"));
+
+  const [row] = await db
+    .select({ owner: schema.normieOwner.owner })
+    .from(schema.normieOwner)
+    .where(eq(schema.normieOwner.tokenId, tokenId))
+    .limit(1);
+
+  if (!row) return c.json({ error: "Token not found" }, 404);
+
+  return c.json({ tokenId: tokenId.toString(), owner: row.owner });
+});
+
 app.get("/tokens/:address", async (c) => {
   const address = c.req.param("address").toLowerCase() as `0x${string}`;
 
