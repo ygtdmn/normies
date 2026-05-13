@@ -134,3 +134,60 @@ export async function getTransformVersion(tokenId: number, version: number): Pro
 export async function getStats(): Promise<StatsData> {
     return ponderFetch("/stats");
 }
+
+// ──────────────────────────────────────────────
+//  Adapter8004 — Agent Bindings
+// ──────────────────────────────────────────────
+
+export interface AgentBindingData {
+    id: string;
+    agentId: string;
+    standard: number;
+    tokenContract: string;
+    tokenId: string;
+    registeredBy: string;
+    blockNumber: string;
+    timestamp: string;
+    txHash: string;
+}
+
+export async function getAgentBinding(
+    tokenContract: string,
+    tokenId: number | bigint | string,
+): Promise<AgentBindingData | null> {
+    const res = await ponderFetch<{ binding: AgentBindingData | null }>(
+        `/agent-binding/${tokenContract.toLowerCase()}/${tokenId.toString()}`,
+    );
+    return res.binding;
+}
+
+export async function getAgentBindings(
+    tokenContract: string,
+    tokenIds: (number | bigint | string)[],
+): Promise<Record<string, AgentBindingData>> {
+    const body = JSON.stringify({
+        tokenContract: tokenContract.toLowerCase(),
+        tokenIds: tokenIds.map((t) => t.toString()),
+    });
+    const res = await fetch(`${PONDER_API_URL}/agent-binding/batch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body,
+        signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`Ponder API ${res.status}: ${txt}`);
+    }
+    const json = (await res.json()) as { bindings: Record<string, AgentBindingData> };
+    return json.bindings ?? {};
+}
+
+export async function getAgentBindingByAgentId(
+    agentId: number | bigint | string,
+): Promise<AgentBindingData | null> {
+    const res = await ponderFetch<{ binding: AgentBindingData | null }>(
+        `/agent/${agentId.toString()}`,
+    );
+    return res.binding;
+}

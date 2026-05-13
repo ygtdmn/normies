@@ -1,7 +1,7 @@
 import { db } from "ponder:api";
 import schema from "ponder:schema";
 import { Hono } from "hono";
-import { eq, desc, count, sum, asc } from "ponder";
+import { eq, desc, count, sum, asc, and, inArray } from "ponder";
 
 const app = new Hono();
 
@@ -304,6 +304,92 @@ app.get("/stats", async (c) => {
     totalTransforms: transformCount?.count ?? 0,
     totalActionPointsDistributed: (actionPointsSum?.total ?? "0").toString(),
   });
+});
+
+// ──────────────────────────────────────────────
+//  Adapter8004: Agent Bindings
+// ──────────────────────────────────────────────
+
+// Single-token lookup: (tokenContract, tokenId) → binding | null
+app.get("/agent-binding/:tokenContract/:tokenId", async (c) => {
+  const tokenContract = c.req.param("tokenContract").toLowerCase() as `0x${string}`;
+  let tokenId: bigint;
+  try {
+    tokenId = BigInt(c.req.param("tokenId"));
+  } catch {
+    return c.json({ error: "Invalid tokenId" }, 400);
+  }
+
+  const [row] = await db
+    .select()
+    .from(schema.agentBinding)
+    .where(
+      and(
+        eq(schema.agentBinding.tokenContract, tokenContract),
+        eq(schema.agentBinding.tokenId, tokenId),
+      ),
+    )
+    .limit(1);
+
+  if (!row) return c.json({ binding: null });
+  return c.json({ binding: serializeBigints(row) });
+});
+
+// Batch lookup: POST { tokenContract, tokenIds[] } → { [tokenId]: binding }
+// Cap at 1000 ids per request.
+app.post("/agent-binding/batch", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    tokenContract?: string;
+    tokenIds?: (string | number)[];
+  };
+  if (!body.tokenContract || !Array.isArray(body.tokenIds) || body.tokenIds.length === 0) {
+    return c.json({ bindings: {} });
+  }
+  const tokenContract = body.tokenContract.toLowerCase() as `0x${string}`;
+  const ids = new Set<bigint>();
+  for (const raw of body.tokenIds.slice(0, 1000)) {
+    try {
+      ids.add(BigInt(raw));
+    } catch {
+      // skip malformed
+    }
+  }
+  if (ids.size === 0) return c.json({ bindings: {} });
+
+  const rows = await db
+    .select()
+    .from(schema.agentBinding)
+    .where(
+      and(
+        eq(schema.agentBinding.tokenContract, tokenContract),
+        inArray(schema.agentBinding.tokenId, Array.from(ids)),
+      ),
+    );
+
+  const bindings: Record<string, unknown> = {};
+  for (const r of rows) {
+    bindings[r.tokenId.toString()] = serializeBigints(r);
+  }
+  return c.json({ bindings });
+});
+
+// Agent lookup: agentId → binding | null
+app.get("/agent/:agentId", async (c) => {
+  let agentId: bigint;
+  try {
+    agentId = BigInt(c.req.param("agentId"));
+  } catch {
+    return c.json({ error: "Invalid agentId" }, 400);
+  }
+
+  const [row] = await db
+    .select()
+    .from(schema.agentBinding)
+    .where(eq(schema.agentBinding.agentId, agentId))
+    .limit(1);
+
+  if (!row) return c.json({ binding: null });
+  return c.json({ binding: serializeBigints(row) });
 });
 
 export default app;

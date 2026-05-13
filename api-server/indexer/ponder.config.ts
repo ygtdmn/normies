@@ -22,6 +22,9 @@ const BurnRevealedEvent = parseAbiItem(
 const PixelsTransformedEvent = parseAbiItem(
   "event PixelsTransformed(address indexed transformer, uint256 indexed tokenId, uint256 changeCount, uint256 newPixelCount)",
 );
+const AgentBoundEvent = parseAbiItem(
+  "event AgentBound(uint256 indexed agentId, uint8 indexed standard, address indexed tokenContract, uint256 tokenId, address registeredBy)",
+);
 
 export default createConfig({
   chains: {
@@ -48,6 +51,14 @@ export default createConfig({
       chain: chainName,
       address: process.env.PONDER_CANVAS_ADDRESS as `0x${string}`,
       startBlock: Number(process.env.PONDER_START_BLOCK),
+    },
+    Adapter8004: {
+      abi: [AgentBoundEvent],
+      chain: chainName,
+      address: process.env.PONDER_ADAPTER_ADDRESS as `0x${string}`,
+      startBlock: Number(
+        process.env.PONDER_ADAPTER_START_BLOCK ?? process.env.PONDER_START_BLOCK,
+      ),
     },
   },
 });

@@ -5,6 +5,7 @@ import {
   burnCommitment,
   burnedToken,
   pixelTransform,
+  agentBinding,
 } from "ponder:schema";
 import { parseAbi } from "viem";
 
@@ -156,4 +157,32 @@ ponder.on("NormiesCanvas:PixelsTransformed", async ({ event, context }) => {
     timestamp: event.block.timestamp,
     txHash: event.transaction.hash,
   });
+});
+
+// ──────────────────────────────────────────────
+//  Adapter8004: AgentBound
+//
+//  Idempotent insert keyed on (standard, tokenContract, tokenId). The
+//  adapter contract guards against re-registration, so we don't expect
+//  collisions in practice — `onConflictDoNothing` is just belt-and-suspenders.
+// ──────────────────────────────────────────────
+
+ponder.on("Adapter8004:AgentBound", async ({ event, context }) => {
+  const { agentId, standard, tokenContract, tokenId, registeredBy } = event.args;
+  const id = `${standard}:${tokenContract.toLowerCase()}:${tokenId}`;
+
+  await context.db
+    .insert(agentBinding)
+    .values({
+      id,
+      agentId,
+      standard: Number(standard),
+      tokenContract,
+      tokenId,
+      registeredBy,
+      blockNumber: event.block.number,
+      timestamp: event.block.timestamp,
+      txHash: event.transaction.hash,
+    })
+    .onConflictDoNothing();
 });

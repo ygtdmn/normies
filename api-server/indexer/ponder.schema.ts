@@ -79,3 +79,31 @@ export const pixelTransform = onchainTable(
     transformerIdx: index().on(table.transformer),
   }),
 );
+
+// ──────────────────────────────────────────────
+//  Adapter8004 — AgentBound
+//
+//  One row per binding (standard × tokenContract × tokenId). PK is composite
+//  so the same token across different standards/contracts can coexist; the
+//  public API filters to Normies before exposing rows.
+// ──────────────────────────────────────────────
+export const agentBinding = onchainTable(
+  "agent_binding",
+  (t) => ({
+    // <standard>:<tokenContract>:<tokenId>, e.g. "0:0x9eb...:93"
+    id: t.text().primaryKey(),
+    agentId: t.bigint().notNull(),
+    standard: t.integer().notNull(),
+    tokenContract: t.hex().notNull(),
+    tokenId: t.bigint().notNull(),
+    registeredBy: t.hex().notNull(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+    txHash: t.hex().notNull(),
+  }),
+  (table) => ({
+    agentIdIdx: index().on(table.agentId),
+    tokenIdx: index().on(table.tokenContract, table.tokenId),
+    registeredByIdx: index().on(table.registeredBy),
+  }),
+);
