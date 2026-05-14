@@ -342,6 +342,104 @@ To reconstruct any historical version:
 The original image data persists on-chain via SSTORE2 (never deleted, even after burn).
 Version numbers are 0-indexed in chronological order (version 0 = first edit).
 
+## Agent Endpoints (ERC-8004)
+
+Endpoints backing the agentic flow: persona snapshots, dynamic agent metadata, and agent-binding
+lookups. Personas are generated deterministically from a Normie's on-chain traits and frozen in the
+agents DB the first time a Normie is registered as an agent via Adapter8004.
+
+### GET /agents/metadata/{tokenId}
+ERC-8004 registration metadata for the agent bound to this Normie. This is the URL stored on-chain
+as the agent's agentURI. Reachable for both pending and registered rows so 8004 indexers can resolve
+metadata the moment a register tx confirms.
+- Content-Type: application/json
+- Parameters: tokenId (integer, 0-9999)
+- Response format:
+  {
+    "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+    "name": "Normies #42 - Pixelpriest",
+    "description": "Tagline. Backstory…",
+    "image": "{base}/agents/image/42",
+    "services": [
+      { "name": "web", "endpoint": "{base}/agents/info/42", "version": "1" }
+    ],
+    "active": true,
+    "x402Support": false,
+    "updatedAt": 1747200000
+  }
+
+### GET /agents/info/{tokenId}
+Rich persona JSON. Combines the frozen persona snapshot from the agents DB with live on-chain canvas
+state (level, action points, pixel diff). Returns 404 for tokens with no DB row or status=pending.
+- Content-Type: application/json
+- Parameters: tokenId (integer, 0-9999)
+- Response format:
+  {
+    "tokenId": "42",
+    "agentId": "7",
+    "chainId": 1,
+    "name": "...",
+    "type": "Alien",
+    "tagline": "...",
+    "backstory": "...",
+    "greeting": "...",
+    "personalityTraits": ["...", "...", "..."],
+    "communicationStyle": "...",
+    "quirks": ["...", "...", "..."],
+    "systemPrompt": "...",
+    "traits": { "name": "...", "attributes": { "Type": "Alien", ... } },
+    "canvas": {
+      "level": 3,
+      "actionPoints": 25,
+      "customized": true,
+      "diff": { "addedCount": 12, "removedCount": 3, "netChange": 9 }
+    },
+    "registeredBy": "0x...",
+    "registeredAt": "ISO date",
+    "txHash": "0x...",
+    "interactions": { "status": "coming_soon" },
+    "mcp": { "status": "coming_soon" }
+  }
+
+### GET /agents/image/{tokenId}
+Composited Normie SVG used as the agent's portrait. Reflects live canvas state — same renderer as
+/normie/{id}/image.svg but mounted under /agents for symmetry with the rest of the agent endpoints.
+- Content-Type: image/svg+xml
+- Parameters: tokenId (integer, 0-9999)
+- Example: `curl {base}/agents/image/42 -o agent.svg`
+
+### GET /agents/binding/{tokenId}
+Resolves a Normie token to its bound agentId via the Ponder indexer (which watches the Adapter8004
+AgentBound event). Returns { "binding": null } if the Normie has not been registered as an agent.
+- Content-Type: application/json
+- Response format:
+  {
+    "binding": {
+      "id": "0:0x9eb6...:42",
+      "agentId": "7",
+      "standard": 0,
+      "tokenContract": "0x9eb6...",
+      "tokenId": "42",
+      "registeredBy": "0x...",
+      "blockNumber": "12345678",
+      "timestamp": "1747200000",
+      "txHash": "0x..."
+    }
+  }
+
+### POST /agents/binding/batch
+Batch resolves many Normies at once. Body: { "tokenIds": ["42", "100", …] }. Response keys are token
+IDs as strings; unbound tokens are absent from the map.
+- Content-Type: application/json
+- Request body: { "tokenIds": [string|number, …] }
+- Response: { "bindings": { "<tokenId>": <AgentBinding>, … } }
+
+### GET /agents/by-agent-id/{agentId}
+Reverse lookup — given an Adapter8004 agentId, returns the bound Normie token (or null if no such
+agent exists in the index).
+- Content-Type: application/json
+- Response format: { "binding": <AgentBinding> | null }
+
 ## Bitmap Data Format
 
 Each Normie is a 40x40 monochrome bitmap stored as 200 bytes on-chain.

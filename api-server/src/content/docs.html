@@ -568,6 +568,190 @@
 }</code></pre>
         </div>
 
+        <h2>Agent Endpoints (ERC-8004)</h2>
+
+        <p>
+            Endpoints that back the ERC-8004 agentic flow: persona snapshots, dynamic agent metadata,
+            and agent-binding lookups. Personas are generated deterministically from a Normie&apos;s on-chain
+            traits and frozen in the agents DB the first time a Normie is registered.
+        </p>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/agents/metadata/:tokenId</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                ERC-8004 registration metadata for the agent bound to this Normie. This is the URL stored on-chain
+                as the agent&apos;s <code>agentURI</code>. Reachable for both <em>pending</em> (not yet on-chain) and
+                <em>registered</em> rows so 8004 indexers can resolve metadata the moment a register tx confirms.
+            </p>
+            <pre><code>curl https://your-api-domain.com/agents/metadata/42
+
+# Response:
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "Normies #42 - Pixelpriest",
+  "description": "A patient archivist of static lines. Pixelpriest...",
+  "image": "https://your-api-domain.com/agents/image/42",
+  "services": [
+    {
+      "name": "web",
+      "endpoint": "https://your-api-domain.com/agents/info/42",
+      "version": "1"
+    }
+  ],
+  "active": true,
+  "x402Support": false,
+  "updatedAt": 1747200000
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/agents/info/:tokenId</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Rich persona JSON for explorers, agent UIs, and LLM clients. Combines the frozen persona snapshot
+                from the agents DB with <em>live</em> on-chain canvas state (level, action points, pixel diff).
+                Returns <code>404</code> for tokens that have no DB row or are still pending.
+            </p>
+            <pre><code>curl https://your-api-domain.com/agents/info/42
+
+# Response:
+{
+  "tokenId": "42",
+  "agentId": "7",
+  "chainId": 1,
+  "name": "Pixelpriest",
+  "type": "Alien",
+  "tagline": "Tends the static lines so they outlast every fork",
+  "backstory": "...",
+  "greeting": "I keep the old shapes...",
+  "personalityTraits": ["...", "...", "..."],
+  "communicationStyle": "Measured, archival, fond of references...",
+  "quirks": ["...", "...", "..."],
+  "systemPrompt": "...",
+  "traits": {
+    "name": "Pixelpriest",
+    "attributes": {
+      "Type": "Alien", "Gender": "Non-Binary", "Age": "Old",
+      "Hair Style": "Bald", "Facial Feature": "Clean Shaven",
+      "Eyes": "Round Glasses", "Expression": "Peaceful", "Accessory": "Hoodie"
+    }
+  },
+  "canvas": {
+    "level": 3,
+    "actionPoints": 25,
+    "customized": true,
+    "diff": { "addedCount": 12, "removedCount": 3, "netChange": 9 }
+  },
+  "registeredBy": "0x1234...abcd",
+  "registeredAt": "2026-05-14T12:00:00.000Z",
+  "txHash": "0xabc...def",
+  "interactions": { "status": "coming_soon" },
+  "mcp": { "status": "coming_soon" }
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/agents/image/:tokenId</span>
+            <span class="response-type">image/svg+xml</span>
+            <p class="desc">
+                Composited Normie SVG used as the agent&apos;s portrait. Reflects live canvas state — edit the
+                Normie via Canvas and the agent image updates within the cache window. Same renderer as
+                <code>/normie/:id/image.svg</code> but mounted under <code>/agents</code> for symmetry with
+                the rest of the agent endpoints.
+            </p>
+            <pre><code>curl https://your-api-domain.com/agents/image/42 -o agent.svg</code></pre>
+        </div>
+
+        <h3>Agent Binding Lookups</h3>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/agents/binding/:tokenId</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Resolves a Normie token to its bound <code>agentId</code> via the Ponder indexer (which
+                watches the Adapter8004 <code>AgentBound</code> event). Returns
+                <code>{ "binding": null }</code> if the Normie has not been registered as an agent.
+            </p>
+            <pre><code>curl https://your-api-domain.com/agents/binding/42
+
+# Response (bound):
+{
+  "binding": {
+    "id": "0:0x9eb6...12438:42",
+    "agentId": "7",
+    "standard": 0,
+    "tokenContract": "0x9eb6e2025b64f340691e424b7fe7022ffde12438",
+    "tokenId": "42",
+    "registeredBy": "0x1234...abcd",
+    "blockNumber": "12345678",
+    "timestamp": "1747200000",
+    "txHash": "0xabc...def"
+  }
+}
+
+# Response (unbound):
+{ "binding": null }</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">POST</span>
+            <span class="path">/agents/binding/batch</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Batch version of the above for resolving many Normies at once. Body is
+                <code>{ "tokenIds": ["42", "100", ...] }</code>. Response keys are token IDs as strings;
+                unbound tokens are simply absent from the map.
+            </p>
+            <pre><code>curl -X POST https://your-api-domain.com/agents/binding/batch \
+  -H "Content-Type: application/json" \
+  -d '{ "tokenIds": ["42", "100", "1337"] }'
+
+# Response:
+{
+  "bindings": {
+    "42": {
+      "agentId": "7",
+      "tokenContract": "0x9eb6...12438",
+      "tokenId": "42",
+      "registeredBy": "0x1234...abcd",
+      "blockNumber": "12345678",
+      "timestamp": "1747200000",
+      "txHash": "0xabc...def"
+    }
+    // tokens 100 and 1337 omitted — not bound
+  }
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/agents/by-agent-id/:agentId</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Reverse lookup — given an Adapter8004 <code>agentId</code>, returns the bound Normie token
+                (or <code>null</code> if no such agent exists in the index).
+            </p>
+            <pre><code>curl https://your-api-domain.com/agents/by-agent-id/7
+
+# Response:
+{
+  "binding": {
+    "agentId": "7",
+    "tokenContract": "0x9eb6...12438",
+    "tokenId": "42",
+    "registeredBy": "0x1234...abcd",
+    "blockNumber": "12345678",
+    "timestamp": "1747200000",
+    "txHash": "0xabc...def"
+  }
+}</code></pre>
+        </div>
+
         <h2>Trait Categories</h2>
 
         <table>
