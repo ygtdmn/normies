@@ -598,6 +598,11 @@
       "name": "web",
       "endpoint": "https://your-api-domain.com/agents/info/42",
       "version": "1"
+    },
+    {
+      "name": "A2A",
+      "endpoint": "https://your-api-domain.com/agents/agent-card/42",
+      "version": "0.3.0"
     }
   ],
   "active": true,
@@ -650,6 +655,60 @@
   "txHash": "0xabc...def",
   "interactions": { "status": "coming_soon" },
   "mcp": { "status": "coming_soon" }
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/agents/agent-card/:tokenId</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                <a href="https://a2aproject.github.io/A2A/" target="_blank" rel="noopener noreferrer">A2A (Agent2Agent)</a>
+                Agent Card for this Normie. Derived from the frozen persona snapshot
+                (<code>name</code>, <code>description</code>, <code>iconUrl</code>, a single conversational
+                <code>skill</code>). Linked from <code>/agents/metadata/:tokenId</code>&apos;s
+                <code>services</code> array as <code>{"name": "A2A", ...}</code> so any ERC-8004 indexer
+                can discover the A2A surface. Returns <code>404</code> for tokens with no DB row or
+                <code>status=pending</code>.
+            </p>
+            <pre><code>curl https://your-api-domain.com/agents/agent-card/42
+
+# Response (abbreviated):
+{
+  "name": "Pixelpriest",
+  "description": "Tends the static lines so they outlast every fork. ...",
+  "supportedInterfaces": [
+    {
+      "url": "https://your-api-domain.com/agents/a2a/42",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "provider": { "organization": "Normies", "url": "https://normies.art" },
+  "iconUrl": "https://your-api-domain.com/agents/image/42",
+  "version": "1.0.0",
+  "documentationUrl": "https://your-api-domain.com/docs",
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false,
+    "stateTransitionHistory": false,
+    "extendedAgentCard": false
+  },
+  "securitySchemes": {},
+  "security": [],
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"],
+  "skills": [
+    {
+      "id": "converse",
+      "name": "Converse with Pixelpriest",
+      "description": "Tends the static lines so they outlast every fork",
+      "tags": ["alien", "conversation", "erc-8004"],
+      "examples": ["I keep the old shapes..."],
+      "inputModes": ["text/plain"],
+      "outputModes": ["text/plain"]
+    }
+  ]
 }</code></pre>
         </div>
 

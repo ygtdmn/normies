@@ -361,7 +361,8 @@ metadata the moment a register tx confirms.
     "description": "Tagline. Backstory…",
     "image": "{base}/agents/image/42",
     "services": [
-      { "name": "web", "endpoint": "{base}/agents/info/42", "version": "1" }
+      { "name": "web", "endpoint": "{base}/agents/info/42", "version": "1" },
+      { "name": "A2A", "endpoint": "{base}/agents/agent-card/42", "version": "0.3.0" }
     ],
     "active": true,
     "x402Support": false,
@@ -399,6 +400,52 @@ state (level, action points, pixel diff). Returns 404 for tokens with no DB row 
     "txHash": "0x...",
     "interactions": { "status": "coming_soon" },
     "mcp": { "status": "coming_soon" }
+  }
+
+### GET /agents/agent-card/{tokenId}
+A2A (Agent2Agent) Agent Card for this Normie. Derived from the frozen persona snapshot — name,
+description, iconUrl, and a single conversational skill. Linked from /agents/metadata/{tokenId}'s
+`services` array as `{"name": "A2A", ...}` so any ERC-8004 indexer can discover the A2A surface.
+Spec reference: https://a2aproject.github.io/A2A/
+- Content-Type: application/json
+- Parameters: tokenId (integer, 0-9999)
+- Returns 404 for tokens with no DB row or status=pending.
+- Response format (abbreviated):
+  {
+    "name": "Pixelpriest",
+    "description": "Tagline. Backstory…",
+    "supportedInterfaces": [
+      {
+        "url": "{base}/agents/a2a/42",
+        "protocolBinding": "HTTP+JSON",
+        "protocolVersion": "1.0"
+      }
+    ],
+    "provider": { "organization": "Normies", "url": "https://normies.art" },
+    "iconUrl": "{base}/agents/image/42",
+    "version": "1.0.0",
+    "documentationUrl": "{base}/docs",
+    "capabilities": {
+      "streaming": false,
+      "pushNotifications": false,
+      "stateTransitionHistory": false,
+      "extendedAgentCard": false
+    },
+    "securitySchemes": {},
+    "security": [],
+    "defaultInputModes": ["text/plain"],
+    "defaultOutputModes": ["text/plain"],
+    "skills": [
+      {
+        "id": "converse",
+        "name": "Converse with Pixelpriest",
+        "description": "Tagline",
+        "tags": ["alien", "conversation", "erc-8004"],
+        "examples": ["First-words greeting"],
+        "inputModes": ["text/plain"],
+        "outputModes": ["text/plain"]
+      }
+    ]
   }
 
 ### GET /agents/image/{tokenId}

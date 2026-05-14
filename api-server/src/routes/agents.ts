@@ -21,6 +21,13 @@ const agents = new Hono();
 const METADATA_TYPE_URL =
     "https://eips.ethereum.org/EIPS/eip-8004#registration-v1";
 
+/**
+ * Version of the A2A (Agent2Agent) Agent Card spec we serve. ERC-8004
+ * service entries advertise this in `version`, and consumers like 8004scan
+ * use it to negotiate the right parser.
+ */
+const A2A_VERSION = "0.3.0";
+
 function publicBase(): string {
     const env = process.env.PUBLIC_API_BASE || "https://api.normies.art";
     return env.replace(/\/$/, "");
@@ -29,6 +36,10 @@ function publicBase(): string {
 function buildAgentDescription(row: { tagline: string; backstory: string }): string {
     const description = `${row.tagline}. ${row.backstory}`.replace(/\s+/g, " ").trim();
     return description.length <= 500 ? description : description.slice(0, 497) + "…";
+}
+
+function agentCardUrl(tokenId: bigint | string): string {
+    return `${publicBase()}/agents/agent-card/${tokenId.toString()}`;
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -61,6 +72,11 @@ agents.get("/metadata/:tokenId", async (c) => {
                 name: "web",
                 endpoint: `${base}/agents/info/${row.tokenId.toString()}`,
                 version: "1",
+            },
+            {
+                name: "A2A",
+                endpoint: agentCardUrl(row.tokenId),
+                version: A2A_VERSION,
             },
         ],
         active: row.status === "registered",
@@ -125,6 +141,73 @@ agents.get("/info/:tokenId", async (c) => {
         txHash: row.txHash,
         interactions: { status: "coming_soon" },
         mcp: { status: "coming_soon" },
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// /agent-card/:tokenId — A2A (Agent2Agent) v0.3.x Agent Card JSON.
+// Linked from /metadata/:tokenId's `services` array so any 8004 indexer
+// can discover the A2A surface for this agent. The agent's persona snapshot
+// drives `name`, `description`, `iconUrl`, and a single conversational
+// `skill`. The protocol-binding URL points at our (forthcoming) A2A
+// endpoint — the surface advertises but is not yet implemented.
+// ──────────────────────────────────────────────────────────────────────
+agents.get("/agent-card/:tokenId", async (c) => {
+    const result = parseTokenId(c.req.param("tokenId"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+
+    const row = await agentsPrisma.agent.findUnique({
+        where: { tokenId: BigInt(result.tokenId) },
+    });
+    if (!row || row.status !== "registered") {
+        return c.json({ error: "Agent not found" }, 404);
+    }
+
+    const base = publicBase();
+    const tokenIdStr = row.tokenId.toString();
+    const description = buildAgentDescription(row);
+    const lowerType = row.type.toLowerCase();
+
+    c.header("Cache-Control", "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
+    c.header("Access-Control-Allow-Origin", "*");
+    return c.json({
+        name: row.name,
+        description,
+        supportedInterfaces: [
+            {
+                url: `${base}/agents/a2a/${tokenIdStr}`,
+                protocolBinding: "HTTP+JSON",
+                protocolVersion: "1.0",
+            },
+        ],
+        provider: {
+            organization: "Normies",
+            url: "https://normies.art",
+        },
+        iconUrl: `${base}/agents/image/${tokenIdStr}`,
+        version: "1.0.0",
+        documentationUrl: `${base}/docs`,
+        capabilities: {
+            streaming: false,
+            pushNotifications: false,
+            stateTransitionHistory: false,
+            extendedAgentCard: false,
+        },
+        securitySchemes: {},
+        security: [],
+        defaultInputModes: ["text/plain"],
+        defaultOutputModes: ["text/plain"],
+        skills: [
+            {
+                id: "converse",
+                name: `Converse with ${row.name}`,
+                description: row.tagline,
+                tags: [lowerType, "conversation", "erc-8004"],
+                examples: [row.greeting],
+                inputModes: ["text/plain"],
+                outputModes: ["text/plain"],
+            },
+        ],
     });
 });
 
