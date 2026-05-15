@@ -1,7 +1,7 @@
 import { db } from "ponder:api";
 import schema from "ponder:schema";
 import { Hono } from "hono";
-import { eq, desc, count, sum, asc, and, inArray } from "ponder";
+import { eq, desc, count, sum, asc, and, gt, lt, inArray } from "ponder";
 
 const app = new Hono();
 
@@ -371,6 +371,103 @@ app.post("/agent-binding/batch", async (c) => {
     bindings[r.tokenId.toString()] = serializeBigints(r);
   }
   return c.json({ bindings });
+});
+
+// List bindings.
+//
+//   GET /agent-bindings?limit=N&sort=desc|asc&tokenContract=0x...
+//                     &cursor=<agentId>        (excludes the cursor row)
+//                     &offset=N                (used only when cursor absent)
+//
+// Default sort is `desc` (newest agentId first). When `cursor` is supplied the
+// next page returns rows on the far side of the cursor in the sort direction
+// — `agentId < cursor` for desc, `agentId > cursor` for asc — which keeps
+// pagination correct under concurrent inserts without an N+1 offset scan.
+app.get("/agent-bindings", async (c) => {
+  const { limit, offset } = parsePagination(c);
+  const tokenContractRaw = c.req.query("tokenContract");
+  const tokenContract = tokenContractRaw
+    ? (tokenContractRaw.toLowerCase() as `0x${string}`)
+    : undefined;
+  const sort = c.req.query("sort") === "asc" ? "asc" : "desc";
+  const cursorRaw = c.req.query("cursor");
+  let cursor: bigint | undefined;
+  if (cursorRaw) {
+    try {
+      cursor = BigInt(cursorRaw);
+    } catch {
+      return c.json({ error: "`cursor` must be an integer string" }, 400);
+    }
+  }
+
+  const conds = [];
+  if (tokenContract) conds.push(eq(schema.agentBinding.tokenContract, tokenContract));
+  if (cursor !== undefined) {
+    conds.push(
+      sort === "asc"
+        ? gt(schema.agentBinding.agentId, cursor)
+        : lt(schema.agentBinding.agentId, cursor),
+    );
+  }
+  const whereClause = conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds);
+  const orderBy = sort === "asc"
+    ? asc(schema.agentBinding.agentId)
+    : desc(schema.agentBinding.agentId);
+
+  // Drizzle's chain narrows the return type with each call, so we build the
+  // full query inline rather than mutating `let query` (which fails type
+  // narrowing). Cursor pagination skips offset; without a cursor we fall back
+  // to offset paging for backwards compatibility with the reconciler sweep.
+  const rows = cursor === undefined
+    ? whereClause
+      ? await db
+          .select()
+          .from(schema.agentBinding)
+          .where(whereClause)
+          .orderBy(orderBy)
+          .limit(limit)
+          .offset(offset)
+      : await db
+          .select()
+          .from(schema.agentBinding)
+          .orderBy(orderBy)
+          .limit(limit)
+          .offset(offset)
+    : whereClause
+      ? await db
+          .select()
+          .from(schema.agentBinding)
+          .where(whereClause)
+          .orderBy(orderBy)
+          .limit(limit)
+      : await db
+          .select()
+          .from(schema.agentBinding)
+          .orderBy(orderBy)
+          .limit(limit);
+
+  return c.json({
+    bindings: rows.map(serializeBigints),
+    hasMore: rows.length === limit,
+  });
+});
+
+// Cheap count of bindings, optionally filtered by tokenContract. Used by the
+// gallery header. Lives next to the list endpoint so a future enrichment can
+// fold it into the list response if we want to save a round trip.
+app.get("/agent-bindings/count", async (c) => {
+  const tokenContractRaw = c.req.query("tokenContract");
+  const tokenContract = tokenContractRaw
+    ? (tokenContractRaw.toLowerCase() as `0x${string}`)
+    : undefined;
+
+  const [row] = tokenContract
+    ? await db
+        .select({ total: count() })
+        .from(schema.agentBinding)
+        .where(eq(schema.agentBinding.tokenContract, tokenContract))
+    : await db.select({ total: count() }).from(schema.agentBinding);
+  return c.json({ count: row?.total ?? 0 });
 });
 
 // Agent lookup: agentId → binding | null
