@@ -20,16 +20,6 @@ model Agent {
   agentId            BigInt?     @unique
   chainId            Int
 
-  name               String
-  type               String
-  tagline            String
-  backstory          String      @db.Text
-  greeting           String      @db.Text
-  personalityTraits  Json
-  communicationStyle String
-  quirks             Json
-  systemPrompt       String      @db.Text
-
   traits             Json
 
   status             AgentStatus @default(pending)

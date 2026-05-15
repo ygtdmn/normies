@@ -14,6 +14,8 @@ import {
     getAgentBindingByAgentId,
     getAgentBindings,
 } from "../services/ponder-data.js";
+import { buildLivePersona, buildAgentIdentity } from "../services/persona-live.js";
+import { personaToDescription } from "../lib/persona.js";
 import { NORMIES_ADDRESS, PONDER_ENABLED } from "../config.js";
 
 const agents = new Hono();
@@ -33,12 +35,11 @@ function publicBase(): string {
     return env.replace(/\/$/, "");
 }
 
-function buildAgentDescription(row: { tagline: string; backstory: string }): string {
-    const description = `${row.tagline}. ${row.backstory}`.replace(/\s+/g, " ").trim();
-    return description.length <= 500 ? description : description.slice(0, 497) + "…";
+function fullAgentName(tokenId: bigint | number | string, name: string): string {
+    return `Normie #${tokenId.toString()} - ${name}`.slice(0, 200);
 }
 
-function agentCardUrl(tokenId: bigint | string): string {
+function agentCardUrl(tokenId: bigint | string | number): string {
     return `${publicBase()}/agents/agent-card/${tokenId.toString()}`;
 }
 
@@ -56,16 +57,16 @@ agents.get("/metadata/:tokenId", async (c) => {
     });
     if (!row) return c.json({ error: "Agent not found" }, 404);
 
+    const persona = await buildLivePersona(result.tokenId);
     const base = publicBase();
     const updatedAt = Math.floor(row.updatedAt.getTime() / 1000);
 
     c.header("Cache-Control", "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
     c.header("Access-Control-Allow-Origin", "*");
-    const fullName = `Normie #${row.tokenId.toString()} - ${row.name}`.slice(0, 200);
     return c.json({
         type: METADATA_TYPE_URL,
-        name: fullName,
-        description: buildAgentDescription(row),
+        name: fullAgentName(row.tokenId, persona.name),
+        description: personaToDescription(persona),
         image: `${base}/agents/image/${row.tokenId.toString()}`,
         services: [
             {
@@ -86,6 +87,51 @@ agents.get("/metadata/:tokenId", async (c) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────
+// /persona-preview/:tokenId — public, returns the full Persona JSON for
+// any tokenId regardless of registration status. Used by the lab during
+// the awakening flow so the reveal sequence and DB-write share one source
+// of persona text.
+// ──────────────────────────────────────────────────────────────────────
+agents.get("/persona-preview/:tokenId", async (c) => {
+    const result = parseTokenId(c.req.param("tokenId"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+
+    try {
+        const persona = await buildLivePersona(result.tokenId);
+        c.header("Cache-Control", "public, max-age=30, s-maxage=60, stale-while-revalidate=300");
+        c.header("Access-Control-Allow-Origin", "*");
+        return c.json(persona);
+    } catch (err) {
+        return c.json(
+            { error: err instanceof Error ? err.message : "Failed to build persona" },
+            502,
+        );
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// /identity/:tokenId — name + type + raw trait map. Pure trait-derived,
+// no canvas reads, longer cache window. Used by the gallery list and the
+// bindings endpoint where the full persona is overkill.
+// ──────────────────────────────────────────────────────────────────────
+agents.get("/identity/:tokenId", async (c) => {
+    const result = parseTokenId(c.req.param("tokenId"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+
+    try {
+        const identity = await buildAgentIdentity(result.tokenId);
+        c.header("Cache-Control", "public, max-age=300, s-maxage=600, stale-while-revalidate=3600");
+        c.header("Access-Control-Allow-Origin", "*");
+        return c.json(identity);
+    } catch (err) {
+        return c.json(
+            { error: err instanceof Error ? err.message : "Failed to read agent identity" },
+            502,
+        );
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────────
 // /info/:tokenId — rich persona JSON for explorers + UIs. Persona snapshot
 // from DB merged with live on-chain canvas state. 404s for pending rows.
 // ──────────────────────────────────────────────────────────────────────
@@ -100,7 +146,10 @@ agents.get("/info/:tokenId", async (c) => {
         return c.json({ error: "Agent not found" }, 404);
     }
 
-    const canvasInfo = await getCanvasInfo(result.tokenId);
+    const [persona, canvasInfo] = await Promise.all([
+        buildLivePersona(result.tokenId),
+        getCanvasInfo(result.tokenId),
+    ]);
     let diff: { addedCount: number; removedCount: number; netChange: number } | null = null;
     if (canvasInfo.customized) {
         try {
@@ -120,15 +169,15 @@ agents.get("/info/:tokenId", async (c) => {
         tokenId: row.tokenId.toString(),
         agentId: row.agentId?.toString() ?? null,
         chainId: row.chainId,
-        name: row.name,
-        type: row.type,
-        tagline: row.tagline,
-        backstory: row.backstory,
-        greeting: row.greeting,
-        personalityTraits: row.personalityTraits,
-        communicationStyle: row.communicationStyle,
-        quirks: row.quirks,
-        systemPrompt: row.systemPrompt,
+        name: persona.name,
+        type: persona.type,
+        tagline: persona.tagline,
+        backstory: persona.backstory,
+        greeting: persona.greeting,
+        personalityTraits: persona.personalityTraits,
+        communicationStyle: persona.communicationStyle,
+        quirks: persona.quirks,
+        systemPrompt: persona.systemPrompt,
         traits: row.traits,
         canvas: {
             level: canvasInfo.level,
@@ -163,16 +212,16 @@ agents.get("/agent-card/:tokenId", async (c) => {
         return c.json({ error: "Agent not found" }, 404);
     }
 
+    const persona = await buildLivePersona(result.tokenId);
     const base = publicBase();
     const tokenIdStr = row.tokenId.toString();
-    const description = buildAgentDescription(row);
-    const lowerType = row.type.toLowerCase();
+    const lowerType = persona.type.toLowerCase();
 
     c.header("Cache-Control", "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
     c.header("Access-Control-Allow-Origin", "*");
     return c.json({
-        name: row.name,
-        description,
+        name: persona.name,
+        description: personaToDescription(persona),
         supportedInterfaces: [
             {
                 url: `${base}/agents/a2a/${tokenIdStr}`,
@@ -200,10 +249,10 @@ agents.get("/agent-card/:tokenId", async (c) => {
         skills: [
             {
                 id: "converse",
-                name: `Converse with ${row.name}`,
-                description: row.tagline,
+                name: `Converse with ${persona.name}`,
+                description: persona.tagline,
                 tags: [lowerType, "conversation", "erc-8004"],
-                examples: [row.greeting],
+                examples: [persona.greeting],
                 inputModes: ["text/plain"],
                 outputModes: ["text/plain"],
             },

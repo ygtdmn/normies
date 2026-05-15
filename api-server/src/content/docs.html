@@ -571,9 +571,12 @@
         <h2>Agent Endpoints (ERC-8004)</h2>
 
         <p>
-            Endpoints that back the ERC-8004 agentic flow: persona snapshots, dynamic agent metadata,
-            and agent-binding lookups. Personas are generated deterministically from a Normie&apos;s on-chain
-            traits and frozen in the agents DB the first time a Normie is registered.
+            Endpoints that back the ERC-8004 agentic flow: live persona generation, dynamic agent metadata,
+            and agent-binding lookups. Personas are generated deterministically from a Normie&apos;s
+            immutable mint traits + current canvas state on <em>every</em> request &mdash; nothing is
+            stored. Name and type are stable per tokenId; backstory, tagline, personality, voice,
+            quirks, greeting, and system prompt evolve as the Normie&apos;s canvas state crosses
+            level bands (untouched / early / mid / late).
         </p>
 
         <div class="endpoint">
@@ -616,9 +619,11 @@
             <span class="path">/agents/info/:tokenId</span>
             <span class="response-type">application/json</span>
             <p class="desc">
-                Rich persona JSON for explorers, agent UIs, and LLM clients. Combines the frozen persona snapshot
-                from the agents DB with <em>live</em> on-chain canvas state (level, action points, pixel diff).
-                Returns <code>404</code> for tokens that have no DB row or are still pending.
+                Rich persona JSON for explorers, agent UIs, and LLM clients. Persona text is
+                regenerated live from current on-chain canvas state on every request (no DB
+                persistence), then merged with the agent&apos;s registration facts (agentId,
+                chainId, registeredBy, txHash). Returns <code>404</code> for tokens that have
+                no DB row or are still pending.
             </p>
             <pre><code>curl https://your-api-domain.com/agents/info/42
 
@@ -664,9 +669,11 @@
             <span class="response-type">application/json</span>
             <p class="desc">
                 <a href="https://a2aproject.github.io/A2A/" target="_blank" rel="noopener noreferrer">A2A (Agent2Agent)</a>
-                Agent Card for this Normie. Derived from the frozen persona snapshot
-                (<code>name</code>, <code>description</code>, <code>iconUrl</code>, a single conversational
-                <code>skill</code>). Linked from <code>/agents/metadata/:tokenId</code>&apos;s
+                Agent Card for this Normie. Derived from the live persona (<code>name</code>,
+                <code>description</code>, <code>iconUrl</code>, a single conversational
+                <code>skill</code>) &mdash; same dynamic regeneration as <code>/info</code>, so
+                edits to the Normie&apos;s canvas flow into the card on the next cache window.
+                Linked from <code>/agents/metadata/:tokenId</code>&apos;s
                 <code>services</code> array as <code>{"name": "A2A", ...}</code> so any ERC-8004 indexer
                 can discover the A2A surface. Returns <code>404</code> for tokens with no DB row or
                 <code>status=pending</code>.
@@ -723,6 +730,45 @@
                 the rest of the agent endpoints.
             </p>
             <pre><code>curl https://your-api-domain.com/agents/image/42 -o agent.svg</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/agents/persona-preview/:tokenId</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Full <code>Persona</code> JSON for any token, regardless of registration status.
+                Used by the lab during the awakening flow so the reveal sequence and the
+                <code>/info</code> endpoint share one source of persona text. Cache window is
+                short (30&nbsp;s public, 60&nbsp;s shared) since the response depends on live
+                canvas state.
+            </p>
+            <pre><code>curl https://your-api-domain.com/agents/persona-preview/42</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/agents/identity/:tokenId</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Lightweight <code>{ tokenId, name, type, traits }</code>. Pure
+                trait-derived &mdash; no canvas reads &mdash; with a long cache window
+                (5&nbsp;min public, 10&nbsp;min shared). Used by gallery lists and bindings
+                where the full persona is overkill.
+            </p>
+            <pre><code>curl https://your-api-domain.com/agents/identity/42
+
+# Response:
+{
+  "tokenId": 42,
+  "name": "Pixelpriest",
+  "type": "Alien",
+  "traits": {
+    "Type": "Alien", "Gender": "Non-Binary", "Age": "Old",
+    "Hair Style": "Bald", "Facial Feature": "Clean Shaven",
+    "Eyes": "Round Glasses", "Expression": "Peaceful", "Accessory": "Hoodie"
+  }
+}</code></pre>
         </div>
 
         <h3>Agent Binding Lookups</h3>

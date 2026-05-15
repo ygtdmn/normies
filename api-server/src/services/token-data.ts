@@ -1,7 +1,8 @@
 import { hexToBytes } from "viem";
 import { publicClient } from "./chain.js";
-import { imageDataCache, traitsCache } from "./cache.js";
+import { imageDataCache, traitsCache, decodedTraitsCache } from "./cache.js";
 import { STORAGE_ADDRESS, NORMIES_ADDRESS } from "../config.js";
+import { decodeTraits } from "../lib/traits.js";
 
 const StorageABI = [
     {
@@ -76,6 +77,23 @@ export async function getTokenData(
         getTraitsHex(tokenId),
     ]);
     return { imageData, traitsHex };
+}
+
+/**
+ * Decoded mint traits as a flat Record<traitName, value>. Cached because
+ * traits are immutable post-mint and decoding runs on every persona request.
+ */
+export async function getDecodedTraits(tokenId: number): Promise<Record<string, string>> {
+    const cached = decodedTraitsCache.get(tokenId);
+    if (cached) return cached;
+
+    const hex = await getTraitsHex(tokenId);
+    const { attributes } = decodeTraits(hex);
+    const record: Record<string, string> = {};
+    for (const { trait_type, value } of attributes) record[trait_type] = value;
+
+    decodedTraitsCache.set(tokenId, record);
+    return record;
 }
 
 export async function isTokenDataSet(tokenId: number): Promise<boolean> {
