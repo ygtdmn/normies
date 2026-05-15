@@ -10,13 +10,28 @@ import { getImageData } from "../services/token-data.js";
 import { computePixelDiff } from "../lib/diff.js";
 import { renderSvg } from "../lib/svg.js";
 import {
+    countAgentBindings,
     getAgentBinding,
     getAgentBindingByAgentId,
     getAgentBindings,
+    getAllAgentBindings,
 } from "../services/ponder-data.js";
 import { buildLivePersona, buildAgentIdentity } from "../services/persona-live.js";
+import { reconcileTokenId } from "../services/agents-reconcile.js";
 import { personaToDescription } from "../lib/persona.js";
 import { NORMIES_ADDRESS, PONDER_ENABLED } from "../config.js";
+
+/**
+ * Read the agentsPrisma row for `tokenId`, falling back to a single-token
+ * reconciliation against the Ponder indexer if the row is missing or still
+ * pending. This is the read path's safety net for users who registered
+ * on-chain but never finished the lab's confirmation handshake.
+ */
+async function loadAgentRow(tokenId: bigint) {
+    const row = await agentsPrisma.agent.findUnique({ where: { tokenId } });
+    if (row && row.status === "registered" && row.agentId !== null) return row;
+    return reconcileTokenId(tokenId);
+}
 
 const agents = new Hono();
 
@@ -52,9 +67,7 @@ agents.get("/metadata/:tokenId", async (c) => {
     const result = parseTokenId(c.req.param("tokenId"));
     if ("error" in result) return c.json({ error: result.error }, 400);
 
-    const row = await agentsPrisma.agent.findUnique({
-        where: { tokenId: BigInt(result.tokenId) },
-    });
+    const row = await loadAgentRow(BigInt(result.tokenId));
     if (!row) return c.json({ error: "Agent not found" }, 404);
 
     const persona = await buildLivePersona(result.tokenId);
@@ -131,41 +144,29 @@ agents.get("/identity/:tokenId", async (c) => {
     }
 });
 
-// ──────────────────────────────────────────────────────────────────────
-// /info/:tokenId — rich persona JSON for explorers + UIs. Persona snapshot
-// from DB merged with live on-chain canvas state. 404s for pending rows.
-// ──────────────────────────────────────────────────────────────────────
-agents.get("/info/:tokenId", async (c) => {
-    const result = parseTokenId(c.req.param("tokenId"));
-    if ("error" in result) return c.json({ error: result.error }, 400);
-
-    const row = await agentsPrisma.agent.findUnique({
-        where: { tokenId: BigInt(result.tokenId) },
-    });
-    if (!row || row.status !== "registered") {
-        return c.json({ error: "Agent not found" }, 404);
-    }
-
+/**
+ * Build the /info JSON body for a registered agent. Shared between
+ * /info/:tokenId and /by-agent-id/:agentId/info so both surfaces speak the
+ * same shape and stay in lockstep when fields evolve.
+ */
+async function buildAgentInfoBody(row: NonNullable<Awaited<ReturnType<typeof loadAgentRow>>>, tokenId: number) {
     const [persona, canvasInfo] = await Promise.all([
-        buildLivePersona(result.tokenId),
-        getCanvasInfo(result.tokenId),
+        buildLivePersona(tokenId),
+        getCanvasInfo(tokenId),
     ]);
     let diff: { addedCount: number; removedCount: number; netChange: number } | null = null;
     if (canvasInfo.customized) {
         try {
             const [original, transform] = await Promise.all([
-                getImageData(result.tokenId),
-                getTransformData(result.tokenId),
+                getImageData(tokenId),
+                getTransformData(tokenId),
             ]);
             diff = computePixelDiff(original, transform);
         } catch {
             // diff stays null; level + actionPoints are still authoritative
         }
     }
-
-    c.header("Cache-Control", "public, max-age=30, s-maxage=60, stale-while-revalidate=300");
-    c.header("Access-Control-Allow-Origin", "*");
-    return c.json({
+    return {
         tokenId: row.tokenId.toString(),
         agentId: row.agentId?.toString() ?? null,
         chainId: row.chainId,
@@ -190,7 +191,154 @@ agents.get("/info/:tokenId", async (c) => {
         txHash: row.txHash,
         interactions: { status: "coming_soon" },
         mcp: { status: "coming_soon" },
+    };
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// /info/:tokenId — rich persona JSON for explorers + UIs. Persona snapshot
+// from DB merged with live on-chain canvas state. 404s for pending rows.
+// ──────────────────────────────────────────────────────────────────────
+agents.get("/info/:tokenId", async (c) => {
+    const result = parseTokenId(c.req.param("tokenId"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+
+    const row = await loadAgentRow(BigInt(result.tokenId));
+    if (!row || row.status !== "registered") {
+        return c.json({ error: "Agent not found" }, 404);
+    }
+
+    const body = await buildAgentInfoBody(row, result.tokenId);
+    c.header("Cache-Control", "public, max-age=30, s-maxage=60, stale-while-revalidate=300");
+    c.header("Access-Control-Allow-Origin", "*");
+    return c.json(body);
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// /by-agent-id/:agentId/info — reverse lookup. Resolves agentId → tokenId
+// via the Ponder indexer, then returns the same payload as /info/:tokenId.
+// Lets the lab's agent detail page do a single round trip instead of two.
+// ──────────────────────────────────────────────────────────────────────
+agents.get("/by-agent-id/:agentId/info", async (c) => {
+    if (!PONDER_ENABLED) {
+        return c.json({ error: "agentId lookup requires PONDER_API_URL to be configured" }, 503);
+    }
+    let agentId: bigint;
+    try {
+        agentId = BigInt(c.req.param("agentId"));
+    } catch {
+        return c.json({ error: "Invalid agentId" }, 400);
+    }
+
+    let binding;
+    try {
+        binding = await getAgentBindingByAgentId(agentId);
+    } catch (err) {
+        return c.json(
+            { error: err instanceof Error ? err.message : "Indexer lookup failed" },
+            502,
+        );
+    }
+    if (!binding) return c.json({ error: "Agent not found" }, 404);
+
+    const tokenId = BigInt(binding.tokenId);
+    const row = await loadAgentRow(tokenId);
+    if (!row || row.status !== "registered") {
+        return c.json({ error: "Agent not found" }, 404);
+    }
+
+    const body = await buildAgentInfoBody(row, Number(tokenId));
+    c.header("Cache-Control", "public, max-age=30, s-maxage=60, stale-while-revalidate=300");
+    c.header("Access-Control-Allow-Origin", "*");
+    return c.json(body);
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// /list — paginated gallery feed, enriched with identity (name + type).
+// Source of pagination is Ponder's agent_binding table (authoritative for
+// "is this registered on-chain?"); identity is built per row from cached
+// on-chain trait reads. Lab gallery uses this for both server-rendered
+// first page and client-side infinite scroll.
+//
+//   GET /agents/list?sort=newest|oldest&limit=N&cursor=<agentId>
+// ──────────────────────────────────────────────────────────────────────
+agents.get("/list", async (c) => {
+    if (!PONDER_ENABLED) {
+        return c.json({ error: "/list requires PONDER_API_URL to be configured" }, 503);
+    }
+    const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 24), 1), 100);
+    const sortParam = c.req.query("sort");
+    const sort = sortParam === "oldest" ? "asc" : "desc";
+    const cursorRaw = c.req.query("cursor");
+    let cursor: bigint | undefined;
+    if (cursorRaw) {
+        try {
+            cursor = BigInt(cursorRaw);
+        } catch {
+            return c.json({ error: "`cursor` must be an integer string" }, 400);
+        }
+    }
+
+    let res;
+    try {
+        res = await getAllAgentBindings({
+            tokenContract: NORMIES_ADDRESS,
+            limit,
+            cursor,
+            sort,
+        });
+    } catch (err) {
+        return c.json(
+            { error: err instanceof Error ? err.message : "Indexer lookup failed" },
+            502,
+        );
+    }
+
+    // Resolve identity per row in parallel — buildAgentIdentity is cheap
+    // after the first hit since decoded traits are process-cached.
+    const identities = await Promise.all(
+        res.bindings.map((b) =>
+            buildAgentIdentity(Number(b.tokenId)).catch(() => null),
+        ),
+    );
+
+    const items = res.bindings.map((b, i) => {
+        const id = identities[i];
+        return {
+            agentId: b.agentId,
+            tokenId: b.tokenId,
+            name: id?.name ?? `Normie #${b.tokenId}`,
+            type: id?.type ?? "",
+            registeredBy: b.registeredBy,
+            registeredAt: b.timestamp,
+            txHash: b.txHash,
+        };
     });
+
+    c.header("Cache-Control", "public, max-age=30, s-maxage=60, stale-while-revalidate=300");
+    c.header("Access-Control-Allow-Origin", "*");
+    return c.json({ items, hasMore: res.hasMore });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// /count — total registered Normies agents, used by the gallery header.
+// Source is Ponder, not agentsPrisma, so newly registered agents are
+// counted the moment the indexer sees the AgentBound event.
+// ──────────────────────────────────────────────────────────────────────
+agents.get("/count", async (c) => {
+    if (!PONDER_ENABLED) {
+        return c.json({ error: "/count requires PONDER_API_URL to be configured" }, 503);
+    }
+    try {
+        const total = await countAgentBindings({ tokenContract: NORMIES_ADDRESS });
+        c.header("Cache-Control", "public, max-age=30, s-maxage=60, stale-while-revalidate=300");
+        c.header("Access-Control-Allow-Origin", "*");
+        return c.json({ count: total });
+    } catch (err) {
+        return c.json(
+            { error: err instanceof Error ? err.message : "Indexer lookup failed" },
+            502,
+        );
+    }
 });
 
 // ──────────────────────────────────────────────────────────────────────
@@ -205,9 +353,7 @@ agents.get("/agent-card/:tokenId", async (c) => {
     const result = parseTokenId(c.req.param("tokenId"));
     if ("error" in result) return c.json({ error: result.error }, 400);
 
-    const row = await agentsPrisma.agent.findUnique({
-        where: { tokenId: BigInt(result.tokenId) },
-    });
+    const row = await loadAgentRow(BigInt(result.tokenId));
     if (!row || row.status !== "registered") {
         return c.json({ error: "Agent not found" }, 404);
     }

@@ -571,12 +571,16 @@
         <h2>Agent Endpoints (ERC-8004)</h2>
 
         <p>
-            Endpoints that back the ERC-8004 agentic flow: live persona generation, dynamic agent metadata,
-            and agent-binding lookups. Personas are generated deterministically from a Normie&apos;s
-            immutable mint traits + current canvas state on <em>every</em> request &mdash; nothing is
-            stored. Name and type are stable per tokenId; backstory, tagline, personality, voice,
-            quirks, greeting, and system prompt evolve as the Normie&apos;s canvas state crosses
-            level bands (untouched / early / mid / late).
+            Endpoints that back the ERC-8004 agentic flow: live persona generation, dynamic agent
+            metadata, agent-binding lookups, and a paginated gallery feed. Personas are generated
+            deterministically from a Normie&apos;s immutable mint traits + current canvas state on
+            <em>every</em> request &mdash; nothing is stored. Name and type are stable per tokenId;
+            backstory, tagline, personality, voice, quirks, greeting, and system prompt evolve as the
+            Normie&apos;s canvas state crosses level bands (untouched / early / mid / late). The
+            Ponder indexer is the source of truth for &ldquo;is this Normie registered?&rdquo;; the
+            metadata / info / agent-card endpoints lazy-reconcile against it on read so an on-chain
+            registration is reachable here within the next read window even if the original frontend
+            handshake was abandoned.
         </p>
 
         <div class="endpoint">
@@ -593,7 +597,7 @@
 # Response:
 {
   "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
-  "name": "Normies #42 - Pixelpriest",
+  "name": "Normie #42 - Pixelpriest",
   "description": "A patient archivist of static lines. Pixelpriest...",
   "image": "https://your-api-domain.com/agents/image/42",
   "services": [
@@ -622,8 +626,9 @@
                 Rich persona JSON for explorers, agent UIs, and LLM clients. Persona text is
                 regenerated live from current on-chain canvas state on every request (no DB
                 persistence), then merged with the agent&apos;s registration facts (agentId,
-                chainId, registeredBy, txHash). Returns <code>404</code> for tokens that have
-                no DB row or are still pending.
+                chainId, registeredBy, txHash). Returns <code>404</code> only when the indexer
+                has no <code>AgentBound</code> event for the token &mdash; if the Ponder
+                indexer knows about it, this endpoint serves it.
             </p>
             <pre><code>curl https://your-api-domain.com/agents/info/42
 
@@ -675,8 +680,8 @@
                 edits to the Normie&apos;s canvas flow into the card on the next cache window.
                 Linked from <code>/agents/metadata/:tokenId</code>&apos;s
                 <code>services</code> array as <code>{"name": "A2A", ...}</code> so any ERC-8004 indexer
-                can discover the A2A surface. Returns <code>404</code> for tokens with no DB row or
-                <code>status=pending</code>.
+                can discover the A2A surface. Returns <code>404</code> only when the indexer has no
+                <code>AgentBound</code> event for the token.
             </p>
             <pre><code>curl https://your-api-domain.com/agents/agent-card/42
 
@@ -771,6 +776,60 @@
 }</code></pre>
         </div>
 
+        <h3>Gallery Feed</h3>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/agents/list</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Paginated registry of every registered Normies agent, enriched per row with
+                <code>name</code> and <code>type</code> from cached on-chain trait reads. Pagination
+                source is the Ponder indexer (newest registration first by default), so a newly
+                bound agent appears here as soon as the indexer sees the <code>AgentBound</code>
+                event &mdash; no DB sweep required.
+            </p>
+            <p class="desc">
+                Query params: <code>sort</code> (<code>newest</code> | <code>oldest</code>, default
+                <code>newest</code>), <code>limit</code> (1&ndash;100, default <code>24</code>),
+                <code>cursor</code> (last seen <code>agentId</code> from the previous page; the next
+                page returns rows past it in the sort direction).
+            </p>
+            <pre><code>curl "https://your-api-domain.com/agents/list?sort=newest&amp;limit=24"
+
+# Response:
+{
+  "items": [
+    {
+      "agentId": "7",
+      "tokenId": "42",
+      "name": "Pixelpriest",
+      "type": "Alien",
+      "registeredBy": "0x1234...abcd",
+      "registeredAt": "1747200000",
+      "txHash": "0xabc...def"
+    }
+    // ...
+  ],
+  "hasMore": true
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/agents/count</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Total count of registered Normies agents. Sourced from the Ponder indexer (filtered
+                to the Normies contract), so it advances with the chain rather than with any
+                product-DB cache. Useful for gallery headers.
+            </p>
+            <pre><code>curl https://your-api-domain.com/agents/count
+
+# Response:
+{ "count": 137 }</code></pre>
+        </div>
+
         <h3>Agent Binding Lookups</h3>
 
         <div class="endpoint">
@@ -855,6 +914,21 @@
     "txHash": "0xabc...def"
   }
 }</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/agents/by-agent-id/:agentId/info</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Reverse-lookup convenience that resolves <code>agentId</code> &rarr; <code>tokenId</code>
+                via the indexer and then returns the same payload as <code>/agents/info/:tokenId</code>.
+                Lets agent UIs (which carry the <code>agentId</code> in URLs) load the full persona
+                + canvas state in a single round trip. Returns <code>404</code> when the indexer has
+                no binding for the given <code>agentId</code>.
+            </p>
+            <pre><code>curl https://your-api-domain.com/agents/by-agent-id/7/info
+# Same response shape as /agents/info/:tokenId</code></pre>
         </div>
 
         <h2>Trait Categories</h2>

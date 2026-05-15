@@ -34,6 +34,17 @@ export const INTERNAL_SECRET = process.env.INTERNAL_SECRET || undefined;
 export const PONDER_API_URL = process.env.PONDER_API_URL || undefined;
 export const PONDER_ENABLED = !!PONDER_API_URL;
 
+// Chain we read against. Defaults to mainnet to match the hardcoded
+// NORMIES_ADDRESS/STORAGE_ADDRESS above.
+export const CHAIN_ID = Number(process.env.CHAIN_ID ?? 1);
+
+// Reconciliation sweep cadence: how often we backfill agentsPrisma rows from
+// on-chain bindings the lab's register-complete flow never touched. Set to 0
+// to disable the sweep (lazy on-read reconciliation still runs). Default 5min.
+export const AGENTS_RECONCILE_INTERVAL_MS = Number(
+    process.env.AGENTS_RECONCILE_INTERVAL_MS ?? 5 * 60_000,
+);
+
 // SVG constants (matching on-chain renderer exactly)
 export const GRID_SIZE = 40;
 export const SVG_OUTPUT_SIZE = 1000;

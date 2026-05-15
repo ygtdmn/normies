@@ -191,3 +191,41 @@ export async function getAgentBindingByAgentId(
     );
     return res.binding;
 }
+
+/**
+ * Paginated list of bindings. Default sort is `desc` (newest agentId first).
+ * Pass `cursor` for keyset pagination (returns rows past the cursor in the
+ * sort direction); omit it for offset paging, which the reconciler uses for
+ * full sweeps. Optional `tokenContract` filter restricts to a single NFT
+ * contract.
+ */
+export async function getAllAgentBindings(opts: {
+    tokenContract?: string;
+    limit?: number;
+    offset?: number;
+    cursor?: bigint | string;
+    sort?: "asc" | "desc";
+} = {}): Promise<{ bindings: AgentBindingData[]; hasMore: boolean }> {
+    const params = new URLSearchParams();
+    if (opts.tokenContract) params.set("tokenContract", opts.tokenContract.toLowerCase());
+    if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+    if (opts.offset !== undefined) params.set("offset", String(opts.offset));
+    if (opts.cursor !== undefined) params.set("cursor", opts.cursor.toString());
+    if (opts.sort) params.set("sort", opts.sort);
+    const qs = params.toString();
+    return ponderFetch<{ bindings: AgentBindingData[]; hasMore: boolean }>(
+        qs ? `/agent-bindings?${qs}` : "/agent-bindings",
+    );
+}
+
+export async function countAgentBindings(opts: {
+    tokenContract?: string;
+} = {}): Promise<number> {
+    const params = new URLSearchParams();
+    if (opts.tokenContract) params.set("tokenContract", opts.tokenContract.toLowerCase());
+    const qs = params.toString();
+    const res = await ponderFetch<{ count: number }>(
+        qs ? `/agent-bindings/count?${qs}` : "/agent-bindings/count",
+    );
+    return res.count;
+}
