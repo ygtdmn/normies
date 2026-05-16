@@ -21,7 +21,8 @@ export const CANVAS_ENABLED = !!(CANVAS_ADDRESS && CANVAS_STORAGE_ADDRESS);
 export const CACHE_MAX_ENTRIES = Number(process.env.CACHE_MAX_ENTRIES ?? 10_000);
 export const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS ?? 3_600_000); // 1 hour default
 export const CANVAS_CACHE_TTL_MS = Number(process.env.CANVAS_CACHE_TTL_MS ?? 60_000); // 1 minute
-export const CANVAS_INFO_CACHE_TTL_MS = Number(process.env.CANVAS_INFO_CACHE_TTL_MS ?? 10_000); // 10 seconds
+export const CANVAS_INFO_CACHE_TTL_MS = Number(process.env.CANVAS_INFO_CACHE_TTL_MS ?? 60_000); // 1 minute
+export const CANVAS_STATUS_CACHE_TTL_MS = Number(process.env.CANVAS_STATUS_CACHE_TTL_MS ?? 300_000); // 5 minutes
 
 // Rate limiting
 export const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute

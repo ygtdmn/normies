@@ -1,9 +1,17 @@
 import type { MiddlewareHandler } from "hono";
+import { CANVAS_INFO_CACHE_TTL_MS, CANVAS_STATUS_CACHE_TTL_MS } from "../config.js";
+
+const canvasInfoMaxAge = Math.floor(CANVAS_INFO_CACHE_TTL_MS / 1000);
+const canvasStatusMaxAge = Math.floor(CANVAS_STATUS_CACHE_TTL_MS / 1000);
 
 export const cacheHeaders: MiddlewareHandler = async (c, next) => {
     await next();
     const path = c.req.path;
-    if (path.includes("/canvas/info") || path.startsWith("/canvas/status") || path.includes("/owner") || path.startsWith("/holders/")) {
+    if (path.startsWith("/canvas/status")) {
+        c.header("Cache-Control", `public, max-age=${canvasStatusMaxAge}, s-maxage=${canvasStatusMaxAge}`);
+    } else if (path.includes("/canvas/info")) {
+        c.header("Cache-Control", `public, max-age=${canvasInfoMaxAge}, s-maxage=${canvasInfoMaxAge}`);
+    } else if (path.includes("/owner") || path.startsWith("/holders/")) {
         // Near-realtime mutable data (ownership, action points, level, delegate, paused state)
         c.header("Cache-Control", "public, max-age=10, s-maxage=10");
     } else if (path.includes("/original/") || path.includes("/traits")) {

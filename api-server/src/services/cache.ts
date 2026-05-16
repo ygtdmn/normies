@@ -1,14 +1,12 @@
 import { LRUCache } from "lru-cache";
 import { CACHE_MAX_ENTRIES, CACHE_TTL_MS, CANVAS_CACHE_TTL_MS, CANVAS_INFO_CACHE_TTL_MS } from "../config.js";
 
-// Traits are written exactly once at mint and have no on-chain mutator after
-// that, so cached values are provably stale-free for the lifetime of the
-// process. No TTL; we bump max so the whole 10k-supply fits resident.
+// Token data is written once at mint and then served from required Ponder rows.
+// No TTL; max fits the full 10k supply plus headroom.
 const TRAITS_CACHE_MAX = Math.max(CACHE_MAX_ENTRIES, 12_000);
 
 export const imageDataCache = new LRUCache<number, Uint8Array>({
-    max: CACHE_MAX_ENTRIES,
-    ttl: CACHE_TTL_MS,
+    max: TRAITS_CACHE_MAX,
 });
 
 export const traitsCache = new LRUCache<number, `0x${string}`>({

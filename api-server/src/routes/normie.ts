@@ -8,7 +8,6 @@ import { renderSvg } from "../lib/svg.js";
 import { svgToPng } from "../lib/png.js";
 import { buildMetadata } from "../lib/metadata.js";
 import { computePixelDiff } from "../lib/diff.js";
-import { CANVAS_ENABLED } from "../config.js";
 import { getTokenOwner } from "../services/ponder-data.js";
 
 const normie = new Hono();
@@ -80,11 +79,11 @@ normie.get("/:id/metadata", async (c) => {
 
     const [{ imageData: originalImageData, traitsHex }, canvasInfo] = await Promise.all([
         getTokenData(result.tokenId),
-        CANVAS_ENABLED ? getCanvasInfo(result.tokenId) : Promise.resolve(undefined),
+        getCanvasInfo(result.tokenId),
     ]);
 
     let imageData = originalImageData;
-    if (canvasInfo?.customized) {
+    if (canvasInfo.customized) {
         imageData = await getCompositedImageData(result.tokenId);
     }
 
@@ -93,7 +92,7 @@ normie.get("/:id/metadata", async (c) => {
         result.tokenId,
         imageData,
         traitsHex,
-        canvasInfo ? { ...canvasInfo, originalPixelCount } : undefined
+        { ...canvasInfo, originalPixelCount }
     );
     return c.json(metadata);
 });

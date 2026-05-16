@@ -2,57 +2,13 @@ import { hexToBytes } from "viem";
 import { publicClient } from "./chain.js";
 import { getImageData } from "./token-data.js";
 import { transformDataCache, isTransformedCache, canvasInfoCache, type CanvasInfo } from "./cache.js";
-import { CANVAS_ADDRESS, CANVAS_STORAGE_ADDRESS, CANVAS_ENABLED } from "../config.js";
+import { getIndexedCanvasState, type IndexedCanvasState } from "./ponder-data.js";
+import { CANVAS_ADDRESS, CANVAS_ENABLED, CANVAS_STATUS_CACHE_TTL_MS } from "../config.js";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const EMPTY_BITMAP = new Uint8Array(200);
 
-const CanvasStorageABI = [
-    {
-        type: "function",
-        name: "isTransformed",
-        inputs: [{ name: "tokenId", type: "uint256" }],
-        outputs: [{ name: "", type: "bool" }],
-        stateMutability: "view",
-    },
-    {
-        type: "function",
-        name: "getTransformedImageData",
-        inputs: [{ name: "tokenId", type: "uint256" }],
-        outputs: [{ name: "", type: "bytes" }],
-        stateMutability: "view",
-    },
-] as const;
-
 const CanvasABI = [
-    {
-        type: "function",
-        name: "actionPoints",
-        inputs: [{ name: "tokenId", type: "uint256" }],
-        outputs: [{ name: "", type: "uint256" }],
-        stateMutability: "view",
-    },
-    {
-        type: "function",
-        name: "getLevel",
-        inputs: [{ name: "tokenId", type: "uint256" }],
-        outputs: [{ name: "", type: "uint256" }],
-        stateMutability: "view",
-    },
-    {
-        type: "function",
-        name: "delegates",
-        inputs: [{ name: "tokenId", type: "uint256" }],
-        outputs: [{ name: "", type: "address" }],
-        stateMutability: "view",
-    },
-    {
-        type: "function",
-        name: "delegateSetBy",
-        inputs: [{ name: "tokenId", type: "uint256" }],
-        outputs: [{ name: "", type: "address" }],
-        stateMutability: "view",
-    },
     {
         type: "function",
         name: "paused",
@@ -83,49 +39,65 @@ const CanvasABI = [
     },
 ] as const;
 
+function hydrateCanvasCaches(tokenId: number, state: IndexedCanvasState): CanvasInfo {
+    const actionPoints = Number(BigInt(state.actionPoints));
+    const customized = state.customized;
+    const info: CanvasInfo = {
+        actionPoints,
+        level: Math.floor(actionPoints / 10) + 1,
+        customized,
+        delegate: state.delegate ?? ZERO_ADDRESS,
+        delegateSetBy: state.delegateSetBy ?? ZERO_ADDRESS,
+    };
+
+    canvasInfoCache.set(tokenId, info);
+    isTransformedCache.set(tokenId, customized);
+    if (customized && state.latestTransformBitmap) {
+        transformDataCache.set(tokenId, hexToBytes(state.latestTransformBitmap));
+    }
+
+    return info;
+}
+
+async function getCanvasState(tokenId: number): Promise<IndexedCanvasState> {
+    const state = await getIndexedCanvasState(tokenId);
+    hydrateCanvasCaches(tokenId, state);
+    return state;
+}
+
 export async function isTransformed(tokenId: number): Promise<boolean> {
     if (!CANVAS_ENABLED) return false;
 
     const cached = isTransformedCache.get(tokenId);
     if (cached !== undefined) return cached;
 
-    const result = await publicClient.readContract({
-        address: CANVAS_STORAGE_ADDRESS!,
-        abi: CanvasStorageABI,
-        functionName: "isTransformed",
-        args: [BigInt(tokenId)],
-    });
-
-    isTransformedCache.set(tokenId, result);
-    return result;
+    const state = await getCanvasState(tokenId);
+    return state.customized;
 }
 
 export async function getTransformData(tokenId: number): Promise<Uint8Array> {
     if (!CANVAS_ENABLED) return EMPTY_BITMAP;
 
-    const transformed = await isTransformed(tokenId);
-    if (!transformed) return EMPTY_BITMAP;
-
     const cached = transformDataCache.get(tokenId);
     if (cached) return cached;
 
-    const data = await publicClient.readContract({
-        address: CANVAS_STORAGE_ADDRESS!,
-        abi: CanvasStorageABI,
-        functionName: "getTransformedImageData",
-        args: [BigInt(tokenId)],
-    });
+    const state = await getCanvasState(tokenId);
+    if (!state.customized) return EMPTY_BITMAP;
+    if (!state.latestTransformBitmap) {
+        throw new Error(`Missing transform bitmap for customized token ${tokenId}`);
+    }
 
-    const bytes = hexToBytes(data);
+    const bytes = hexToBytes(state.latestTransformBitmap);
     transformDataCache.set(tokenId, bytes);
     return bytes;
 }
 
 export async function getCompositedImageData(tokenId: number): Promise<Uint8Array> {
-    const original = await getImageData(tokenId);
-
-    const transformed = await isTransformed(tokenId);
-    if (!transformed) return original;
+    const [original, info] = await Promise.all([
+        getImageData(tokenId),
+        getCanvasInfo(tokenId),
+    ]);
+    if (!info.customized) return original;
 
     const transform = await getTransformData(tokenId);
     return composite(original, transform);
@@ -139,51 +111,8 @@ export async function getCanvasInfo(tokenId: number): Promise<CanvasInfo> {
     const cached = canvasInfoCache.get(tokenId);
     if (cached) return cached;
 
-    const results = await publicClient.multicall({
-        contracts: [
-            {
-                address: CANVAS_ADDRESS!,
-                abi: CanvasABI,
-                functionName: "actionPoints",
-                args: [BigInt(tokenId)],
-            },
-            {
-                address: CANVAS_ADDRESS!,
-                abi: CanvasABI,
-                functionName: "getLevel",
-                args: [BigInt(tokenId)],
-            },
-            {
-                address: CANVAS_ADDRESS!,
-                abi: CanvasABI,
-                functionName: "delegates",
-                args: [BigInt(tokenId)],
-            },
-            {
-                address: CANVAS_ADDRESS!,
-                abi: CanvasABI,
-                functionName: "delegateSetBy",
-                args: [BigInt(tokenId)],
-            },
-            {
-                address: CANVAS_STORAGE_ADDRESS!,
-                abi: CanvasStorageABI,
-                functionName: "isTransformed",
-                args: [BigInt(tokenId)],
-            },
-        ],
-    });
-
-    const info: CanvasInfo = {
-        actionPoints: Number(results[0].result ?? 0n),
-        level: Number(results[1].result ?? 1n),
-        customized: (results[4].result as boolean) ?? false,
-        delegate: (results[2].result as string) ?? ZERO_ADDRESS,
-        delegateSetBy: (results[3].result as string) ?? ZERO_ADDRESS,
-    };
-
-    canvasInfoCache.set(tokenId, info);
-    return info;
+    const state = await getIndexedCanvasState(tokenId);
+    return hydrateCanvasCaches(tokenId, state);
 }
 
 export interface CanvasStatus {
@@ -193,7 +122,13 @@ export interface CanvasStatus {
     tierMinPercents: [number, number, number];
 }
 
+let canvasStatusCache: { value: CanvasStatus; expiresAt: number } | undefined;
+
 export async function getCanvasStatus(): Promise<CanvasStatus> {
+    if (canvasStatusCache && canvasStatusCache.expiresAt > Date.now()) {
+        return canvasStatusCache.value;
+    }
+
     const results = await publicClient.multicall({
         contracts: [
             { address: CANVAS_ADDRESS!, abi: CanvasABI, functionName: "paused" },
@@ -206,12 +141,14 @@ export async function getCanvasStatus(): Promise<CanvasStatus> {
         ],
     });
 
-    return {
+    const status: CanvasStatus = {
         paused: (results[0].result as boolean) ?? false,
         maxBurnPercent: Number(results[1].result ?? 0n),
         tierThresholds: [Number(results[2].result ?? 0n), Number(results[3].result ?? 0n)],
         tierMinPercents: [Number(results[4].result ?? 0n), Number(results[5].result ?? 0n), Number(results[6].result ?? 0n)],
     };
+    canvasStatusCache = { value: status, expiresAt: Date.now() + CANVAS_STATUS_CACHE_TTL_MS };
+    return status;
 }
 
 function composite(original: Uint8Array, transform: Uint8Array): Uint8Array {

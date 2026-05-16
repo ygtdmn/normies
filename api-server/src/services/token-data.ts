@@ -1,56 +1,16 @@
 import { hexToBytes } from "viem";
-import { publicClient } from "./chain.js";
 import { imageDataCache, traitsCache, decodedTraitsCache } from "./cache.js";
-import { STORAGE_ADDRESS, NORMIES_ADDRESS } from "../config.js";
+import { getIndexedTokenData, getIndexedTokenDataCount } from "./ponder-data.js";
 import { decodeTraits } from "../lib/traits.js";
-
-const StorageABI = [
-    {
-        type: "function",
-        name: "getTokenRawImageData",
-        inputs: [{ name: "tokenId", type: "uint256" }],
-        outputs: [{ name: "", type: "bytes" }],
-        stateMutability: "view",
-    },
-    {
-        type: "function",
-        name: "getTokenTraits",
-        inputs: [{ name: "tokenId", type: "uint256" }],
-        outputs: [{ name: "", type: "bytes8" }],
-        stateMutability: "view",
-    },
-    {
-        type: "function",
-        name: "isTokenDataSet",
-        inputs: [{ name: "tokenId", type: "uint256" }],
-        outputs: [{ name: "", type: "bool" }],
-        stateMutability: "view",
-    },
-] as const;
-
-const NormiesABI = [
-    {
-        type: "function",
-        name: "totalSupply",
-        inputs: [],
-        outputs: [{ name: "", type: "uint256" }],
-        stateMutability: "view",
-    },
-] as const;
 
 export async function getImageData(tokenId: number): Promise<Uint8Array> {
     const cached = imageDataCache.get(tokenId);
     if (cached) return cached;
 
-    const data = await publicClient.readContract({
-        address: STORAGE_ADDRESS,
-        abi: StorageABI,
-        functionName: "getTokenRawImageData",
-        args: [BigInt(tokenId)],
-    });
-
-    const bytes = hexToBytes(data);
+    const data = await getIndexedTokenData(tokenId);
+    const bytes = hexToBytes(data.rawImageData);
     imageDataCache.set(tokenId, bytes);
+    traitsCache.set(tokenId, data.traitsHex);
     return bytes;
 }
 
@@ -58,25 +18,26 @@ export async function getTraitsHex(tokenId: number): Promise<`0x${string}`> {
     const cached = traitsCache.get(tokenId);
     if (cached) return cached;
 
-    const data = await publicClient.readContract({
-        address: STORAGE_ADDRESS,
-        abi: StorageABI,
-        functionName: "getTokenTraits",
-        args: [BigInt(tokenId)],
-    });
-
-    traitsCache.set(tokenId, data);
-    return data;
+    const data = await getIndexedTokenData(tokenId);
+    traitsCache.set(tokenId, data.traitsHex);
+    imageDataCache.set(tokenId, hexToBytes(data.rawImageData));
+    return data.traitsHex;
 }
 
 export async function getTokenData(
     tokenId: number
 ): Promise<{ imageData: Uint8Array; traitsHex: `0x${string}` }> {
-    const [imageData, traitsHex] = await Promise.all([
-        getImageData(tokenId),
-        getTraitsHex(tokenId),
-    ]);
-    return { imageData, traitsHex };
+    const cachedImage = imageDataCache.get(tokenId);
+    const cachedTraits = traitsCache.get(tokenId);
+    if (cachedImage && cachedTraits) {
+        return { imageData: cachedImage, traitsHex: cachedTraits };
+    }
+
+    const data = await getIndexedTokenData(tokenId);
+    const imageData = hexToBytes(data.rawImageData);
+    imageDataCache.set(tokenId, imageData);
+    traitsCache.set(tokenId, data.traitsHex);
+    return { imageData, traitsHex: data.traitsHex };
 }
 
 /**
@@ -97,19 +58,15 @@ export async function getDecodedTraits(tokenId: number): Promise<Record<string, 
 }
 
 export async function isTokenDataSet(tokenId: number): Promise<boolean> {
-    return publicClient.readContract({
-        address: STORAGE_ADDRESS,
-        abi: StorageABI,
-        functionName: "isTokenDataSet",
-        args: [BigInt(tokenId)],
-    });
+    try {
+        await getIndexedTokenData(tokenId);
+        return true;
+    } catch (err) {
+        if (err instanceof Error && err.message.startsWith("Ponder API 404:")) return false;
+        throw err;
+    }
 }
 
 export async function getTotalSupply(): Promise<number> {
-    const supply = await publicClient.readContract({
-        address: NORMIES_ADDRESS,
-        abi: NormiesABI,
-        functionName: "totalSupply",
-    });
-    return Number(supply);
+    return getIndexedTokenDataCount();
 }

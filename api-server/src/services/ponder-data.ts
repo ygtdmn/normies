@@ -23,6 +23,26 @@ async function ponderFetch<T>(path: string): Promise<T> {
     return res.json() as Promise<T>;
 }
 
+async function ponderPost<T>(path: string, body: unknown): Promise<T> {
+    let res: Response;
+    try {
+        res = await fetch(`${PONDER_API_URL}${path}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(15_000),
+        });
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(`Ponder API request failed: ${message}`);
+    }
+    if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Ponder API ${res.status}: ${text}`);
+    }
+    return res.json() as Promise<T>;
+}
+
 // ──────────────────────────────────────────────
 //  Types
 // ──────────────────────────────────────────────
@@ -74,7 +94,29 @@ export interface StatsData {
     totalBurnCommitments: number;
     totalBurnedTokens: number;
     totalTransforms: number;
+    totalTokenData: number;
     totalActionPointsDistributed: string;
+}
+
+export interface IndexedTokenData {
+    tokenId: string;
+    rawImageData: `0x${string}`;
+    traitsHex: `0x${string}`;
+    blockNumber: string;
+    timestamp: string;
+    txHash: `0x${string}`;
+}
+
+export interface IndexedCanvasState {
+    tokenId: string;
+    actionPoints: string;
+    customized: boolean;
+    delegate: `0x${string}`;
+    delegateSetBy: `0x${string}`;
+    latestTransformBitmap: `0x${string}` | null;
+    blockNumber: string;
+    timestamp: string;
+    txHash: `0x${string}`;
 }
 
 // ──────────────────────────────────────────────
@@ -92,6 +134,41 @@ export async function getTokenOwner(tokenId: number): Promise<TokenOwnerData> {
 
 export async function getTokensByHolder(address: string): Promise<string[]> {
     return ponderFetch(`/tokens/${address.toLowerCase()}`);
+}
+
+// ──────────────────────────────────────────────
+//  Token data & Canvas state
+// ──────────────────────────────────────────────
+
+export async function getIndexedTokenData(tokenId: number): Promise<IndexedTokenData> {
+    return ponderFetch(`/token-data/${tokenId}`);
+}
+
+export async function getIndexedTokenDataBatch(
+    tokenIds: (number | bigint | string)[],
+): Promise<Record<string, IndexedTokenData>> {
+    const res = await ponderPost<{ tokens: Record<string, IndexedTokenData> }>("/token-data/batch", {
+        tokenIds: tokenIds.map((tokenId) => tokenId.toString()),
+    });
+    return res.tokens ?? {};
+}
+
+export async function getIndexedTokenDataCount(): Promise<number> {
+    const res = await ponderFetch<{ count: number }>("/token-data/count");
+    return res.count;
+}
+
+export async function getIndexedCanvasState(tokenId: number): Promise<IndexedCanvasState> {
+    return ponderFetch(`/canvas-state/${tokenId}`);
+}
+
+export async function getIndexedCanvasStateBatch(
+    tokenIds: (number | bigint | string)[],
+): Promise<Record<string, IndexedCanvasState>> {
+    const res = await ponderPost<{ states: Record<string, IndexedCanvasState> }>("/canvas-state/batch", {
+        tokenIds: tokenIds.map((tokenId) => tokenId.toString()),
+    });
+    return res.states ?? {};
 }
 
 // ──────────────────────────────────────────────
@@ -192,22 +269,11 @@ export async function getAgentBindings(
     tokenContract: string,
     tokenIds: (number | bigint | string)[],
 ): Promise<Record<string, AgentBindingData>> {
-    const body = JSON.stringify({
+    const res = await ponderPost<{ bindings: Record<string, AgentBindingData> }>("/agent-binding/batch", {
         tokenContract: tokenContract.toLowerCase(),
         tokenIds: tokenIds.map((t) => t.toString()),
     });
-    const res = await fetch(`${PONDER_API_URL}/agent-binding/batch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body,
-        signal: AbortSignal.timeout(15_000),
-    });
-    if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(`Ponder API ${res.status}: ${txt}`);
-    }
-    const json = (await res.json()) as { bindings: Record<string, AgentBindingData> };
-    return json.bindings ?? {};
+    return res.bindings ?? {};
 }
 
 export async function getAgentBindingByAgentId(
