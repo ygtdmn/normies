@@ -1,4 +1,9 @@
 import { PONDER_API_URL } from "../config.js";
+import {
+    agentBindingCache,
+    agentBindingNullTtlMs,
+    transformHistoryCache,
+} from "./cache.js";
 
 async function ponderFetch<T>(path: string): Promise<T> {
     const res = await fetch(`${PONDER_API_URL}${path}`, {
@@ -116,6 +121,16 @@ export async function getBurnedToken(tokenId: number): Promise<BurnedTokenData[]
 // ──────────────────────────────────────────────
 
 export async function getTransformHistory(tokenId: number, limit = 50, offset = 0): Promise<TransformData[]> {
+    // Only the default page (offset=0, full limit) goes through cache — paginated
+    // callers are rare and benefit less from a hit-rate boost than they suffer
+    // from cache pollution.
+    if (offset === 0 && limit === 50) {
+        const cached = transformHistoryCache.get(tokenId) as TransformData[] | undefined;
+        if (cached) return cached;
+        const fresh = await ponderFetch<TransformData[]>(`/transforms/${tokenId}?limit=${limit}&offset=${offset}`);
+        transformHistoryCache.set(tokenId, fresh);
+        return fresh;
+    }
     return ponderFetch(`/transforms/${tokenId}?limit=${limit}&offset=${offset}`);
 }
 
@@ -155,9 +170,15 @@ export async function getAgentBinding(
     tokenContract: string,
     tokenId: number | bigint | string,
 ): Promise<AgentBindingData | null> {
+    const key = `t:${tokenContract.toLowerCase()}:${tokenId.toString()}`;
+    const cached = agentBindingCache.get(key);
+    if (cached) return cached.v as AgentBindingData | null;
     const res = await ponderFetch<{ binding: AgentBindingData | null }>(
         `/agent-binding/${tokenContract.toLowerCase()}/${tokenId.toString()}`,
     );
+    // Bindings are immutable once seen — long TTL for hits. Misses get the
+    // short TTL so newly registered agents stop 404ing quickly.
+    agentBindingCache.set(key, { v: res.binding }, res.binding ? undefined : { ttl: agentBindingNullTtlMs });
     return res.binding;
 }
 
@@ -186,9 +207,13 @@ export async function getAgentBindings(
 export async function getAgentBindingByAgentId(
     agentId: number | bigint | string,
 ): Promise<AgentBindingData | null> {
+    const key = `a:${agentId.toString()}`;
+    const cached = agentBindingCache.get(key);
+    if (cached) return cached.v as AgentBindingData | null;
     const res = await ponderFetch<{ binding: AgentBindingData | null }>(
         `/agent/${agentId.toString()}`,
     );
+    agentBindingCache.set(key, { v: res.binding }, res.binding ? undefined : { ttl: agentBindingNullTtlMs });
     return res.binding;
 }
 

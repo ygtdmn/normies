@@ -1,12 +1,11 @@
 import { Hono } from "hono";
-import { agentsPrisma } from "../lib/agents-db.js";
 import { parseTokenId } from "../lib/validation.js";
 import {
     getCanvasInfo,
     getCompositedImageData,
     getTransformData,
 } from "../services/canvas-data.js";
-import { getImageData } from "../services/token-data.js";
+import { getDecodedTraits, getImageData } from "../services/token-data.js";
 import { computePixelDiff } from "../lib/diff.js";
 import { renderSvg } from "../lib/svg.js";
 import {
@@ -17,20 +16,82 @@ import {
     getAllAgentBindings,
 } from "../services/ponder-data.js";
 import { buildLivePersona, buildAgentIdentity } from "../services/persona-live.js";
-import { reconcileTokenId } from "../services/agents-reconcile.js";
 import { personaToDescription } from "../lib/persona.js";
-import { NORMIES_ADDRESS, PONDER_ENABLED } from "../config.js";
+import { agentResponseCache } from "../services/cache.js";
+import { CHAIN_ID, NORMIES_ADDRESS, PONDER_ENABLED } from "../config.js";
+
+// Mint-time immutable traits exposed in the /info response. Mutable canvas-
+// derived state lives under the `canvas` field instead.
+const STATIC_TRAITS = new Set([
+    "Type",
+    "Gender",
+    "Age",
+    "Hair Style",
+    "Facial Feature",
+    "Expression",
+    "Eyes",
+    "Accessory",
+]);
+
+function staticAttributes(all: Record<string, string>): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const k of Object.keys(all)) {
+        if (STATIC_TRAITS.has(k)) out[k] = all[k];
+    }
+    return out;
+}
+
+interface AgentRow {
+    tokenId: bigint;
+    agentId: bigint;
+    chainId: number;
+    txHash: string;
+    registeredBy: string;
+    registeredAt: Date;
+}
 
 /**
- * Read the agentsPrisma row for `tokenId`, falling back to a single-token
- * reconciliation against the Ponder indexer if the row is missing or still
- * pending. This is the read path's safety net for users who registered
- * on-chain but never finished the lab's confirmation handshake.
+ * Memoize a route handler's JSON body per (route, tokenId) so repeated hits
+ * within the response-cache TTL skip persona generation entirely. The 404
+ * sentinel keeps non-existent agents from hammering loadAgentRow.
  */
-async function loadAgentRow(tokenId: bigint) {
-    const row = await agentsPrisma.agent.findUnique({ where: { tokenId } });
-    if (row && row.status === "registered" && row.agentId !== null) return row;
-    return reconcileTokenId(tokenId);
+async function cachedAgentResponse<T>(
+    routeKey: string,
+    tokenId: number | string,
+    build: () => Promise<{ body: T; status?: number } | null>,
+): Promise<{ body: T | { error: string }; status: number }> {
+    const cacheKey = `${routeKey}:${tokenId}`;
+    const cached = agentResponseCache.get(cacheKey) as { body: T | { error: string }; status: number } | undefined;
+    if (cached) return cached;
+    const result = await build();
+    const out = result
+        ? { body: result.body, status: result.status ?? 200 }
+        : { body: { error: "Agent not found" }, status: 404 };
+    agentResponseCache.set(cacheKey, out);
+    return out;
+}
+
+/**
+ * Resolve a Normie's agent identity from the indexer's AgentBound view. Returns
+ * null if the token has not been registered (or the indexer can't reach us).
+ */
+async function loadAgentRow(tokenId: bigint): Promise<AgentRow | null> {
+    if (!PONDER_ENABLED) return null;
+    let binding;
+    try {
+        binding = await getAgentBinding(NORMIES_ADDRESS, tokenId);
+    } catch {
+        return null;
+    }
+    if (!binding) return null;
+    return {
+        tokenId,
+        agentId: BigInt(binding.agentId),
+        chainId: CHAIN_ID,
+        txHash: binding.txHash,
+        registeredBy: binding.registeredBy,
+        registeredAt: new Date(Number(binding.timestamp) * 1000),
+    };
 }
 
 const agents = new Hono();
@@ -67,36 +128,40 @@ agents.get("/metadata/:tokenId", async (c) => {
     const result = parseTokenId(c.req.param("tokenId"));
     if ("error" in result) return c.json({ error: result.error }, 400);
 
-    const row = await loadAgentRow(BigInt(result.tokenId));
-    if (!row) return c.json({ error: "Agent not found" }, 404);
-
-    const persona = await buildLivePersona(result.tokenId);
-    const base = publicBase();
-    const updatedAt = Math.floor(row.updatedAt.getTime() / 1000);
+    const { body, status } = await cachedAgentResponse("metadata", result.tokenId, async () => {
+        const row = await loadAgentRow(BigInt(result.tokenId));
+        if (!row) return null;
+        const persona = await buildLivePersona(result.tokenId);
+        const base = publicBase();
+        const updatedAt = Math.floor(row.registeredAt.getTime() / 1000);
+        return {
+            body: {
+                type: METADATA_TYPE_URL,
+                name: fullAgentName(row.tokenId, persona.name),
+                description: personaToDescription(persona),
+                image: `${base}/agents/image/${row.tokenId.toString()}`,
+                services: [
+                    {
+                        name: "web",
+                        endpoint: `${base}/agents/info/${row.tokenId.toString()}`,
+                        version: "1",
+                    },
+                    {
+                        name: "A2A",
+                        endpoint: agentCardUrl(row.tokenId),
+                        version: A2A_VERSION,
+                    },
+                ],
+                active: true,
+                x402Support: false,
+                updatedAt,
+            },
+        };
+    });
 
     c.header("Cache-Control", "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
     c.header("Access-Control-Allow-Origin", "*");
-    return c.json({
-        type: METADATA_TYPE_URL,
-        name: fullAgentName(row.tokenId, persona.name),
-        description: personaToDescription(persona),
-        image: `${base}/agents/image/${row.tokenId.toString()}`,
-        services: [
-            {
-                name: "web",
-                endpoint: `${base}/agents/info/${row.tokenId.toString()}`,
-                version: "1",
-            },
-            {
-                name: "A2A",
-                endpoint: agentCardUrl(row.tokenId),
-                version: A2A_VERSION,
-            },
-        ],
-        active: row.status === "registered",
-        x402Support: false,
-        updatedAt,
-    });
+    return c.json(body, status as 200 | 404);
 });
 
 // ──────────────────────────────────────────────────────────────────────
@@ -149,10 +214,11 @@ agents.get("/identity/:tokenId", async (c) => {
  * /info/:tokenId and /by-agent-id/:agentId/info so both surfaces speak the
  * same shape and stay in lockstep when fields evolve.
  */
-async function buildAgentInfoBody(row: NonNullable<Awaited<ReturnType<typeof loadAgentRow>>>, tokenId: number) {
-    const [persona, canvasInfo] = await Promise.all([
+async function buildAgentInfoBody(row: AgentRow, tokenId: number) {
+    const [persona, canvasInfo, attributes] = await Promise.all([
         buildLivePersona(tokenId),
         getCanvasInfo(tokenId),
+        getDecodedTraits(tokenId),
     ]);
     let diff: { addedCount: number; removedCount: number; netChange: number } | null = null;
     if (canvasInfo.customized) {
@@ -168,7 +234,7 @@ async function buildAgentInfoBody(row: NonNullable<Awaited<ReturnType<typeof loa
     }
     return {
         tokenId: row.tokenId.toString(),
-        agentId: row.agentId?.toString() ?? null,
+        agentId: row.agentId.toString(),
         chainId: row.chainId,
         name: persona.name,
         type: persona.type,
@@ -179,7 +245,10 @@ async function buildAgentInfoBody(row: NonNullable<Awaited<ReturnType<typeof loa
         communicationStyle: persona.communicationStyle,
         quirks: persona.quirks,
         systemPrompt: persona.systemPrompt,
-        traits: row.traits,
+        traits: {
+            name: `Normie #${row.tokenId.toString()}`,
+            attributes: staticAttributes(attributes),
+        },
         canvas: {
             level: canvasInfo.level,
             actionPoints: canvasInfo.actionPoints,
@@ -187,7 +256,7 @@ async function buildAgentInfoBody(row: NonNullable<Awaited<ReturnType<typeof loa
             diff,
         },
         registeredBy: row.registeredBy,
-        registeredAt: row.createdAt.toISOString(),
+        registeredAt: row.registeredAt.toISOString(),
         txHash: row.txHash,
         interactions: { status: "coming_soon" },
         mcp: { status: "coming_soon" },
@@ -202,15 +271,15 @@ agents.get("/info/:tokenId", async (c) => {
     const result = parseTokenId(c.req.param("tokenId"));
     if ("error" in result) return c.json({ error: result.error }, 400);
 
-    const row = await loadAgentRow(BigInt(result.tokenId));
-    if (!row || row.status !== "registered") {
-        return c.json({ error: "Agent not found" }, 404);
-    }
+    const { body, status } = await cachedAgentResponse("info", result.tokenId, async () => {
+        const row = await loadAgentRow(BigInt(result.tokenId));
+        if (!row) return null;
+        return { body: await buildAgentInfoBody(row, result.tokenId) };
+    });
 
-    const body = await buildAgentInfoBody(row, result.tokenId);
     c.header("Cache-Control", "public, max-age=30, s-maxage=60, stale-while-revalidate=300");
     c.header("Access-Control-Allow-Origin", "*");
-    return c.json(body);
+    return c.json(body, status as 200 | 404);
 });
 
 // ──────────────────────────────────────────────────────────────────────
@@ -242,7 +311,7 @@ agents.get("/by-agent-id/:agentId/info", async (c) => {
 
     const tokenId = BigInt(binding.tokenId);
     const row = await loadAgentRow(tokenId);
-    if (!row || row.status !== "registered") {
+    if (!row) {
         return c.json({ error: "Agent not found" }, 404);
     }
 
@@ -321,8 +390,6 @@ agents.get("/list", async (c) => {
 
 // ──────────────────────────────────────────────────────────────────────
 // /count — total registered Normies agents, used by the gallery header.
-// Source is Ponder, not agentsPrisma, so newly registered agents are
-// counted the moment the indexer sees the AgentBound event.
 // ──────────────────────────────────────────────────────────────────────
 agents.get("/count", async (c) => {
     if (!PONDER_ENABLED) {
@@ -353,57 +420,59 @@ agents.get("/agent-card/:tokenId", async (c) => {
     const result = parseTokenId(c.req.param("tokenId"));
     if ("error" in result) return c.json({ error: result.error }, 400);
 
-    const row = await loadAgentRow(BigInt(result.tokenId));
-    if (!row || row.status !== "registered") {
-        return c.json({ error: "Agent not found" }, 404);
-    }
-
-    const persona = await buildLivePersona(result.tokenId);
-    const base = publicBase();
-    const tokenIdStr = row.tokenId.toString();
-    const lowerType = persona.type.toLowerCase();
+    const { body, status } = await cachedAgentResponse("agent-card", result.tokenId, async () => {
+        const row = await loadAgentRow(BigInt(result.tokenId));
+        if (!row) return null;
+        const persona = await buildLivePersona(result.tokenId);
+        const base = publicBase();
+        const tokenIdStr = row.tokenId.toString();
+        const lowerType = persona.type.toLowerCase();
+        return {
+            body: {
+                name: persona.name,
+                description: personaToDescription(persona),
+                supportedInterfaces: [
+                    {
+                        url: `${base}/agents/a2a/${tokenIdStr}`,
+                        protocolBinding: "HTTP+JSON",
+                        protocolVersion: "1.0",
+                    },
+                ],
+                provider: {
+                    organization: "Normies",
+                    url: "https://normies.art",
+                },
+                iconUrl: `${base}/agents/image/${tokenIdStr}`,
+                version: "1.0.0",
+                documentationUrl: `${base}/docs`,
+                capabilities: {
+                    streaming: false,
+                    pushNotifications: false,
+                    stateTransitionHistory: false,
+                    extendedAgentCard: false,
+                },
+                securitySchemes: {},
+                security: [],
+                defaultInputModes: ["text/plain"],
+                defaultOutputModes: ["text/plain"],
+                skills: [
+                    {
+                        id: "converse",
+                        name: `Converse with ${persona.name}`,
+                        description: persona.tagline,
+                        tags: [lowerType, "conversation", "erc-8004"],
+                        examples: [persona.greeting],
+                        inputModes: ["text/plain"],
+                        outputModes: ["text/plain"],
+                    },
+                ],
+            },
+        };
+    });
 
     c.header("Cache-Control", "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
     c.header("Access-Control-Allow-Origin", "*");
-    return c.json({
-        name: persona.name,
-        description: personaToDescription(persona),
-        supportedInterfaces: [
-            {
-                url: `${base}/agents/a2a/${tokenIdStr}`,
-                protocolBinding: "HTTP+JSON",
-                protocolVersion: "1.0",
-            },
-        ],
-        provider: {
-            organization: "Normies",
-            url: "https://normies.art",
-        },
-        iconUrl: `${base}/agents/image/${tokenIdStr}`,
-        version: "1.0.0",
-        documentationUrl: `${base}/docs`,
-        capabilities: {
-            streaming: false,
-            pushNotifications: false,
-            stateTransitionHistory: false,
-            extendedAgentCard: false,
-        },
-        securitySchemes: {},
-        security: [],
-        defaultInputModes: ["text/plain"],
-        defaultOutputModes: ["text/plain"],
-        skills: [
-            {
-                id: "converse",
-                name: `Converse with ${persona.name}`,
-                description: persona.tagline,
-                tags: [lowerType, "conversation", "erc-8004"],
-                examples: [persona.greeting],
-                inputModes: ["text/plain"],
-                outputModes: ["text/plain"],
-            },
-        ],
-    });
+    return c.json(body, status as 200 | 404);
 });
 
 agents.get("/image/:tokenId", async (c) => {
