@@ -5,8 +5,7 @@
  *
  * Trait reads are cached for the lifetime of the process (traits are
  * immutable post-mint); canvas reads share the existing short-TTL canvas
- * caches; transformation history comes from Ponder when available, falling
- * back to a single-entry estimate if the indexer is unreachable.
+ * caches; transformation history comes from the required Ponder indexer.
  */
 
 import {
@@ -19,7 +18,6 @@ import { computePixelDiff } from "../lib/diff.js";
 import { getDecodedTraits, getImageData } from "./token-data.js";
 import { getCanvasInfo, getTransformData } from "./canvas-data.js";
 import { getTransformHistory } from "./ponder-data.js";
-import { PONDER_ENABLED } from "../config.js";
 
 export async function buildLivePersona(tokenId: number): Promise<Persona> {
     const [attributes, canvas] = await Promise.all([
@@ -41,23 +39,16 @@ export async function buildLivePersona(tokenId: number): Promise<Persona> {
         }
     }
 
-    let versions: PersonaVersion[] = [];
-    if (PONDER_ENABLED) {
-        try {
-            const history = await getTransformHistory(tokenId);
-            versions = history.map((t) => ({
-                version: t.version ?? 0,
-                changeCount: t.changeCount,
-                newPixelCount: t.newPixelCount,
-                transformer: t.transformer,
-                blockNumber: t.blockNumber,
-                timestamp: t.timestamp,
-                txHash: t.txHash,
-            }));
-        } catch {
-            // Indexer unreachable — falls back to customized ? 1 : 0 below.
-        }
-    }
+    const history = await getTransformHistory(tokenId);
+    const versions: PersonaVersion[] = history.map((t) => ({
+        version: t.version ?? 0,
+        changeCount: t.changeCount,
+        newPixelCount: t.newPixelCount,
+        transformer: t.transformer,
+        blockNumber: t.blockNumber,
+        timestamp: t.timestamp,
+        txHash: t.txHash,
+    }));
 
     const transformationCount = versions.length || (canvas.customized ? 1 : 0);
 

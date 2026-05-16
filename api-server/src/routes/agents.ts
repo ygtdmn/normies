@@ -18,7 +18,7 @@ import {
 import { buildLivePersona, buildAgentIdentity } from "../services/persona-live.js";
 import { personaToDescription } from "../lib/persona.js";
 import { agentResponseCache } from "../services/cache.js";
-import { CHAIN_ID, NORMIES_ADDRESS, PONDER_ENABLED } from "../config.js";
+import { CHAIN_ID, NORMIES_ADDRESS } from "../config.js";
 
 // Mint-time immutable traits exposed in the /info response. Mutable canvas-
 // derived state lives under the `canvas` field instead.
@@ -73,16 +73,10 @@ async function cachedAgentResponse<T>(
 
 /**
  * Resolve a Normie's agent identity from the indexer's AgentBound view. Returns
- * null if the token has not been registered (or the indexer can't reach us).
+ * null only if the token has not been registered.
  */
 async function loadAgentRow(tokenId: bigint): Promise<AgentRow | null> {
-    if (!PONDER_ENABLED) return null;
-    let binding;
-    try {
-        binding = await getAgentBinding(NORMIES_ADDRESS, tokenId);
-    } catch {
-        return null;
-    }
+    const binding = await getAgentBinding(NORMIES_ADDRESS, tokenId);
     if (!binding) return null;
     return {
         tokenId,
@@ -288,9 +282,6 @@ agents.get("/info/:tokenId", async (c) => {
 // Lets the lab's agent detail page do a single round trip instead of two.
 // ──────────────────────────────────────────────────────────────────────
 agents.get("/by-agent-id/:agentId/info", async (c) => {
-    if (!PONDER_ENABLED) {
-        return c.json({ error: "agentId lookup requires PONDER_API_URL to be configured" }, 503);
-    }
     let agentId: bigint;
     try {
         agentId = BigInt(c.req.param("agentId"));
@@ -331,9 +322,6 @@ agents.get("/by-agent-id/:agentId/info", async (c) => {
 //   GET /agents/list?sort=newest|oldest&limit=N&cursor=<agentId>
 // ──────────────────────────────────────────────────────────────────────
 agents.get("/list", async (c) => {
-    if (!PONDER_ENABLED) {
-        return c.json({ error: "/list requires PONDER_API_URL to be configured" }, 503);
-    }
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 24), 1), 100);
     const sortParam = c.req.query("sort");
     const sort = sortParam === "oldest" ? "asc" : "desc";
@@ -392,9 +380,6 @@ agents.get("/list", async (c) => {
 // /count — total registered Normies agents, used by the gallery header.
 // ──────────────────────────────────────────────────────────────────────
 agents.get("/count", async (c) => {
-    if (!PONDER_ENABLED) {
-        return c.json({ error: "/count requires PONDER_API_URL to be configured" }, 503);
-    }
     try {
         const total = await countAgentBindings({ tokenContract: NORMIES_ADDRESS });
         c.header("Cache-Control", "public, max-age=30, s-maxage=60, stale-while-revalidate=300");
@@ -496,22 +481,13 @@ agents.get("/image/:tokenId", async (c) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────
-// Agent-binding lookups, backed by the Ponder indexer (not public).
+// Agent-binding lookups, backed by the required Ponder indexer (not public).
 // These let downstream apps (incl. the lab) avoid direct on-chain
 // eth_getLogs / agentIdForBinding calls.
 // ──────────────────────────────────────────────────────────────────────
 
-function requirePonder(c: { json: (data: unknown, status: number) => Response }) {
-    if (!PONDER_ENABLED) {
-        return c.json({ error: "Binding lookups require PONDER_API_URL to be configured" }, 503);
-    }
-    return null;
-}
-
 // GET /agents/binding/:tokenId — Normies-only single-token lookup.
 agents.get("/binding/:tokenId", async (c) => {
-    const fail = requirePonder(c);
-    if (fail) return fail;
     const result = parseTokenId(c.req.param("tokenId"));
     if ("error" in result) return c.json({ error: result.error }, 400);
 
@@ -532,9 +508,6 @@ agents.get("/binding/:tokenId", async (c) => {
 //   body: { tokenIds: (string|number)[] }
 //   returns: { bindings: { [tokenId]: AgentBinding } }
 agents.post("/binding/batch", async (c) => {
-    const fail = requirePonder(c);
-    if (fail) return fail;
-
     const body = (await c.req.json().catch(() => ({}))) as {
         tokenIds?: (string | number)[];
     };
@@ -557,8 +530,6 @@ agents.post("/binding/batch", async (c) => {
 
 // GET /agents/by-agent-id/:agentId — reverse lookup (agentId → token).
 agents.get("/by-agent-id/:agentId", async (c) => {
-    const fail = requirePonder(c);
-    if (fail) return fail;
     let agentId: bigint;
     try {
         agentId = BigInt(c.req.param("agentId"));

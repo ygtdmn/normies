@@ -30,9 +30,11 @@ export const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX ?? 60);
 // Internal bypass secret (unset = bypass disabled)
 export const INTERNAL_SECRET = process.env.INTERNAL_SECRET || undefined;
 
-// Ponder indexer API (required for history endpoints)
-export const PONDER_API_URL = process.env.PONDER_API_URL || undefined;
-export const PONDER_ENABLED = !!PONDER_API_URL;
+// Ponder indexer API (required for API server startup)
+if (!process.env.PONDER_API_URL) {
+    throw new Error("PONDER_API_URL must be configured");
+}
+export const PONDER_API_URL = process.env.PONDER_API_URL;
 
 // Chain we read against. Defaults to mainnet to match the hardcoded
 // NORMIES_ADDRESS/STORAGE_ADDRESS above.

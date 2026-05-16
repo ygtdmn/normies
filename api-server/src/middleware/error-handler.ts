@@ -9,5 +9,9 @@ export const errorHandler: ErrorHandler = (err, c) => {
         return c.json({ error: "Token not found or data not set" }, 404);
     }
 
+    if (message.startsWith("Ponder API")) {
+        return c.json({ error: message }, 502);
+    }
+
     return c.json({ error: "Internal server error" }, 500);
 };

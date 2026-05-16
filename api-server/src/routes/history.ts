@@ -5,7 +5,6 @@ import { imageDataToPixelString } from "../lib/pixels.js";
 import { renderSvg } from "../lib/svg.js";
 import { svgToPng } from "../lib/png.js";
 import { getImageData } from "../services/token-data.js";
-import { PONDER_ENABLED } from "../config.js";
 import {
     getBurns,
     getBurnCommitment,
@@ -19,13 +18,6 @@ import {
 } from "../services/ponder-data.js";
 
 const history = new Hono();
-
-function requirePonder(c: { json: (data: unknown, status: number) => Response }) {
-    if (!PONDER_ENABLED) {
-        return c.json({ error: "History features require PONDER_API_URL to be configured" }, 503);
-    }
-    return null;
-}
 
 function parsePagination(c: { req: { query: (key: string) => string | undefined } }) {
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50), 1), 100);
@@ -46,31 +38,23 @@ function compositeBuffers(original: Uint8Array, transform: Uint8Array): Uint8Arr
 // ──────────────────────────────────────────────
 
 history.get("/burns", async (c) => {
-    const check = requirePonder(c);
-    if (check) return check;
     const { limit, offset } = parsePagination(c);
     const burns = await getBurns(limit, offset);
     return c.json(burns);
 });
 
 history.get("/burns/:commitId", async (c) => {
-    const check = requirePonder(c);
-    if (check) return check;
     const commitment = await getBurnCommitment(c.req.param("commitId"));
     return c.json(commitment);
 });
 
 history.get("/burns/address/:address", async (c) => {
-    const check = requirePonder(c);
-    if (check) return check;
     const { limit, offset } = parsePagination(c);
     const burns = await getBurnsForAddress(c.req.param("address"), limit, offset);
     return c.json(burns);
 });
 
 history.get("/burns/receiver/:tokenId", async (c) => {
-    const check = requirePonder(c);
-    if (check) return check;
     const result = parseTokenId(c.req.param("tokenId"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const { limit, offset } = parsePagination(c);
@@ -83,16 +67,12 @@ history.get("/burns/receiver/:tokenId", async (c) => {
 // ──────────────────────────────────────────────
 
 history.get("/burned-tokens", async (c) => {
-    const check = requirePonder(c);
-    if (check) return check;
     const { limit, offset } = parsePagination(c);
     const tokens = await getBurnedTokens(limit, offset);
     return c.json(tokens);
 });
 
 history.get("/burned/:tokenId", async (c) => {
-    const check = requirePonder(c);
-    if (check) return check;
     const result = parseTokenId(c.req.param("tokenId"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const burnInfo = await getBurnedToken(result.tokenId);
@@ -122,8 +102,6 @@ history.get("/burned/:tokenId/image.png", async (c) => {
 // ──────────────────────────────────────────────
 
 history.get("/normie/:id/versions", async (c) => {
-    const check = requirePonder(c);
-    if (check) return check;
     const result = parseTokenId(c.req.param("id"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const { limit, offset } = parsePagination(c);
@@ -142,8 +120,6 @@ history.get("/normie/:id/versions", async (c) => {
 });
 
 history.get("/normie/:id/version/:version/pixels", async (c) => {
-    const check = requirePonder(c);
-    if (check) return check;
     const result = parseTokenId(c.req.param("id"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const version = Number(c.req.param("version"));
@@ -161,8 +137,6 @@ history.get("/normie/:id/version/:version/pixels", async (c) => {
 });
 
 history.get("/normie/:id/version/:version/image.svg", async (c) => {
-    const check = requirePonder(c);
-    if (check) return check;
     const result = parseTokenId(c.req.param("id"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const version = Number(c.req.param("version"));
@@ -180,8 +154,6 @@ history.get("/normie/:id/version/:version/image.svg", async (c) => {
 });
 
 history.get("/normie/:id/version/:version/image.png", async (c) => {
-    const check = requirePonder(c);
-    if (check) return check;
     const result = parseTokenId(c.req.param("id"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const version = Number(c.req.param("version"));
@@ -204,8 +176,6 @@ history.get("/normie/:id/version/:version/image.png", async (c) => {
 // ──────────────────────────────────────────────
 
 history.get("/stats", async (c) => {
-    const check = requirePonder(c);
-    if (check) return check;
     const stats = await getStats();
     return c.json(stats);
 });

@@ -8,19 +8,16 @@ import { renderSvg } from "../lib/svg.js";
 import { svgToPng } from "../lib/png.js";
 import { buildMetadata } from "../lib/metadata.js";
 import { computePixelDiff } from "../lib/diff.js";
-import { CANVAS_ENABLED, PONDER_ENABLED } from "../config.js";
+import { CANVAS_ENABLED } from "../config.js";
 import { getTokenOwner } from "../services/ponder-data.js";
 
 const normie = new Hono();
 
 // ──────────────────────────────────────────────
-//  Ownership (requires Ponder indexer)
+//  Ownership (Ponder indexer-backed)
 // ──────────────────────────────────────────────
 
 normie.get("/:id/owner", async (c) => {
-    if (!PONDER_ENABLED) {
-        return c.json({ error: "Ownership lookup requires PONDER_API_URL to be configured" }, 503);
-    }
     const result = parseTokenId(c.req.param("id"));
     if ("error" in result) return c.json({ error: result.error }, 400);
 

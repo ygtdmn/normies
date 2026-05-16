@@ -6,10 +6,16 @@ import {
 } from "./cache.js";
 
 async function ponderFetch<T>(path: string): Promise<T> {
-    const res = await fetch(`${PONDER_API_URL}${path}`, {
-        headers: { "Accept": "application/json" },
-        signal: AbortSignal.timeout(15_000),
-    });
+    let res: Response;
+    try {
+        res = await fetch(`${PONDER_API_URL}${path}`, {
+            headers: { "Accept": "application/json" },
+            signal: AbortSignal.timeout(15_000),
+        });
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(`Ponder API request failed: ${message}`);
+    }
     if (!res.ok) {
         const body = await res.text().catch(() => "");
         throw new Error(`Ponder API ${res.status}: ${body}`);
