@@ -11,15 +11,6 @@ const chainId = Number(requiredEnv("PONDER_CHAIN_ID"));
 const chainName = chainId === 1 ? "mainnet" : "sepolia";
 const startBlock = Number(requiredEnv("PONDER_START_BLOCK"));
 
-function addressList(name: string): readonly `0x${string}`[] {
-  const addresses = requiredEnv(name)
-    .split(",")
-    .map((address) => address.trim())
-    .filter(Boolean) as readonly `0x${string}`[];
-  if (addresses.length === 0) throw new Error(`${name} must include at least one address`);
-  return addresses;
-}
-
 const TransferEvent = parseAbiItem(
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
 );
@@ -59,10 +50,10 @@ export default createConfig({
       address: requiredEnv("PONDER_NORMIES_ADDRESS") as `0x${string}`,
       startBlock,
     },
-    NormiesMinter: {
+    NormiesMinterV2: {
       abi: [MintEvent],
       chain: chainName,
-      address: addressList("PONDER_MINTER_ADDRESSES"),
+      address: requiredEnv("PONDER_MINTER_V2_ADDRESS") as `0x${string}`,
       startBlock: Number(process.env.PONDER_MINTER_START_BLOCK ?? startBlock),
     },
     NormiesCanvas: {

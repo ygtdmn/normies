@@ -10,47 +10,28 @@ import {
   pixelTransform,
   agentBinding,
 } from "ponder:schema";
-import { createPublicClient, http, parseAbi } from "viem";
+import { bytesToHex, encodePacked, hexToBytes, keccak256, parseAbi, toBytes } from "viem";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-const ZERO_HASH = "0x0000000000000000000000000000000000000000000000000000000000000000";
-const BACKFILL_CHUNK_SIZE = Number(process.env.PONDER_BACKFILL_CHUNK_SIZE ?? 100);
-const STORAGE_ADDRESS = requiredEnv("PONDER_STORAGE_ADDRESS") as `0x${string}`;
-const NORMIES_ADDRESS = requiredEnv("PONDER_NORMIES_ADDRESS") as `0x${string}`;
-const CANVAS_ADDRESS = requiredEnv("PONDER_CANVAS_ADDRESS") as `0x${string}`;
+const REVEAL_PHRASE =
+  "normies-ftw-lividly-pumice-consoling-equator-makeover-scone-speculate-dreamy-murky-zips-unplanted-verbalize";
+const EXPECTED_REVEAL_HASH = "0xe733b398326d00945c58c635ae2c06a04aa9da7edc2a12659a91877410970a9f";
+const REVEAL_HASH = keccak256(toBytes(REVEAL_PHRASE));
+const REVEAL_HASH_BYTES = hexToBytes(REVEAL_HASH);
 
-function requiredEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} must be configured`);
-  return value;
+if (REVEAL_HASH !== EXPECTED_REVEAL_HASH) {
+  throw new Error("Hardcoded reveal phrase does not match deployed reveal hash");
 }
 
 const commitPixelCountsABI = parseAbi([
   "function commitPixelCounts(uint256 commitId) view returns (uint256[])",
 ]);
-const normiesABI = parseAbi([
-  "function maxSupply() view returns (uint256)",
-]);
-const storageABI = parseAbi([
-  "function isTokenDataSet(uint256 tokenId) view returns (bool)",
-  "function getTokenRawImageData(uint256 tokenId) view returns (bytes)",
-  "function getTokenTraits(uint256 tokenId) view returns (bytes8)",
-]);
-const canvasABI = parseAbi([
-  "function actionPoints(uint256 tokenId) view returns (uint256)",
-  "function delegates(uint256 tokenId) view returns (address)",
-  "function delegateSetBy(uint256 tokenId) view returns (address)",
-]);
 const canvasStorageABI = parseAbi([
   "function canvasStorage() view returns (address)",
-  "function isTransformed(uint256 tokenId) view returns (bool)",
 ]);
 const getTransformedImageDataABI = parseAbi([
   "function getTransformedImageData(uint256 tokenId) view returns (bytes)",
 ]);
-
-// Latest canvas storage address used by the current-state startup backfill.
-let canvasStorageAddress: `0x${string}` | undefined;
 
 type IndexingContext = Context;
 type EventMeta = {
@@ -67,10 +48,6 @@ function eventMeta(event: { block: { number: bigint; timestamp: bigint }; transa
   };
 }
 
-function backfillMeta(blockNumber: bigint, timestamp: bigint): EventMeta {
-  return { blockNumber, timestamp, txHash: ZERO_HASH };
-}
-
 async function readCanvasStorageAddress(context: IndexingContext, canvasAddress: `0x${string}`): Promise<`0x${string}`> {
   return context.client.readContract({
     address: canvasAddress,
@@ -80,30 +57,11 @@ async function readCanvasStorageAddress(context: IndexingContext, canvasAddress:
   }) as Promise<`0x${string}`>;
 }
 
-async function hasNewerCanvasState(
-  context: IndexingContext,
-  tokenId: bigint,
-  blockNumber: bigint,
-): Promise<boolean> {
-  const row = await context.db.find(canvasTokenState, { tokenId });
-  return !!row && row.blockNumber > blockNumber;
-}
-
-async function hasNewerTokenData(
-  context: IndexingContext,
-  tokenId: bigint,
-  blockNumber: bigint,
-): Promise<boolean> {
-  const row = await context.db.find(tokenData, { tokenId });
-  return !!row && row.blockNumber > blockNumber;
-}
-
 async function upsertDefaultCanvasState(
   context: IndexingContext,
   tokenId: bigint,
   meta: EventMeta,
 ): Promise<void> {
-  if (await hasNewerCanvasState(context, tokenId, meta.blockNumber)) return;
   await context.db
     .insert(canvasTokenState)
     .values({
@@ -120,27 +78,44 @@ async function upsertDefaultCanvasState(
     .onConflictDoNothing();
 }
 
-async function upsertTokenDataFromStorage(
+function decryptImageData(encryptedImageData: `0x${string}`): `0x${string}` {
+  const data = Uint8Array.from(hexToBytes(encryptedImageData));
+  let key = new Uint8Array(32);
+
+  for (let i = 0; i < data.length; i++) {
+    if ((i & 31) === 0) {
+      key = Uint8Array.from(hexToBytes(
+        keccak256(
+          encodePacked(
+            ["bytes32", "uint256"],
+            [REVEAL_HASH, BigInt(Math.floor(i / 32))],
+          ),
+        ),
+      ));
+    }
+    data[i] = data[i]! ^ key[i & 31]!;
+  }
+
+  return bytesToHex(data);
+}
+
+function decryptTraitsHex(encryptedTraits: `0x${string}`): `0x${string}` {
+  const traits = Uint8Array.from(hexToBytes(encryptedTraits));
+  for (let i = 0; i < traits.length; i++) {
+    traits[i] = traits[i]! ^ REVEAL_HASH_BYTES[i]!;
+  }
+  return bytesToHex(traits);
+}
+
+async function upsertTokenDataFromMint(
   context: IndexingContext,
   tokenId: bigint,
+  encryptedImageData: `0x${string}`,
+  encryptedTraits: `0x${string}`,
   meta: EventMeta,
 ): Promise<void> {
-  if (await hasNewerTokenData(context, tokenId, meta.blockNumber)) return;
-
-  const [rawImageData, traitsHex] = await Promise.all([
-    context.client.readContract({
-      address: STORAGE_ADDRESS,
-      abi: storageABI,
-      functionName: "getTokenRawImageData",
-      args: [tokenId],
-    }) as Promise<`0x${string}`>,
-    context.client.readContract({
-      address: STORAGE_ADDRESS,
-      abi: storageABI,
-      functionName: "getTokenTraits",
-      args: [tokenId],
-    }) as Promise<`0x${string}`>,
-  ]);
+  const rawImageData = decryptImageData(encryptedImageData);
+  const traitsHex = decryptTraitsHex(encryptedTraits);
 
   await context.db
     .insert(tokenData)
@@ -173,7 +148,6 @@ async function upsertCanvasState(
   },
   meta: EventMeta,
 ): Promise<void> {
-  if (await hasNewerCanvasState(context, tokenId, meta.blockNumber)) return;
   const existing = await context.db.find(canvasTokenState, { tokenId });
   const next = {
     tokenId,
@@ -203,201 +177,6 @@ async function upsertCanvasState(
       txHash: next.txHash,
     });
 }
-
-function chunk<T>(values: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < values.length; i += size) {
-    chunks.push(values.slice(i, i + size));
-  }
-  return chunks;
-}
-
-function multicallResult<T>(value: unknown): T {
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    "status" in value &&
-    value.status === "success" &&
-    "result" in value
-  ) {
-    return (value as { result: T }).result;
-  }
-  throw new Error("Required backfill contract read failed");
-}
-
-async function backfillTokenAndCanvasState(context: IndexingContext): Promise<void> {
-  if (process.env.PONDER_BACKFILL_ON_START === "false") return;
-
-  const latestClient = createPublicClient({ transport: http(requiredEnv("PONDER_RPC_URL")) });
-  const latestBlockNumber = await latestClient.getBlockNumber();
-  const latestBlock = await latestClient.getBlock({ blockNumber: latestBlockNumber });
-  const meta = backfillMeta(latestBlockNumber, latestBlock.timestamp);
-
-  const maxSupply = Number(await context.client.readContract({
-    address: NORMIES_ADDRESS,
-    abi: normiesABI,
-    functionName: "maxSupply",
-    args: [],
-    cache: "immutable",
-  }));
-
-  canvasStorageAddress = await context.client.readContract({
-    address: CANVAS_ADDRESS,
-    abi: canvasStorageABI,
-    functionName: "canvasStorage",
-    args: [],
-    cache: "immutable",
-  }) as `0x${string}`;
-
-  const ids = Array.from({ length: maxSupply }, (_, tokenId) => BigInt(tokenId));
-  for (const idChunk of chunk(ids, BACKFILL_CHUNK_SIZE)) {
-    const isSetResults = await context.client.multicall({
-      allowFailure: true,
-      cache: "immutable",
-      contracts: idChunk.map((tokenId) => ({
-        address: STORAGE_ADDRESS,
-        abi: storageABI,
-        functionName: "isTokenDataSet",
-        args: [tokenId],
-      })),
-    });
-    const setIds = idChunk.filter((_, index) => multicallResult<boolean>(isSetResults[index]));
-    if (setIds.length === 0) continue;
-
-    const tokenReads = await context.client.multicall({
-      allowFailure: true,
-      cache: "immutable",
-      contracts: setIds.flatMap((tokenId) => [
-        {
-          address: STORAGE_ADDRESS,
-          abi: storageABI,
-          functionName: "getTokenRawImageData",
-          args: [tokenId],
-        },
-        {
-          address: STORAGE_ADDRESS,
-          abi: storageABI,
-          functionName: "getTokenTraits",
-          args: [tokenId],
-        },
-      ]),
-    });
-
-    const canvasReads = await context.client.multicall({
-      allowFailure: true,
-      cache: "immutable",
-      contracts: setIds.flatMap((tokenId) => [
-        {
-          address: CANVAS_ADDRESS,
-          abi: canvasABI,
-          functionName: "actionPoints",
-          args: [tokenId],
-        },
-        {
-          address: CANVAS_ADDRESS,
-          abi: canvasABI,
-          functionName: "delegates",
-          args: [tokenId],
-        },
-        {
-          address: CANVAS_ADDRESS,
-          abi: canvasABI,
-          functionName: "delegateSetBy",
-          args: [tokenId],
-        },
-        {
-          address: canvasStorageAddress!,
-          abi: canvasStorageABI,
-          functionName: "isTransformed",
-          args: [tokenId],
-        },
-      ]),
-    });
-
-    const transformedIds = setIds.filter((_, index) => {
-      const base = index * 4;
-      return multicallResult<boolean>(canvasReads[base + 3]);
-    });
-    const transformReads = transformedIds.length > 0
-      ? await context.client.multicall({
-          allowFailure: true,
-          cache: "immutable",
-          contracts: transformedIds.map((tokenId) => ({
-            address: canvasStorageAddress!,
-            abi: getTransformedImageDataABI,
-            functionName: "getTransformedImageData",
-            args: [tokenId],
-          })),
-        })
-      : [];
-    const transformBitmapByTokenId = new Map<bigint, `0x${string}`>();
-    transformedIds.forEach((tokenId, index) => {
-      transformBitmapByTokenId.set(tokenId, multicallResult<`0x${string}`>(transformReads[index]));
-    });
-
-    for (const [index, tokenId] of setIds.entries()) {
-      const tokenBase = index * 2;
-      const canvasBase = index * 4;
-      const rawImageData = multicallResult<`0x${string}`>(tokenReads[tokenBase]);
-      const traitsHex = multicallResult<`0x${string}`>(tokenReads[tokenBase + 1]);
-      const actionPoints = multicallResult<bigint>(canvasReads[canvasBase]);
-      const delegate = multicallResult<`0x${string}`>(canvasReads[canvasBase + 1]);
-      const delegateSetBy = multicallResult<`0x${string}`>(canvasReads[canvasBase + 2]);
-      const customized = multicallResult<boolean>(canvasReads[canvasBase + 3]);
-      const latestTransformBitmap = customized ? transformBitmapByTokenId.get(tokenId) : null;
-      if (customized && !latestTransformBitmap) {
-        throw new Error(`Missing transform bitmap while backfilling token ${tokenId}`);
-      }
-
-      await context.db
-        .insert(tokenData)
-        .values({
-          tokenId,
-          rawImageData,
-          traitsHex,
-          blockNumber: meta.blockNumber,
-          timestamp: meta.timestamp,
-          txHash: meta.txHash,
-        })
-        .onConflictDoUpdate({
-          rawImageData,
-          traitsHex,
-          blockNumber: meta.blockNumber,
-          timestamp: meta.timestamp,
-          txHash: meta.txHash,
-        });
-
-      await upsertCanvasState(
-        context,
-        tokenId,
-        {
-          actionPoints,
-          customized,
-          delegate,
-          delegateSetBy,
-          latestTransformBitmap,
-        },
-        meta,
-      );
-      if (delegate === ZERO_ADDRESS) {
-        await context.db.delete(delegation, { tokenId });
-      } else {
-        await context.db
-          .insert(delegation)
-          .values({ tokenId, delegate })
-          .onConflictDoUpdate({ delegate });
-      }
-    }
-  }
-}
-
-// ──────────────────────────────────────────────
-//  Startup backfill
-// ──────────────────────────────────────────────
-
-ponder.on("Normies:setup", async ({ context }) => {
-  await backfillTokenAndCanvasState(context);
-});
 
 // ──────────────────────────────────────────────
 //  Normies: Transfer
@@ -441,14 +220,14 @@ ponder.on("Normies:Transfer", async ({ event, context }) => {
 });
 
 // ──────────────────────────────────────────────
-//  NormiesMinter: Mint
+//  NormiesMinterV2: Mint
 // ──────────────────────────────────────────────
 
-ponder.on("NormiesMinter:Mint", async ({ event, context }) => {
-  const { tokenId } = event.args;
+ponder.on("NormiesMinterV2:Mint", async ({ event, context }) => {
+  const { tokenId, imageData, traits } = event.args;
   const meta = eventMeta(event);
 
-  await upsertTokenDataFromStorage(context, tokenId, meta);
+  await upsertTokenDataFromMint(context, tokenId, imageData, traits, meta);
   await upsertDefaultCanvasState(context, tokenId, meta);
 });
 
@@ -459,12 +238,7 @@ ponder.on("NormiesMinter:Mint", async ({ event, context }) => {
 ponder.on("NormiesCanvas:DelegateSet", async ({ event, context }) => {
   const { tokenId, delegate } = event.args;
   const meta = eventMeta(event);
-  const delegateSetBy = await context.client.readContract({
-    address: event.log.address,
-    abi: canvasABI,
-    functionName: "delegateSetBy",
-    args: [tokenId],
-  }) as `0x${string}`;
+  const delegateSetBy = event.transaction.from;
 
   await context.db
     .insert(delegation)
@@ -533,14 +307,12 @@ ponder.on("NormiesCanvas:BurnRevealed", async ({ event, context }) => {
   });
 
   const existing = await context.db.find(canvasTokenState, { tokenId: receiverTokenId });
-  if (!existing || existing.blockNumber <= event.block.number) {
-    await upsertCanvasState(
-      context,
-      receiverTokenId,
-      { actionPoints: (existing?.actionPoints ?? 0n) + totalActions },
-      meta,
-    );
-  }
+  await upsertCanvasState(
+    context,
+    receiverTokenId,
+    { actionPoints: (existing?.actionPoints ?? 0n) + totalActions },
+    meta,
+  );
 });
 
 // ──────────────────────────────────────────────
