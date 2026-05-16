@@ -23,6 +23,19 @@ function serializeBigints<T extends Record<string, unknown>>(row: T): Record<str
   return result;
 }
 
+function parseTokenIds(raw: unknown): bigint[] {
+  if (!Array.isArray(raw)) return [];
+  const ids = new Set<bigint>();
+  for (const value of raw.slice(0, 1000)) {
+    try {
+      ids.add(BigInt(String(value)));
+    } catch {
+      // skip malformed token ids
+    }
+  }
+  return Array.from(ids);
+}
+
 // ──────────────────────────────────────────────
 //  Existing: Ownership & Delegation
 // ──────────────────────────────────────────────
@@ -61,6 +74,71 @@ app.get("/delegations/:address", async (c) => {
     .where(eq(schema.delegation.delegate, address));
 
   return c.json(rows.map((r) => r.tokenId.toString()));
+});
+
+// ──────────────────────────────────────────────
+//  Token data & Canvas state
+// ──────────────────────────────────────────────
+
+app.get("/token-data/count", async (c) => {
+  const [row] = await db.select({ total: count() }).from(schema.tokenData);
+  return c.json({ count: row?.total ?? 0 });
+});
+
+app.get("/token-data/:tokenId", async (c) => {
+  const tokenId = BigInt(c.req.param("tokenId"));
+
+  const [row] = await db
+    .select()
+    .from(schema.tokenData)
+    .where(eq(schema.tokenData.tokenId, tokenId))
+    .limit(1);
+
+  if (!row) return c.json({ error: "Token data not found" }, 404);
+  return c.json(serializeBigints(row));
+});
+
+app.post("/token-data/batch", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { tokenIds?: unknown };
+  const ids = parseTokenIds(body.tokenIds);
+  if (ids.length === 0) return c.json({ tokens: {} });
+
+  const rows = await db
+    .select()
+    .from(schema.tokenData)
+    .where(inArray(schema.tokenData.tokenId, ids));
+
+  const tokens: Record<string, unknown> = {};
+  for (const row of rows) tokens[row.tokenId.toString()] = serializeBigints(row);
+  return c.json({ tokens });
+});
+
+app.get("/canvas-state/:tokenId", async (c) => {
+  const tokenId = BigInt(c.req.param("tokenId"));
+
+  const [row] = await db
+    .select()
+    .from(schema.canvasTokenState)
+    .where(eq(schema.canvasTokenState.tokenId, tokenId))
+    .limit(1);
+
+  if (!row) return c.json({ error: "Canvas state not found" }, 404);
+  return c.json(serializeBigints(row));
+});
+
+app.post("/canvas-state/batch", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { tokenIds?: unknown };
+  const ids = parseTokenIds(body.tokenIds);
+  if (ids.length === 0) return c.json({ states: {} });
+
+  const rows = await db
+    .select()
+    .from(schema.canvasTokenState)
+    .where(inArray(schema.canvasTokenState.tokenId, ids));
+
+  const states: Record<string, unknown> = {};
+  for (const row of rows) states[row.tokenId.toString()] = serializeBigints(row);
+  return c.json({ states });
 });
 
 // ──────────────────────────────────────────────
@@ -293,6 +371,10 @@ app.get("/stats", async (c) => {
     .select({ count: count() })
     .from(schema.pixelTransform);
 
+  const [tokenDataCount] = await db
+    .select({ count: count() })
+    .from(schema.tokenData);
+
   const [actionPointsSum] = await db
     .select({ total: sum(schema.burnCommitment.totalActions) })
     .from(schema.burnCommitment)
@@ -302,6 +384,7 @@ app.get("/stats", async (c) => {
     totalBurnCommitments: burnCommitmentCount?.count ?? 0,
     totalBurnedTokens: burnedTokenCount?.count ?? 0,
     totalTransforms: transformCount?.count ?? 0,
+    totalTokenData: tokenDataCount?.count ?? 0,
     totalActionPointsDistributed: (actionPointsSum?.total ?? "0").toString(),
   });
 });

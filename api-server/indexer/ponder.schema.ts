@@ -22,6 +22,33 @@ export const delegation = onchainTable(
   }),
 );
 
+export const tokenData = onchainTable(
+  "token_data",
+  (t) => ({
+    tokenId: t.bigint().primaryKey(),
+    rawImageData: t.hex().notNull(),
+    traitsHex: t.hex().notNull(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+    txHash: t.hex().notNull(),
+  }),
+);
+
+export const canvasTokenState = onchainTable(
+  "canvas_token_state",
+  (t) => ({
+    tokenId: t.bigint().primaryKey(),
+    actionPoints: t.bigint().notNull().default(0n),
+    customized: t.boolean().notNull().default(false),
+    delegate: t.hex().notNull(),
+    delegateSetBy: t.hex().notNull(),
+    latestTransformBitmap: t.hex(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+    txHash: t.hex().notNull(),
+  }),
+);
+
 export const burnCommitment = onchainTable(
   "burn_commitment",
   (t) => ({
