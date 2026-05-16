@@ -94,9 +94,21 @@ async function promoteFromBinding(
     // No row at all: user bypassed the lab UI. Build the traits snapshot from
     // on-chain reads. Failures bubble up so the caller (sweep / read handler)
     // can log and retry later; we'd rather skip a row than persist garbage.
+    //
+    // Upsert (not create) because the sweep and the lazy read-path reconcile
+    // can both observe the same missing row and race to insert it. Prisma
+    // emits a single INSERT ... ON CONFLICT, so the loser takes the update
+    // branch instead of throwing on Agent_tokenId_key.
     const attributes = await getDecodedTraits(Number(tokenId));
-    return agentsPrisma.agent.create({
-        data: {
+    return agentsPrisma.agent.upsert({
+        where: { tokenId },
+        update: {
+            agentId,
+            txHash,
+            status: "registered",
+            registeredBy,
+        },
+        create: {
             tokenId,
             agentId,
             chainId: CHAIN_ID,
