@@ -1,15 +1,21 @@
-import { PONDER_API_URL } from "../config.js";
+import { PONDER_API_SECRET, PONDER_API_URL } from "../config.js";
 import {
     agentBindingCache,
     agentBindingNullTtlMs,
     transformHistoryCache,
 } from "./cache.js";
 
+function ponderHeaders(init: Record<string, string>): Record<string, string> {
+    return PONDER_API_SECRET
+        ? { ...init, "X-Ponder-Secret": PONDER_API_SECRET }
+        : { ...init };
+}
+
 async function ponderFetch<T>(path: string): Promise<T> {
     let res: Response;
     try {
         res = await fetch(`${PONDER_API_URL}${path}`, {
-            headers: { "Accept": "application/json" },
+            headers: ponderHeaders({ "Accept": "application/json" }),
             signal: AbortSignal.timeout(15_000),
         });
     } catch (err) {
@@ -28,7 +34,7 @@ async function ponderPost<T>(path: string, body: unknown): Promise<T> {
     try {
         res = await fetch(`${PONDER_API_URL}${path}`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            headers: ponderHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
             body: JSON.stringify(body),
             signal: AbortSignal.timeout(15_000),
         });

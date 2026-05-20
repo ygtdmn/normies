@@ -36,6 +36,7 @@ if (!process.env.PONDER_API_URL) {
     throw new Error("PONDER_API_URL must be configured");
 }
 export const PONDER_API_URL = process.env.PONDER_API_URL;
+export const PONDER_API_SECRET = process.env.PONDER_API_SECRET || undefined;
 
 // Chain we read against. Defaults to mainnet to match the hardcoded
 // NORMIES_ADDRESS/STORAGE_ADDRESS above.
