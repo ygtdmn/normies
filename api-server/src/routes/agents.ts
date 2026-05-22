@@ -16,6 +16,7 @@ import {
     getAllAgentBindings,
 } from "../services/ponder-data.js";
 import { buildLivePersona, buildAgentIdentity } from "../services/persona-live.js";
+import { searchByName, type AgentIndexEntry } from "../services/agent-search-index.js";
 import { personaToDescription } from "../lib/persona.js";
 import { agentResponseCache } from "../services/cache.js";
 import { CHAIN_ID, NORMIES_ADDRESS } from "../config.js";
@@ -374,6 +375,74 @@ agents.get("/list", async (c) => {
     c.header("Cache-Control", "public, max-age=30, s-maxage=60, stale-while-revalidate=300");
     c.header("Access-Control-Allow-Origin", "*");
     return c.json({ items, hasMore: res.hasMore });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// /search — gallery search across all registered agents.
+//
+//   GET /agents/search?q=<query>&limit=N
+//
+// Numeric queries resolve as exact matches against agentId and/or tokenId
+// (cheap binding lookups, no index build). Non-numeric queries fall back
+// to a substring filter over a lazily-built name index — the first call
+// after the TTL pays for an enrich sweep; subsequent calls are in-memory.
+// ──────────────────────────────────────────────────────────────────────
+agents.get("/search", async (c) => {
+    const qRaw = c.req.query("q") ?? "";
+    const q = qRaw.trim();
+    const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 24), 1), 50);
+    if (!q) return c.json({ items: [], hasMore: false });
+
+    c.header("Access-Control-Allow-Origin", "*");
+    c.header("Cache-Control", "public, max-age=15, s-maxage=30, stale-while-revalidate=120");
+
+    const toItem = async (b: { agentId: string; tokenId: string; registeredBy: string; timestamp: string; txHash: string }) => {
+        const id = await buildAgentIdentity(Number(b.tokenId)).catch(() => null);
+        return {
+            agentId: b.agentId,
+            tokenId: b.tokenId,
+            name: id?.name ?? `Normie #${b.tokenId}`,
+            type: id?.type ?? "",
+            registeredBy: b.registeredBy,
+            registeredAt: b.timestamp,
+            txHash: b.txHash,
+        };
+    };
+
+    if (/^\d+$/.test(q)) {
+        try {
+            const [byToken, byAgent] = await Promise.all([
+                getAgentBinding(NORMIES_ADDRESS, q).catch(() => null),
+                getAgentBindingByAgentId(q).catch(() => null),
+            ]);
+
+            const items: AgentIndexEntry[] = [];
+            const seen = new Set<string>();
+            for (const b of [byAgent, byToken]) {
+                if (!b) continue;
+                if (b.tokenContract.toLowerCase() !== NORMIES_ADDRESS.toLowerCase()) continue;
+                if (seen.has(b.agentId)) continue;
+                seen.add(b.agentId);
+                items.push(await toItem(b));
+            }
+            return c.json({ items, hasMore: false });
+        } catch (err) {
+            return c.json(
+                { error: err instanceof Error ? err.message : "Search failed" },
+                502,
+            );
+        }
+    }
+
+    try {
+        const items = await searchByName(q, limit);
+        return c.json({ items, hasMore: items.length >= limit });
+    } catch (err) {
+        return c.json(
+            { error: err instanceof Error ? err.message : "Search failed" },
+            502,
+        );
+    }
 });
 
 // ──────────────────────────────────────────────────────────────────────
