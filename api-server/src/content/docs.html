@@ -294,6 +294,57 @@
 
         <div class="endpoint">
             <span class="method">GET</span>
+            <span class="path">/normie/all/original</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Returns a compact static dump of every indexed original Normie: original 200-byte bitmap hex,
+                pixel count, decoded traits, and index metadata. Alias: <code>/normie/all/original/data</code>.
+            </p>
+            <pre><code>curl https://your-api-domain.com/normie/all/original
+
+# Response:
+{
+  "count": 10000,
+  "tokens": [
+    {
+      "tokenId": "0",
+      "rawImageData": "0x...",
+      "pixelCount": 527,
+      "traits": { "raw": "0x...", "attributes": [...] },
+      "blockNumber": "12345678",
+      "timestamp": "1700000000",
+      "txHash": "0x..."
+    }
+  ]
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/normie/all/original/traits</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">Returns decoded original traits for every indexed Normie.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/normie/all/original/traits/binary</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">Returns raw <code>bytes8</code> original trait hex for every indexed Normie.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/normie/all/original/pixels</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Returns compact original bitmap data for every indexed Normie as <code>rawImageData</code>
+                plus <code>pixelCount</code>. Alias: <code>/normie/all/original/canvas</code>.
+            </p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
             <span class="path">/normie/:id/original/pixels</span>
             <span class="response-type">text/plain</span>
             <p class="desc">Returns the original 40x40 bitmap as a 1600-character binary string, before any Canvas edits or zombie conversion.</p>
@@ -587,6 +638,38 @@
         </div>
 
         <h3>Transform History &amp; Historical Versions</h3>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/history/customized</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">
+                Lists NormiesCanvas customization events with token IDs and event metadata. Supports
+                <code>after_timestamp</code> for incremental syncs; <code>since_timestamp</code> is accepted as an alias.
+                Default sort is newest first, or oldest first when a timestamp filter is supplied.
+            </p>
+            <pre><code>curl "https://your-api-domain.com/history/customized?after_timestamp=1700000000"
+
+# Response:
+{
+  "events": [
+    {
+      "id": "12345678-42",
+      "tokenId": "42",
+      "transformer": "0x1234...abcd",
+      "changeCount": 12,
+      "newPixelCount": 535,
+      "blockNumber": "12345678",
+      "timestamp": "1700000001",
+      "txHash": "0xabc...def"
+    }
+  ],
+  "tokenIds": ["42"],
+  "count": 1,
+  "hasMore": false,
+  "afterTimestamp": "1700000000"
+}</code></pre>
+        </div>
 
         <div class="endpoint">
             <span class="method">GET</span>

@@ -218,6 +218,11 @@ export async function getIndexedTokenDataBatch(
     return res.tokens ?? {};
 }
 
+export async function getIndexedTokenDataAll(): Promise<IndexedTokenData[]> {
+    const res = await ponderFetch<{ tokens: IndexedTokenData[] }>("/token-data/all?limit=10000&offset=0");
+    return res.tokens ?? [];
+}
+
 export async function getIndexedTokenDataCount(): Promise<number> {
     const res = await ponderFetch<{ count: number }>("/token-data/count");
     return res.count;
@@ -349,6 +354,29 @@ export async function getTransformLatest(tokenId: number): Promise<TransformData
 
 export async function getTransformVersion(tokenId: number, version: number): Promise<TransformData> {
     return ponderFetch(`/transforms/${tokenId}/${version}`);
+}
+
+export interface CustomizedEventsData {
+    events: TransformData[];
+    tokenIds: string[];
+    count: number;
+    hasMore: boolean;
+    afterTimestamp: string | null;
+}
+
+export async function getCustomizedEvents(opts: {
+    limit?: number;
+    offset?: number;
+    afterTimestamp?: bigint | string;
+    sort?: "asc" | "desc";
+} = {}): Promise<CustomizedEventsData> {
+    const params = new URLSearchParams();
+    if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+    if (opts.offset !== undefined) params.set("offset", String(opts.offset));
+    if (opts.afterTimestamp !== undefined) params.set("after_timestamp", opts.afterTimestamp.toString());
+    if (opts.sort) params.set("sort", opts.sort);
+    const qs = params.toString();
+    return ponderFetch<CustomizedEventsData>(qs ? `/transforms?${qs}` : "/transforms");
 }
 
 // ──────────────────────────────────────────────

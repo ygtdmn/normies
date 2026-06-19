@@ -1,6 +1,7 @@
 import { Hono } from "hono";
+import { hexToBytes } from "viem";
 import { parseTokenId } from "../lib/validation.js";
-import { getTokenData, getImageData, getTraitsHex } from "../services/token-data.js";
+import { getTokenData, getAllTokenData, getImageData, getTraitsHex } from "../services/token-data.js";
 import { getTransformData, getCanvasInfo } from "../services/canvas-data.js";
 import { imageDataToPixelString } from "../lib/pixels.js";
 import { decodeTraits, countPixels } from "../lib/traits.js";
@@ -20,6 +21,80 @@ import {
 import { getLegendaryCanvasInfo } from "../services/legendary-canvas-data.js";
 
 const normie = new Hono();
+
+// ──────────────────────────────────────────────
+//  Bulk original dump (always pre-transform)
+// ──────────────────────────────────────────────
+
+async function getOriginalTokenRows() {
+    const rows = await getAllTokenData();
+    return rows.map((row) => {
+        const imageData = hexToBytes(row.rawImageData);
+        return {
+            tokenId: row.tokenId,
+            rawImageData: row.rawImageData,
+            pixelCount: countPixels(imageData),
+            traits: decodeTraits(row.traitsHex),
+            blockNumber: row.blockNumber,
+            timestamp: row.timestamp,
+            txHash: row.txHash,
+        };
+    });
+}
+
+normie.get("/all/original", async (c) => {
+    const tokens = await getOriginalTokenRows();
+    return c.json({ count: tokens.length, tokens });
+});
+
+normie.get("/all/original/data", async (c) => {
+    const tokens = await getOriginalTokenRows();
+    return c.json({ count: tokens.length, tokens });
+});
+
+normie.get("/all/original/traits", async (c) => {
+    const tokens = (await getAllTokenData()).map((row) => ({
+        tokenId: row.tokenId,
+        traits: decodeTraits(row.traitsHex),
+        blockNumber: row.blockNumber,
+        timestamp: row.timestamp,
+        txHash: row.txHash,
+    }));
+    return c.json({ count: tokens.length, tokens });
+});
+
+normie.get("/all/original/traits/binary", async (c) => {
+    const tokens = (await getAllTokenData()).map((row) => ({
+        tokenId: row.tokenId,
+        traitsHex: row.traitsHex,
+        blockNumber: row.blockNumber,
+        timestamp: row.timestamp,
+        txHash: row.txHash,
+    }));
+    return c.json({ count: tokens.length, tokens });
+});
+
+async function getOriginalBitmapRows() {
+    const rows = await getAllTokenData();
+    return rows.map((row) => ({
+        tokenId: row.tokenId,
+        rawImageData: row.rawImageData,
+        pixelCount: countPixels(hexToBytes(row.rawImageData)),
+        blockNumber: row.blockNumber,
+        timestamp: row.timestamp,
+        txHash: row.txHash,
+    }));
+}
+
+normie.get("/all/original/pixels", async (c) => {
+    const tokens = await getOriginalBitmapRows();
+    return c.json({ count: tokens.length, tokens });
+});
+
+normie.get("/all/original/canvas", async (c) => {
+    const tokens = await getOriginalBitmapRows();
+    return c.json({ count: tokens.length, tokens });
+});
 
 // ──────────────────────────────────────────────
 //  Ownership (Ponder indexer-backed)

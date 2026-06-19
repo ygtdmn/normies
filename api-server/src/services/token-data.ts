@@ -1,7 +1,15 @@
 import { hexToBytes } from "viem";
 import { imageDataCache, traitsCache, decodedTraitsCache } from "./cache.js";
-import { getIndexedTokenData, getIndexedTokenDataCount } from "./ponder-data.js";
+import {
+    getIndexedTokenData,
+    getIndexedTokenDataAll,
+    getIndexedTokenDataCount,
+    type IndexedTokenData,
+} from "./ponder-data.js";
 import { decodeTraits } from "../lib/traits.js";
+import { CACHE_TTL_MS } from "../config.js";
+
+let allTokenDataCache: { rows: IndexedTokenData[]; expiresAt: number } | undefined;
 
 export async function getImageData(tokenId: number): Promise<Uint8Array> {
     const cached = imageDataCache.get(tokenId);
@@ -38,6 +46,23 @@ export async function getTokenData(
     imageDataCache.set(tokenId, imageData);
     traitsCache.set(tokenId, data.traitsHex);
     return { imageData, traitsHex: data.traitsHex };
+}
+
+export async function getAllTokenData(): Promise<IndexedTokenData[]> {
+    if (allTokenDataCache && allTokenDataCache.expiresAt > Date.now()) {
+        return allTokenDataCache.rows;
+    }
+
+    const rows = await getIndexedTokenDataAll();
+    for (const data of rows) {
+        const tokenId = Number(data.tokenId);
+        if (!Number.isSafeInteger(tokenId)) continue;
+        const imageData = hexToBytes(data.rawImageData);
+        imageDataCache.set(tokenId, imageData);
+        traitsCache.set(tokenId, data.traitsHex);
+    }
+    allTokenDataCache = { rows, expiresAt: Date.now() + CACHE_TTL_MS };
+    return rows;
 }
 
 /**

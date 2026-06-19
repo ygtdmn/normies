@@ -14,6 +14,7 @@ import {
     getBurnedToken,
     getTransformHistory,
     getTransformVersion,
+    getCustomizedEvents,
     getStats,
 } from "../services/ponder-data.js";
 
@@ -23,6 +24,18 @@ function parsePagination(c: { req: { query: (key: string) => string | undefined 
     const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50), 1), 100);
     const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
     return { limit, offset };
+}
+
+function parseTimestampQuery(c: { req: { query: (key: string) => string | undefined } }) {
+    const raw = c.req.query("after_timestamp") ?? c.req.query("since_timestamp");
+    if (raw === undefined) return {};
+    try {
+        const timestamp = BigInt(raw);
+        if (timestamp < 0n) throw new Error("negative timestamp");
+        return { timestamp };
+    } catch {
+        return { error: "`after_timestamp` must be a non-negative unix timestamp string" };
+    }
 }
 
 function compositeBuffers(original: Uint8Array, transform: Uint8Array): Uint8Array {
@@ -100,6 +113,26 @@ history.get("/burned/:tokenId/image.png", async (c) => {
 // ──────────────────────────────────────────────
 //  Transform History
 // ──────────────────────────────────────────────
+
+history.get("/customized", async (c) => {
+    const { limit, offset } = parsePagination(c);
+    const timestampResult = parseTimestampQuery(c);
+    if ("error" in timestampResult) return c.json({ error: timestampResult.error }, 400);
+
+    const sortRaw = c.req.query("sort");
+    const sort = sortRaw === "asc" || sortRaw === "desc"
+        ? sortRaw
+        : timestampResult.timestamp !== undefined
+            ? "asc"
+            : "desc";
+
+    return c.json(await getCustomizedEvents({
+        limit,
+        offset,
+        afterTimestamp: timestampResult.timestamp,
+        sort,
+    }));
+});
 
 history.get("/normie/:id/versions", async (c) => {
     const result = parseTokenId(c.req.param("id"));

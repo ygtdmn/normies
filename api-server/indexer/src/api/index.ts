@@ -15,6 +15,12 @@ function parsePagination(c: { req: { query: (key: string) => string | undefined 
   return { limit, offset };
 }
 
+function parseBulkPagination(c: { req: { query: (key: string) => string | undefined } }) {
+  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 10_000), 1), 10_000);
+  const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
+  return { limit, offset };
+}
+
 function serializeBigints<T extends Record<string, unknown>>(row: T): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(row)) {
@@ -125,6 +131,23 @@ app.get("/delegations/:address", async (c) => {
 app.get("/token-data/count", async (c) => {
   const [row] = await db.select({ total: count() }).from(schema.tokenData);
   return c.json({ count: row?.total ?? 0 });
+});
+
+app.get("/token-data/all", async (c) => {
+  const { limit, offset } = parseBulkPagination(c);
+
+  const rows = await db
+    .select()
+    .from(schema.tokenData)
+    .orderBy(asc(schema.tokenData.tokenId))
+    .limit(limit + 1)
+    .offset(offset);
+
+  const page = rows.slice(0, limit);
+  return c.json({
+    tokens: page.map(serializeBigints),
+    hasMore: rows.length > limit,
+  });
 });
 
 app.get("/token-data/:tokenId", async (c) => {
@@ -434,6 +457,73 @@ app.get("/burned-tokens/:tokenId", async (c) => {
 // ──────────────────────────────────────────────
 //  Transforms
 // ──────────────────────────────────────────────
+
+app.get("/transforms", async (c) => {
+  const { limit, offset } = parsePagination(c);
+  const afterTimestampRaw = c.req.query("after_timestamp") ?? c.req.query("since_timestamp");
+  const sortRaw = c.req.query("sort");
+  const sort = sortRaw === "asc" || sortRaw === "desc"
+    ? sortRaw
+    : afterTimestampRaw
+      ? "asc"
+      : "desc";
+
+  let afterTimestamp: bigint | undefined;
+  if (afterTimestampRaw !== undefined) {
+    try {
+      afterTimestamp = BigInt(afterTimestampRaw);
+      if (afterTimestamp < 0n) throw new Error("negative timestamp");
+    } catch {
+      return c.json({ error: "`after_timestamp` must be a non-negative unix timestamp string" }, 400);
+    }
+  }
+
+  const rows = afterTimestamp !== undefined
+    ? sort === "asc"
+      ? await db
+          .select()
+          .from(schema.pixelTransform)
+          .where(gt(schema.pixelTransform.timestamp, afterTimestamp))
+          .orderBy(asc(schema.pixelTransform.timestamp), asc(schema.pixelTransform.blockNumber))
+          .limit(limit + 1)
+          .offset(offset)
+      : await db
+          .select()
+          .from(schema.pixelTransform)
+          .where(gt(schema.pixelTransform.timestamp, afterTimestamp))
+          .orderBy(desc(schema.pixelTransform.timestamp), desc(schema.pixelTransform.blockNumber))
+          .limit(limit + 1)
+          .offset(offset)
+    : sort === "asc"
+      ? await db
+          .select()
+          .from(schema.pixelTransform)
+          .orderBy(asc(schema.pixelTransform.timestamp), asc(schema.pixelTransform.blockNumber))
+          .limit(limit + 1)
+          .offset(offset)
+      : await db
+          .select()
+          .from(schema.pixelTransform)
+          .orderBy(desc(schema.pixelTransform.timestamp), desc(schema.pixelTransform.blockNumber))
+          .limit(limit + 1)
+          .offset(offset);
+
+  const page = rows.slice(0, limit);
+  const events = page.map((r) => {
+    const serialized = serializeBigints(r);
+    delete serialized.transformBitmap;
+    return serialized;
+  });
+  const tokenIds = Array.from(new Set(page.map((r) => r.tokenId.toString())));
+
+  return c.json({
+    events,
+    tokenIds,
+    count: events.length,
+    hasMore: rows.length > limit,
+    afterTimestamp: afterTimestamp?.toString() ?? null,
+  });
+});
 
 app.get("/transforms/:tokenId", async (c) => {
   const tokenId = BigInt(c.req.param("tokenId"));

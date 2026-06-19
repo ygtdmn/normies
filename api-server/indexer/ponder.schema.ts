@@ -104,6 +104,7 @@ export const pixelTransform = onchainTable(
   (table) => ({
     tokenIdx: index().on(table.tokenId),
     transformerIdx: index().on(table.transformer),
+    timestampIdx: index().on(table.timestamp),
   }),
 );
 

@@ -130,6 +130,48 @@ Returns all Normie token IDs currently owned by the given wallet address.
 
 These endpoints always return the original Normie mint data, ignoring Canvas customizations and zombie conversion.
 
+### GET /normie/all/original
+Returns a compact static dump of all indexed original Normie mint data.
+- Content-Type: application/json
+- Response fields:
+  {
+    "count": 10000,
+    "tokens": [
+      {
+        "tokenId": "0",
+        "rawImageData": "0x...",
+        "pixelCount": 527,
+        "traits": {
+          "raw": "0x0001000305010200",
+          "attributes": [
+            { "trait_type": "Type", "value": "Human" }
+          ]
+        },
+        "blockNumber": "12345678",
+        "timestamp": "1700000000",
+        "txHash": "0x..."
+      }
+    ]
+  }
+- Aliases: /normie/all/original/data
+- rawImageData is the original 200-byte bitmap hex, before Canvas edits or zombie conversion.
+
+### GET /normie/all/original/traits
+Returns decoded original traits for all indexed Normies.
+- Content-Type: application/json
+- Response: { "count": 10000, "tokens": [{ "tokenId": "0", "traits": { "raw": "0x...", "attributes": [...] } }] }
+
+### GET /normie/all/original/traits/binary
+Returns raw bytes8 original trait hex for all indexed Normies.
+- Content-Type: application/json
+- Response: { "count": 10000, "tokens": [{ "tokenId": "0", "traitsHex": "0x..." }] }
+
+### GET /normie/all/original/pixels
+Returns compact original bitmap data for all indexed Normies.
+- Content-Type: application/json
+- Response: { "count": 10000, "tokens": [{ "tokenId": "0", "rawImageData": "0x...", "pixelCount": 527 }] }
+- Alias: /normie/all/original/canvas
+
 ### GET /normie/{id}/original/pixels
 Returns the original 40x40 bitmap before any Canvas edits or zombie conversion.
 - Content-Type: text/plain
@@ -370,6 +412,32 @@ setTransformBitmap call with metadata about pixel changes.
       "txHash": "0xabc...def"
     }
   ]
+
+### GET /history/customized
+Lists NormiesCanvas customization events.
+- Content-Type: application/json
+- Query: ?limit=50&offset=0&after_timestamp=1700000000
+- since_timestamp is accepted as an alias for after_timestamp.
+- Default sort is newest first; when after_timestamp or since_timestamp is supplied, default sort is oldest first. Use sort=asc or sort=desc to override.
+- Response format:
+  {
+    "events": [
+      {
+        "id": "12345678-42",
+        "tokenId": "42",
+        "transformer": "0x1234...abcd",
+        "changeCount": 12,
+        "newPixelCount": 535,
+        "blockNumber": "12345678",
+        "timestamp": "1700000001",
+        "txHash": "0xabc...def"
+      }
+    ],
+    "tokenIds": ["42"],
+    "count": 1,
+    "hasMore": false,
+    "afterTimestamp": "1700000000"
+  }
 
 ### GET /history/normie/{id}/version/{version}/pixels
 Returns the composited pixel string for a historical version.
