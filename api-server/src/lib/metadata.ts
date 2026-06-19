@@ -6,6 +6,13 @@ export interface CanvasMetadataInfo {
     level: number;
     customized: boolean;
     originalPixelCount: number;
+    legendaryCanvasArtist?: string | null;
+}
+
+export interface MetadataAttribute {
+    trait_type: string;
+    value: string | number;
+    display_type?: string;
 }
 
 /**
@@ -19,10 +26,27 @@ export function buildMetadata(
     traitsHex: `0x${string}`,
     canvasInfo?: CanvasMetadataInfo
 ): object {
-    const svg = renderSvg(imageData);
-    const svgBase64 = Buffer.from(svg).toString("base64");
     const { attributes } = decodeTraits(traitsHex);
     const pixelCount = canvasInfo?.originalPixelCount ?? countPixels(imageData);
+    return buildMetadataFromAttributes(
+        tokenId,
+        imageData,
+        attributes.map((a) => ({ trait_type: a.trait_type, value: a.value })),
+        canvasInfo,
+        pixelCount
+    );
+}
+
+export function buildMetadataFromAttributes(
+    tokenId: number,
+    imageData: Uint8Array,
+    attributes: MetadataAttribute[],
+    canvasInfo?: Omit<CanvasMetadataInfo, "originalPixelCount">,
+    pixelCountOverride?: number
+): object {
+    const svg = renderSvg(imageData);
+    const svgBase64 = Buffer.from(svg).toString("base64");
+    const pixelCount = pixelCountOverride ?? countPixels(imageData);
 
     // Build animation_url HTML (matching on-chain _buildAnimationUrl)
     const imageHex = Buffer.from(imageData).toString("hex");
@@ -43,8 +67,15 @@ export function buildMetadata(
     return {
         name: `Normie #${tokenId}`,
         attributes: [
-            ...attributes.map((a) => ({ trait_type: a.trait_type, value: a.value })),
+            ...attributes.map((a) => (
+                a.display_type
+                    ? { display_type: a.display_type, trait_type: a.trait_type, value: a.value }
+                    : { trait_type: a.trait_type, value: a.value }
+            )),
             { display_type: "number", trait_type: "Level", value: canvasInfo?.level ?? 1 },
+            ...(canvasInfo?.legendaryCanvasArtist
+                ? [{ trait_type: "Legendary Canvas", value: canvasInfo.legendaryCanvasArtist }]
+                : []),
             { display_type: "number", trait_type: "Pixel Count", value: pixelCount },
             { display_type: "number", trait_type: "Action Points", value: canvasInfo?.actionPoints ?? 0 },
             { trait_type: "Customized", value: canvasInfo?.customized ? "Yes" : "No" },

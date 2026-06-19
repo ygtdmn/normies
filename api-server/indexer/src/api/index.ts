@@ -36,6 +36,48 @@ function parseTokenIds(raw: unknown): bigint[] {
   return Array.from(ids);
 }
 
+function emptyZombieState(tokenId: bigint): Record<string, unknown> {
+  return {
+    tokenId: tokenId.toString(),
+    isZombie: false,
+    poolIndex: null,
+    bitmap: null,
+    attributesJson: null,
+    qualifyingWallet: null,
+    commitId: null,
+    blockNumber: null,
+    timestamp: null,
+    txHash: null,
+  };
+}
+
+function defaultZombieStatus(): Record<string, unknown> {
+  return {
+    paused: true,
+    merkleRoot: null,
+    seedBlock: null,
+    seed: null,
+    seedLocked: false,
+    poolSize: 0,
+    poolSealed: false,
+    blockNumber: null,
+    timestamp: null,
+    txHash: null,
+  };
+}
+
+function emptyLegendaryCanvasState(tokenId: bigint): Record<string, unknown> {
+  return {
+    tokenId: tokenId.toString(),
+    isLegendary: false,
+    artistName: null,
+    operator: null,
+    blockNumber: null,
+    timestamp: null,
+    txHash: null,
+  };
+}
+
 // ──────────────────────────────────────────────
 //  Existing: Ownership & Delegation
 // ──────────────────────────────────────────────
@@ -139,6 +181,134 @@ app.post("/canvas-state/batch", async (c) => {
   const states: Record<string, unknown> = {};
   for (const row of rows) states[row.tokenId.toString()] = serializeBigints(row);
   return c.json({ states });
+});
+
+// ──────────────────────────────────────────────
+//  Zombie state
+// ──────────────────────────────────────────────
+
+app.get("/zombie-state/:tokenId", async (c) => {
+  const tokenId = BigInt(c.req.param("tokenId"));
+
+  const [row] = await db
+    .select()
+    .from(schema.zombieTokenState)
+    .where(eq(schema.zombieTokenState.tokenId, tokenId))
+    .limit(1);
+
+  return c.json(row ? serializeBigints(row) : emptyZombieState(tokenId));
+});
+
+app.post("/zombie-state/batch", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { tokenIds?: unknown };
+  const ids = parseTokenIds(body.tokenIds);
+  if (ids.length === 0) return c.json({ states: {} });
+
+  const rows = await db
+    .select()
+    .from(schema.zombieTokenState)
+    .where(inArray(schema.zombieTokenState.tokenId, ids));
+
+  const states: Record<string, unknown> = {};
+  for (const tokenId of ids) states[tokenId.toString()] = emptyZombieState(tokenId);
+  for (const row of rows) states[row.tokenId.toString()] = serializeBigints(row);
+  return c.json({ states });
+});
+
+app.get("/zombies/status", async (c) => {
+  const [row] = await db
+    .select()
+    .from(schema.zombieConfig)
+    .where(eq(schema.zombieConfig.id, "global"))
+    .limit(1);
+
+  return c.json(row ? serializeBigints(row) : defaultZombieStatus());
+});
+
+app.get("/zombies/conversions", async (c) => {
+  const { limit, offset } = parsePagination(c);
+
+  const rows = await db
+    .select()
+    .from(schema.zombieCommitment)
+    .orderBy(desc(schema.zombieCommitment.blockNumber))
+    .limit(limit)
+    .offset(offset);
+
+  return c.json(rows.map(serializeBigints));
+});
+
+app.get("/zombies/wallet/:address", async (c) => {
+  const address = c.req.param("address").toLowerCase() as `0x${string}`;
+  const { limit, offset } = parsePagination(c);
+
+  const rows = await db
+    .select()
+    .from(schema.zombieCommitment)
+    .where(eq(schema.zombieCommitment.qualifyingWallet, address))
+    .orderBy(desc(schema.zombieCommitment.blockNumber))
+    .limit(limit)
+    .offset(offset);
+
+  return c.json(rows.map(serializeBigints));
+});
+
+app.get("/zombies/token/:tokenId", async (c) => {
+  const tokenId = BigInt(c.req.param("tokenId"));
+
+  const rows = await db
+    .select()
+    .from(schema.zombieCommitment)
+    .where(eq(schema.zombieCommitment.tokenId, tokenId))
+    .orderBy(desc(schema.zombieCommitment.blockNumber));
+
+  return c.json(rows.map(serializeBigints));
+});
+
+// ──────────────────────────────────────────────
+//  Legendary Canvas
+// ──────────────────────────────────────────────
+
+app.get("/legendary-canvas/:tokenId", async (c) => {
+  const tokenId = BigInt(c.req.param("tokenId"));
+
+  const [row] = await db
+    .select()
+    .from(schema.legendaryCanvasTrait)
+    .where(eq(schema.legendaryCanvasTrait.tokenId, tokenId))
+    .limit(1);
+
+  return c.json(row ? serializeBigints(row) : emptyLegendaryCanvasState(tokenId));
+});
+
+app.post("/legendary-canvas/batch", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { tokenIds?: unknown };
+  const ids = parseTokenIds(body.tokenIds);
+  if (ids.length === 0) return c.json({ states: {} });
+
+  const rows = await db
+    .select()
+    .from(schema.legendaryCanvasTrait)
+    .where(inArray(schema.legendaryCanvasTrait.tokenId, ids));
+
+  const states: Record<string, unknown> = {};
+  for (const tokenId of ids) states[tokenId.toString()] = emptyLegendaryCanvasState(tokenId);
+  for (const row of rows) states[row.tokenId.toString()] = serializeBigints(row);
+  return c.json({ states });
+});
+
+app.get("/legendary-canvas", async (c) => {
+  const { limit, offset } = parsePagination(c);
+
+  const rows = await db
+    .select()
+    .from(schema.legendaryCanvasTrait)
+    .where(eq(schema.legendaryCanvasTrait.isLegendary, true))
+    .orderBy(desc(schema.legendaryCanvasTrait.blockNumber))
+    .limit(limit)
+    .offset(offset);
+
+  return c.json(rows.map(serializeBigints));
 });
 
 // ──────────────────────────────────────────────
@@ -375,6 +545,16 @@ app.get("/stats", async (c) => {
     .select({ count: count() })
     .from(schema.tokenData);
 
+  const [zombieTokenCount] = await db
+    .select({ count: count() })
+    .from(schema.zombieTokenState)
+    .where(eq(schema.zombieTokenState.isZombie, true));
+
+  const [legendaryCanvasCount] = await db
+    .select({ count: count() })
+    .from(schema.legendaryCanvasTrait)
+    .where(eq(schema.legendaryCanvasTrait.isLegendary, true));
+
   const [actionPointsSum] = await db
     .select({ total: sum(schema.burnCommitment.totalActions) })
     .from(schema.burnCommitment)
@@ -385,6 +565,8 @@ app.get("/stats", async (c) => {
     totalBurnedTokens: burnedTokenCount?.count ?? 0,
     totalTransforms: transformCount?.count ?? 0,
     totalTokenData: tokenDataCount?.count ?? 0,
+    totalZombies: zombieTokenCount?.count ?? 0,
+    totalLegendaryCanvases: legendaryCanvasCount?.count ?? 0,
     totalActionPointsDistributed: (actionPointsSum?.total ?? "0").toString(),
   });
 });

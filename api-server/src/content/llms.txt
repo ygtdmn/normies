@@ -12,11 +12,14 @@ Replace `{base}` with the deployed API URL.
 ## Endpoints
 
 Note: The /normie/{id}/pixels, /image.svg, /image.png, and /metadata endpoints return
-composited (customized) data when a Normie has been edited via NormiesCanvas.
-Use /normie/{id}/original/* endpoints to access pre-transform data.
+the active V5-style token state. If a Normie has been converted, these endpoints use
+the zombie bitmap and zombie attributes; if it has also been edited via NormiesCanvas,
+they return zombie XOR transform. Use /normie/{id}/original/* endpoints to access
+the original mint data, ignoring both Canvas edits and zombie conversion.
 
 ### GET /normie/{id}/pixels
-Returns the 40x40 bitmap as a 1600-character string of 0s and 1s (composited if customized).
+Returns the active 40x40 bitmap as a 1600-character string of 0s and 1s.
+Zombie-converted tokens use the zombie bitmap; customized tokens use the active base XOR Canvas transform.
 - Content-Type: text/plain
 - Parameters: id (integer, 0-9999)
 - Response: 1600 characters, row-major order, top-left to bottom-right
@@ -51,7 +54,7 @@ Returns decoded traits as JSON with human-readable labels.
   }
 
 ### GET /normie/{id}/image.svg
-Returns the Normie as an SVG image (composited if customized).
+Returns the active Normie as an SVG image.
 - Content-Type: image/svg+xml
 - Parameters: id (integer, 0-9999)
 - Output: 1000x1000 SVG with 40x40 viewBox, crispEdges rendering
@@ -59,16 +62,18 @@ Returns the Normie as an SVG image (composited if customized).
 - Example: `curl {base}/normie/0/image.svg -o normie.svg`
 
 ### GET /normie/{id}/image.png
-Returns the Normie as a PNG image (composited if customized).
+Returns the active Normie as a PNG image.
 - Content-Type: image/png
 - Parameters: id (integer, 0-9999)
 - Output: 1000x1000 PNG, pixel-perfect rasterization
 - Example: `curl {base}/normie/0/image.png -o normie.png`
 
 ### GET /normie/{id}/metadata
-Returns full NFT metadata JSON matching on-chain tokenURI() (V4 renderer).
+Returns full NFT metadata JSON matching the active on-chain tokenURI() renderer.
+Human tokens keep original mint traits. Zombie tokens use zombie attributes.
 Includes canvas-aware attributes: Level, Action Points, Customized.
-If customized, uses the composited image.
+If customized, uses the active composited image.
+Selected tokens may also include { "trait_type": "Legendary Canvas", "value": "<Artist Name>" }.
 - Content-Type: application/json
 - Parameters: id (integer, 0-9999)
 - Response format:
@@ -123,22 +128,83 @@ Returns all Normie token IDs currently owned by the given wallet address.
 
 ## Original Endpoints (Pre-Transform)
 
-These endpoints always return the original Normie data, ignoring Canvas customizations.
+These endpoints always return the original Normie mint data, ignoring Canvas customizations and zombie conversion.
 
 ### GET /normie/{id}/original/pixels
-Returns the original 40x40 bitmap before any Canvas edits.
+Returns the original 40x40 bitmap before any Canvas edits or zombie conversion.
 - Content-Type: text/plain
 - Parameters: id (integer, 0-9999)
 
 ### GET /normie/{id}/original/image.svg
-Returns the original Normie SVG before any Canvas edits.
+Returns the original Normie SVG before any Canvas edits or zombie conversion.
 - Content-Type: image/svg+xml
 - Parameters: id (integer, 0-9999)
 
 ### GET /normie/{id}/original/image.png
-Returns the original Normie PNG before any Canvas edits.
+Returns the original Normie PNG before any Canvas edits or zombie conversion.
+
+## Zombie Endpoints
+
+Zombie endpoints expose conversion state and zombie-specific assets, powered by the Ponder indexer.
+The default /normie/{id}/pixels, image, and metadata endpoints already use zombie data when a token is converted.
+
+### GET /zombies/status
+Returns global NormiesZombie status.
+- Content-Type: application/json
+- Response fields: paused, merkleRoot, seedBlock, seed, seedLocked, poolSize, poolSealed, blockNumber, timestamp, txHash
+
+### GET /zombies/conversions
+Lists zombie conversion commitments, newest first.
+- Content-Type: application/json
+- Query: ?limit=50&offset=0 (pagination, max 100)
+
+### GET /zombies/wallet/{address}
+Lists conversion commitments for a qualifying wallet.
+- Content-Type: application/json
+- Query: ?limit=50&offset=0 (pagination, max 100)
+
+### GET /zombies/token/{id}
+Returns zombie state and conversion history for a token.
+- Content-Type: application/json
+
+### GET /zombies/token/{id}/attributes
+Returns parsed zombie attributes for a converted token.
+- Content-Type: application/json
+
+### GET /zombies/token/{id}/pixels
+Returns the base zombie bitmap as a 1600-character string of 0s and 1s.
+- Content-Type: text/plain
+
+### GET /zombies/token/{id}/image.svg
+Returns the base zombie SVG.
+- Content-Type: image/svg+xml
+
+### GET /zombies/token/{id}/image.png
+Returns the base zombie PNG.
 - Content-Type: image/png
-- Parameters: id (integer, 0-9999)
+
+Equivalent token-scoped aliases are also available under /normie/{id}/zombie/*.
+
+## Legendary Canvas Endpoints
+
+Legendary Canvas is an owner-managed optional trait for selected Normies.
+When set, /normie/{id}/metadata includes:
+{ "trait_type": "Legendary Canvas", "value": "<Artist Name>" }.
+Tokens without a registered artist do not include this trait.
+
+### GET /legendary-canvas
+Lists active Legendary Canvas entries, newest first.
+- Content-Type: application/json
+- Query: ?limit=50&offset=0 (pagination, max 100)
+
+### GET /legendary-canvas/token/{id}
+Returns Legendary Canvas state for a token.
+- Content-Type: application/json
+- Response fields: tokenId, isLegendary, artistName, operator, blockNumber, timestamp, txHash
+
+### GET /normie/{id}/legendary-canvas
+Token-scoped alias for /legendary-canvas/token/{id}.
+- Content-Type: application/json
 
 ## Canvas Endpoints
 
@@ -152,7 +218,7 @@ Returns all 0s if the Normie has not been customized.
 - Parameters: id (integer, 0-9999)
 
 ### GET /normie/{id}/canvas/diff
-Returns a pixel-level diff between the original and the Canvas edits.
+Returns a pixel-level diff between the active base image and the Canvas edits.
 - Content-Type: application/json
 - Parameters: id (integer, 0-9999)
 - Response format:
@@ -163,8 +229,8 @@ Returns a pixel-level diff between the original and the Canvas edits.
     "removedCount": 1,
     "netChange": 1
   }
-- added: pixels turned ON by the edit (original was off)
-- removed: pixels turned OFF by the edit (original was on)
+- added: pixels turned ON by the edit (active base was off)
+- removed: pixels turned OFF by the edit (active base was on)
 
 ### GET /normie/{id}/canvas/info
 Returns Canvas metadata for a Normie.

@@ -16,3 +16,4 @@ yarn-error.log*
 # Ponder
 /generated/
 /.ponder/
+.env.local.anvil

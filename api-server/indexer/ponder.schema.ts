@@ -108,6 +108,112 @@ export const pixelTransform = onchainTable(
 );
 
 // ──────────────────────────────────────────────
+//  NormiesZombie
+// ──────────────────────────────────────────────
+
+export const zombiePoolItem = onchainTable(
+  "zombie_pool_item",
+  (t) => ({
+    poolIndex: t.bigint().primaryKey(),
+    bitmap: t.hex().notNull(),
+    attributesJson: t.text().notNull(),
+    bitmapPointer: t.hex(),
+    attributesPointer: t.hex(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+    txHash: t.hex().notNull(),
+  }),
+);
+
+export const zombieTokenState = onchainTable(
+  "zombie_token_state",
+  (t) => ({
+    tokenId: t.bigint().primaryKey(),
+    isZombie: t.boolean().notNull().default(false),
+    poolIndex: t.bigint(),
+    bitmap: t.hex(),
+    attributesJson: t.text(),
+    qualifyingWallet: t.hex(),
+    commitId: t.bigint(),
+    blockNumber: t.bigint(),
+    timestamp: t.bigint(),
+    txHash: t.hex(),
+  }),
+  (table) => ({
+    poolIdx: index().on(table.poolIndex),
+    walletIdx: index().on(table.qualifyingWallet),
+    commitIdx: index().on(table.commitId),
+  }),
+);
+
+export const zombieCommitment = onchainTable(
+  "zombie_commitment",
+  (t) => ({
+    commitId: t.bigint().primaryKey(),
+    qualifyingWallet: t.hex().notNull(),
+    tokenId: t.bigint().notNull(),
+    index: t.bigint().notNull(),
+    committer: t.hex().notNull(),
+    committedOwner: t.hex().notNull(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+    txHash: t.hex().notNull(),
+    revealed: t.boolean().notNull().default(false),
+    cancelled: t.boolean().notNull().default(false),
+    poolIndex: t.bigint(),
+    revealBlockNumber: t.bigint(),
+    revealTimestamp: t.bigint(),
+    revealTxHash: t.hex(),
+    cancelBlockNumber: t.bigint(),
+    cancelTimestamp: t.bigint(),
+    cancelTxHash: t.hex(),
+  }),
+  (table) => ({
+    walletIdx: index().on(table.qualifyingWallet),
+    tokenIdx: index().on(table.tokenId),
+    txHashIdx: index().on(table.txHash),
+  }),
+);
+
+export const zombieConfig = onchainTable(
+  "zombie_config",
+  (t) => ({
+    id: t.text().primaryKey(),
+    paused: t.boolean().notNull().default(true),
+    merkleRoot: t.hex(),
+    seedBlock: t.bigint(),
+    seed: t.hex(),
+    seedLocked: t.boolean().notNull().default(false),
+    poolSize: t.integer().notNull().default(0),
+    poolSealed: t.boolean().notNull().default(false),
+    blockNumber: t.bigint(),
+    timestamp: t.bigint(),
+    txHash: t.hex(),
+  }),
+);
+
+// ──────────────────────────────────────────────
+//  NormiesLegendaryCanvas
+// ──────────────────────────────────────────────
+
+export const legendaryCanvasTrait = onchainTable(
+  "legendary_canvas_trait",
+  (t) => ({
+    tokenId: t.bigint().primaryKey(),
+    isLegendary: t.boolean().notNull().default(false),
+    artistName: t.text(),
+    operator: t.hex(),
+    blockNumber: t.bigint(),
+    timestamp: t.bigint(),
+    txHash: t.hex(),
+  }),
+  (table) => ({
+    activeIdx: index().on(table.isLegendary),
+    operatorIdx: index().on(table.operator),
+  }),
+);
+
+// ──────────────────────────────────────────────
 //  Adapter8004 — AgentBound
 //
 //  One row per binding (standard × tokenContract × tokenId). PK is composite

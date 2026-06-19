@@ -5,7 +5,12 @@ export const errorHandler: ErrorHandler = (err, c) => {
 
     const message = err instanceof Error ? err.message : "Internal server error";
 
-    if (message.includes("TokenDataNotSet") || message.includes("TokenNotTransformed") || message.includes("revert")) {
+    if (
+        message.includes("TokenDataNotSet") ||
+        message.includes("TokenNotTransformed") ||
+        message.includes("not a zombie") ||
+        message.includes("revert")
+    ) {
         return c.json({ error: "Token not found or data not set" }, 404);
     }
 

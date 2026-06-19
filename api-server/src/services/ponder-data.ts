@@ -101,6 +101,8 @@ export interface StatsData {
     totalBurnedTokens: number;
     totalTransforms: number;
     totalTokenData: number;
+    totalZombies: number;
+    totalLegendaryCanvases: number;
     totalActionPointsDistributed: string;
 }
 
@@ -123,6 +125,63 @@ export interface IndexedCanvasState {
     blockNumber: string;
     timestamp: string;
     txHash: `0x${string}`;
+}
+
+export interface IndexedZombieState {
+    tokenId: string;
+    isZombie: boolean;
+    poolIndex: string | null;
+    bitmap: `0x${string}` | null;
+    attributesJson: string | null;
+    qualifyingWallet: string | null;
+    commitId: string | null;
+    blockNumber: string | null;
+    timestamp: string | null;
+    txHash: `0x${string}` | null;
+}
+
+export interface IndexedZombieConversion {
+    commitId: string;
+    qualifyingWallet: string;
+    tokenId: string;
+    index: string;
+    committer: string;
+    committedOwner: string;
+    blockNumber: string;
+    timestamp: string;
+    txHash: `0x${string}`;
+    revealed: boolean;
+    cancelled: boolean;
+    poolIndex: string | null;
+    revealBlockNumber: string | null;
+    revealTimestamp: string | null;
+    revealTxHash: `0x${string}` | null;
+    cancelBlockNumber: string | null;
+    cancelTimestamp: string | null;
+    cancelTxHash: `0x${string}` | null;
+}
+
+export interface IndexedZombieStatus {
+    paused: boolean;
+    merkleRoot: `0x${string}` | null;
+    seedBlock: string | null;
+    seed: `0x${string}` | null;
+    seedLocked: boolean;
+    poolSize: number;
+    poolSealed: boolean;
+    blockNumber: string | null;
+    timestamp: string | null;
+    txHash: `0x${string}` | null;
+}
+
+export interface IndexedLegendaryCanvasState {
+    tokenId: string;
+    isLegendary: boolean;
+    artistName: string | null;
+    operator: `0x${string}` | null;
+    blockNumber: string | null;
+    timestamp: string | null;
+    txHash: `0x${string}` | null;
 }
 
 // ──────────────────────────────────────────────
@@ -175,6 +234,67 @@ export async function getIndexedCanvasStateBatch(
         tokenIds: tokenIds.map((tokenId) => tokenId.toString()),
     });
     return res.states ?? {};
+}
+
+// ──────────────────────────────────────────────
+//  Zombie state
+// ──────────────────────────────────────────────
+
+export async function getIndexedZombieState(tokenId: number): Promise<IndexedZombieState> {
+    return ponderFetch(`/zombie-state/${tokenId}`);
+}
+
+export async function getIndexedZombieStateBatch(
+    tokenIds: (number | bigint | string)[],
+): Promise<Record<string, IndexedZombieState>> {
+    const res = await ponderPost<{ states: Record<string, IndexedZombieState> }>("/zombie-state/batch", {
+        tokenIds: tokenIds.map((tokenId) => tokenId.toString()),
+    });
+    return res.states ?? {};
+}
+
+export async function getIndexedZombieConversions(
+    limit = 50,
+    offset = 0,
+): Promise<IndexedZombieConversion[]> {
+    return ponderFetch(`/zombies/conversions?limit=${limit}&offset=${offset}`);
+}
+
+export async function getIndexedZombieConversionsForWallet(
+    address: string,
+    limit = 50,
+    offset = 0,
+): Promise<IndexedZombieConversion[]> {
+    return ponderFetch(`/zombies/wallet/${address.toLowerCase()}?limit=${limit}&offset=${offset}`);
+}
+
+export async function getIndexedZombieConversionsForToken(tokenId: number): Promise<IndexedZombieConversion[]> {
+    return ponderFetch(`/zombies/token/${tokenId}`);
+}
+
+export async function getIndexedZombieStatus(): Promise<IndexedZombieStatus> {
+    return ponderFetch("/zombies/status");
+}
+
+// ──────────────────────────────────────────────
+//  Legendary Canvas
+// ──────────────────────────────────────────────
+
+export async function getIndexedLegendaryCanvasState(tokenId: number): Promise<IndexedLegendaryCanvasState> {
+    return ponderFetch(`/legendary-canvas/${tokenId}`);
+}
+
+export async function getIndexedLegendaryCanvasStateBatch(
+    tokenIds: (number | bigint | string)[],
+): Promise<Record<string, IndexedLegendaryCanvasState>> {
+    const res = await ponderPost<{ states: Record<string, IndexedLegendaryCanvasState> }>("/legendary-canvas/batch", {
+        tokenIds: tokenIds.map((tokenId) => tokenId.toString()),
+    });
+    return res.states ?? {};
+}
+
+export async function getIndexedLegendaryCanvases(limit = 50, offset = 0): Promise<IndexedLegendaryCanvasState[]> {
+    return ponderFetch(`/legendary-canvas?limit=${limit}&offset=${offset}`);
 }
 
 // ──────────────────────────────────────────────

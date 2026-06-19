@@ -131,10 +131,11 @@
         <h2>Endpoints</h2>
 
         <div class="note">
-            <strong>Canvas Support:</strong> The <code>/normie/:id/pixels</code>, <code>/normie/:id/image.svg</code>,
+            <strong>Active Rendering:</strong> The <code>/normie/:id/pixels</code>, <code>/normie/:id/image.svg</code>,
             <code>/normie/:id/image.png</code>, and <code>/normie/:id/metadata</code> endpoints now return
-            composited (customized) data when a Normie has been edited via NormiesCanvas.
-            Use the <code>/normie/:id/original/*</code> endpoints to access pre-transform data.
+            active V5-style token data. Zombie-converted tokens use zombie art and attributes; Canvas-edited
+            tokens use active base art XOR transform. Use the <code>/normie/:id/original/*</code> endpoints
+            to access original mint data, ignoring both Canvas edits and zombie conversion.
         </div>
 
         <div class="endpoint">
@@ -145,7 +146,7 @@
                 Returns the 40x40 monochrome bitmap as a 1600-character binary string of <code>0</code>s and <code>1</code>s.
                 Row-major order, top-left to bottom-right.
                 <code>1</code> = pixel on (#48494b), <code>0</code> = pixel off (#e3e5e4 background).
-                If the Normie has been customized, returns the composited (original XOR transform) bitmap.
+                If the Normie is a zombie, returns zombie art. If customized, returns active base art XOR transform.
             </p>
             <pre><code>curl https://your-api-domain.com/normie/0/pixels
 
@@ -200,7 +201,7 @@
             <p class="desc">
                 Returns the Normie image as an SVG. 1000x1000 output with a 40x40 viewBox.
                 Matches the on-chain renderer output exactly (RLE row-scan optimization).
-                If customized, returns the composited image.
+                If the Normie is a zombie, returns zombie art. If customized, returns the composited image.
             </p>
             <pre><code>curl https://your-api-domain.com/normie/0/image.svg -o normie.svg
 
@@ -214,7 +215,7 @@
             <span class="response-type">image/png</span>
             <p class="desc">
                 Returns the Normie image as a 1000x1000 PNG. Rasterized from the SVG with pixel-perfect rendering.
-                If customized, returns the composited image.
+                If the Normie is a zombie, returns zombie art. If customized, returns the composited image.
             </p>
             <pre><code>curl https://your-api-domain.com/normie/0/image.png -o normie.png</code></pre>
         </div>
@@ -224,9 +225,11 @@
             <span class="path">/normie/:id/metadata</span>
             <span class="response-type">application/json</span>
             <p class="desc">
-                Returns the full NFT metadata JSON, matching the on-chain <code>tokenURI()</code> output (V4 renderer).
-                Includes name, attributes (with canvas-aware Level, Action Points, Customized), SVG image, and animation URL.
-                If customized, uses the composited image.
+                Returns the full NFT metadata JSON, matching the active on-chain <code>tokenURI()</code> output.
+                Human tokens keep original mint traits; zombie tokens use zombie attributes.
+                Includes name, attributes (with Level, Action Points, Customized), SVG image, and animation URL.
+                If customized, uses the active composited image.
+                Selected tokens may also include a <code>Legendary Canvas</code> artist trait.
             </p>
             <pre><code>curl https://your-api-domain.com/normie/0/metadata
 
@@ -287,27 +290,112 @@
 
         <h2>Original Endpoints (Pre-Transform)</h2>
 
-        <p>These endpoints always return the original Normie data, ignoring any Canvas customizations.</p>
+        <p>These endpoints always return the original Normie mint data, ignoring any Canvas customizations and zombie conversion.</p>
 
         <div class="endpoint">
             <span class="method">GET</span>
             <span class="path">/normie/:id/original/pixels</span>
             <span class="response-type">text/plain</span>
-            <p class="desc">Returns the original 40x40 bitmap as a 1600-character binary string, before any Canvas edits.</p>
+            <p class="desc">Returns the original 40x40 bitmap as a 1600-character binary string, before any Canvas edits or zombie conversion.</p>
         </div>
 
         <div class="endpoint">
             <span class="method">GET</span>
             <span class="path">/normie/:id/original/image.svg</span>
             <span class="response-type">image/svg+xml</span>
-            <p class="desc">Returns the original Normie SVG image, before any Canvas edits.</p>
+            <p class="desc">Returns the original Normie SVG image, before any Canvas edits or zombie conversion.</p>
         </div>
 
         <div class="endpoint">
             <span class="method">GET</span>
             <span class="path">/normie/:id/original/image.png</span>
             <span class="response-type">image/png</span>
-            <p class="desc">Returns the original Normie PNG image, before any Canvas edits.</p>
+            <p class="desc">Returns the original Normie PNG image, before any Canvas edits or zombie conversion.</p>
+        </div>
+
+        <h2>Zombie Endpoints</h2>
+
+        <p>
+            These endpoints expose NormiesZombie conversion state, pool status, and zombie-specific assets.
+            The default <code>/normie/:id</code> render and metadata endpoints already use zombie data when a token is converted.
+        </p>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/zombies/status</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">Returns global NormiesZombie status: paused state, merkle root, seed state, pool size, and pool seal state.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/zombies/conversions</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">Lists zombie conversion commitments, newest first. Supports <code>?limit=50&amp;offset=0</code>.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/zombies/wallet/:address</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">Lists zombie conversion commitments for a qualifying wallet. Supports <code>?limit=50&amp;offset=0</code>.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/zombies/token/:id</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">Returns zombie state plus conversion history for a token. Equivalent token aliases exist under <code>/normie/:id/zombie/*</code>.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/zombies/token/:id/attributes</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">Returns parsed zombie attributes for a converted token.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/zombies/token/:id/pixels</span>
+            <span class="response-type">text/plain</span>
+            <p class="desc">Returns the base zombie bitmap as a 1600-character binary string.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/zombies/token/:id/image.svg</span>
+            <span class="response-type">image/svg+xml</span>
+            <p class="desc">Returns the base zombie SVG image.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/zombies/token/:id/image.png</span>
+            <span class="response-type">image/png</span>
+            <p class="desc">Returns the base zombie PNG image.</p>
+        </div>
+
+        <h2>Legendary Canvas Endpoints</h2>
+
+        <p>
+            Legendary Canvas is an owner-managed optional trait for selected Normies.
+            When set, <code>/normie/:id/metadata</code> includes the artist name as
+            <code>{"trait_type":"Legendary Canvas","value":"Artist Name"}</code>.
+        </p>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/legendary-canvas</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">Lists active Legendary Canvas entries, newest first. Supports <code>?limit=50&amp;offset=0</code>.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span>
+            <span class="path">/legendary-canvas/token/:id</span>
+            <span class="response-type">application/json</span>
+            <p class="desc">Returns Legendary Canvas state for a token: active state, artist name, operator, block number, timestamp, and tx hash.</p>
         </div>
 
         <h2>Canvas Endpoints</h2>
@@ -330,7 +418,7 @@
             <span class="path">/normie/:id/canvas/diff</span>
             <span class="response-type">application/json</span>
             <p class="desc">
-                Returns a pixel-level diff between the original and the Canvas edits.
+                Returns a pixel-level diff between the active base image and the Canvas edits.
                 Lists which pixels were added (turned on) and removed (turned off).
             </p>
             <pre><code>curl https://your-api-domain.com/normie/42/canvas/diff

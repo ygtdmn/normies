@@ -9,10 +9,16 @@ import {
   burnedToken,
   pixelTransform,
   agentBinding,
+  zombiePoolItem,
+  zombieTokenState,
+  zombieCommitment,
+  zombieConfig,
+  legendaryCanvasTrait,
 } from "ponder:schema";
-import { bytesToHex, encodePacked, hexToBytes, keccak256, parseAbi, toBytes } from "viem";
+import { bytesToHex, encodePacked, hexToBytes, hexToString, keccak256, parseAbi, toBytes } from "viem";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const ZOMBIE_CONFIG_ID = "global";
 const REVEAL_PHRASE =
   "normies-ftw-lividly-pumice-consoling-equator-makeover-scone-speculate-dreamy-murky-zips-unplanted-verbalize";
 const EXPECTED_REVEAL_HASH = "0xe733b398326d00945c58c635ae2c06a04aa9da7edc2a12659a91877410970a9f";
@@ -31,6 +37,12 @@ const canvasStorageABI = parseAbi([
 ]);
 const getTransformedImageDataABI = parseAbi([
   "function getTransformedImageData(uint256 tokenId) view returns (bytes)",
+]);
+const zombieStorageABI = parseAbi([
+  "function getPoolBitmap(uint256 poolIndex) view returns (bytes)",
+  "function getPoolAttributes(uint256 poolIndex) view returns (bytes)",
+  "function poolSize() view returns (uint256)",
+  "function isPoolSealed() view returns (bool)",
 ]);
 
 type IndexingContext = Context;
@@ -55,6 +67,81 @@ async function readCanvasStorageAddress(context: IndexingContext, canvasAddress:
     functionName: "canvasStorage",
     args: [],
   }) as Promise<`0x${string}`>;
+}
+
+function zombieStorageAddress(): `0x${string}` {
+  const value = process.env.PONDER_ZOMBIE_STORAGE_ADDRESS;
+  if (!value) throw new Error("PONDER_ZOMBIE_STORAGE_ADDRESS must be configured");
+  return value as `0x${string}`;
+}
+
+async function readZombiePoolItem(
+  context: IndexingContext,
+  storageAddress: `0x${string}`,
+  poolIndex: bigint,
+): Promise<{ bitmap: `0x${string}`; attributesJson: string }> {
+  const [bitmap, attributesHex] = await Promise.all([
+    context.client.readContract({
+      address: storageAddress,
+      abi: zombieStorageABI,
+      functionName: "getPoolBitmap",
+      args: [poolIndex],
+    }) as Promise<`0x${string}`>,
+    context.client.readContract({
+      address: storageAddress,
+      abi: zombieStorageABI,
+      functionName: "getPoolAttributes",
+      args: [poolIndex],
+    }) as Promise<`0x${string}`>,
+  ]);
+
+  return { bitmap, attributesJson: hexToString(attributesHex) };
+}
+
+async function readZombiePoolSize(
+  context: IndexingContext,
+  storageAddress: `0x${string}`,
+): Promise<number> {
+  const value = await context.client.readContract({
+    address: storageAddress,
+    abi: zombieStorageABI,
+    functionName: "poolSize",
+    args: [],
+  }) as bigint;
+  return Number(value);
+}
+
+async function getStoredZombiePoolItem(
+  context: IndexingContext,
+  poolIndex: bigint,
+  meta: EventMeta,
+): Promise<{ bitmap: `0x${string}`; attributesJson: string }> {
+  const existing = await context.db.find(zombiePoolItem, { poolIndex });
+  if (existing) {
+    return { bitmap: existing.bitmap, attributesJson: existing.attributesJson };
+  }
+
+  const item = await readZombiePoolItem(context, zombieStorageAddress(), poolIndex);
+  await context.db
+    .insert(zombiePoolItem)
+    .values({
+      poolIndex,
+      bitmap: item.bitmap,
+      attributesJson: item.attributesJson,
+      bitmapPointer: null,
+      attributesPointer: null,
+      blockNumber: meta.blockNumber,
+      timestamp: meta.timestamp,
+      txHash: meta.txHash,
+    })
+    .onConflictDoUpdate({
+      bitmap: item.bitmap,
+      attributesJson: item.attributesJson,
+      blockNumber: meta.blockNumber,
+      timestamp: meta.timestamp,
+      txHash: meta.txHash,
+    });
+  return item;
 }
 
 async function upsertDefaultCanvasState(
@@ -172,6 +259,96 @@ async function upsertCanvasState(
       delegate: next.delegate,
       delegateSetBy: next.delegateSetBy,
       latestTransformBitmap: next.latestTransformBitmap,
+      blockNumber: next.blockNumber,
+      timestamp: next.timestamp,
+      txHash: next.txHash,
+    });
+}
+
+async function upsertZombieTokenState(
+  context: IndexingContext,
+  tokenId: bigint,
+  values: {
+    isZombie?: boolean;
+    poolIndex?: bigint | null;
+    bitmap?: `0x${string}` | null;
+    attributesJson?: string | null;
+    qualifyingWallet?: `0x${string}` | null;
+    commitId?: bigint | null;
+  },
+  meta: EventMeta,
+): Promise<void> {
+  const existing = await context.db.find(zombieTokenState, { tokenId });
+  const next = {
+    tokenId,
+    isZombie: values.isZombie ?? existing?.isZombie ?? false,
+    poolIndex: values.poolIndex !== undefined ? values.poolIndex : existing?.poolIndex ?? null,
+    bitmap: values.bitmap !== undefined ? values.bitmap : existing?.bitmap ?? null,
+    attributesJson: values.attributesJson !== undefined ? values.attributesJson : existing?.attributesJson ?? null,
+    qualifyingWallet: values.qualifyingWallet !== undefined
+      ? values.qualifyingWallet
+      : existing?.qualifyingWallet ?? null,
+    commitId: values.commitId !== undefined ? values.commitId : existing?.commitId ?? null,
+    blockNumber: meta.blockNumber,
+    timestamp: meta.timestamp,
+    txHash: meta.txHash,
+  };
+
+  await context.db
+    .insert(zombieTokenState)
+    .values(next)
+    .onConflictDoUpdate({
+      isZombie: next.isZombie,
+      poolIndex: next.poolIndex,
+      bitmap: next.bitmap,
+      attributesJson: next.attributesJson,
+      qualifyingWallet: next.qualifyingWallet,
+      commitId: next.commitId,
+      blockNumber: next.blockNumber,
+      timestamp: next.timestamp,
+      txHash: next.txHash,
+    });
+}
+
+async function upsertZombieConfig(
+  context: IndexingContext,
+  values: {
+    paused?: boolean;
+    merkleRoot?: `0x${string}` | null;
+    seedBlock?: bigint | null;
+    seed?: `0x${string}` | null;
+    seedLocked?: boolean;
+    poolSize?: number;
+    poolSealed?: boolean;
+  },
+  meta: EventMeta,
+): Promise<void> {
+  const existing = await context.db.find(zombieConfig, { id: ZOMBIE_CONFIG_ID });
+  const next = {
+    id: ZOMBIE_CONFIG_ID,
+    paused: values.paused ?? existing?.paused ?? true,
+    merkleRoot: values.merkleRoot !== undefined ? values.merkleRoot : existing?.merkleRoot ?? null,
+    seedBlock: values.seedBlock !== undefined ? values.seedBlock : existing?.seedBlock ?? null,
+    seed: values.seed !== undefined ? values.seed : existing?.seed ?? null,
+    seedLocked: values.seedLocked ?? existing?.seedLocked ?? false,
+    poolSize: values.poolSize ?? existing?.poolSize ?? 0,
+    poolSealed: values.poolSealed ?? existing?.poolSealed ?? false,
+    blockNumber: meta.blockNumber,
+    timestamp: meta.timestamp,
+    txHash: meta.txHash,
+  };
+
+  await context.db
+    .insert(zombieConfig)
+    .values(next)
+    .onConflictDoUpdate({
+      paused: next.paused,
+      merkleRoot: next.merkleRoot,
+      seedBlock: next.seedBlock,
+      seed: next.seed,
+      seedLocked: next.seedLocked,
+      poolSize: next.poolSize,
+      poolSealed: next.poolSealed,
       blockNumber: next.blockNumber,
       timestamp: next.timestamp,
       txHash: next.txHash,
@@ -347,6 +524,254 @@ ponder.on("NormiesCanvas:PixelsTransformed", async ({ event, context }) => {
     { customized: true, latestTransformBitmap: bitmap },
     eventMeta(event),
   );
+});
+
+// ──────────────────────────────────────────────
+//  NormiesZombieStorage: Pool Assets & Token State
+// ──────────────────────────────────────────────
+
+ponder.on("NormiesZombieStorage:ZombieAdded", async ({ event, context }) => {
+  const { poolIndex, bitmapPointer, attributesPointer } = event.args;
+  const meta = eventMeta(event);
+  const item = await readZombiePoolItem(context, event.log.address, poolIndex);
+  const poolSize = await readZombiePoolSize(context, event.log.address);
+
+  await context.db
+    .insert(zombiePoolItem)
+    .values({
+      poolIndex,
+      bitmap: item.bitmap,
+      attributesJson: item.attributesJson,
+      bitmapPointer,
+      attributesPointer,
+      blockNumber: event.block.number,
+      timestamp: event.block.timestamp,
+      txHash: event.transaction.hash,
+    })
+    .onConflictDoUpdate({
+      bitmap: item.bitmap,
+      attributesJson: item.attributesJson,
+      bitmapPointer,
+      attributesPointer,
+      blockNumber: event.block.number,
+      timestamp: event.block.timestamp,
+      txHash: event.transaction.hash,
+    });
+
+  await upsertZombieConfig(context, { poolSize }, meta);
+});
+
+ponder.on("NormiesZombieStorage:PoolSealed", async ({ event, context }) => {
+  const { poolSize } = event.args;
+  await upsertZombieConfig(
+    context,
+    { poolSize: Number(poolSize), poolSealed: true },
+    eventMeta(event),
+  );
+});
+
+ponder.on("NormiesZombieStorage:ZombieSet", async ({ event, context }) => {
+  const { tokenId, poolIndex } = event.args;
+  const meta = eventMeta(event);
+  const item = await getStoredZombiePoolItem(context, poolIndex, meta);
+
+  await upsertZombieTokenState(
+    context,
+    tokenId,
+    {
+      isZombie: true,
+      poolIndex,
+      bitmap: item.bitmap,
+      attributesJson: item.attributesJson,
+    },
+    meta,
+  );
+});
+
+// ──────────────────────────────────────────────
+//  NormiesZombie: Config & Conversions
+// ──────────────────────────────────────────────
+
+ponder.on("NormiesZombie:MerkleRootSet", async ({ event, context }) => {
+  await upsertZombieConfig(
+    context,
+    { merkleRoot: event.args.merkleRoot },
+    eventMeta(event),
+  );
+});
+
+ponder.on("NormiesZombie:SeedBlockSet", async ({ event, context }) => {
+  await upsertZombieConfig(
+    context,
+    { seedBlock: event.args.seedBlock },
+    eventMeta(event),
+  );
+});
+
+ponder.on("NormiesZombie:SeedLocked", async ({ event, context }) => {
+  const { seed, poolSize } = event.args;
+  await upsertZombieConfig(
+    context,
+    {
+      seed,
+      seedLocked: true,
+      poolSize: Number(poolSize),
+      poolSealed: true,
+    },
+    eventMeta(event),
+  );
+});
+
+ponder.on("NormiesZombie:PausedSet", async ({ event, context }) => {
+  await upsertZombieConfig(
+    context,
+    { paused: event.args.paused },
+    eventMeta(event),
+  );
+});
+
+ponder.on("NormiesZombie:ZombieConvertCommitted", async ({ event, context }) => {
+  const { commitId, qualifyingWallet, tokenId, index, committer, committedOwner } = event.args;
+
+  await context.db
+    .insert(zombieCommitment)
+    .values({
+      commitId,
+      qualifyingWallet,
+      tokenId,
+      index,
+      committer,
+      committedOwner,
+      blockNumber: event.block.number,
+      timestamp: event.block.timestamp,
+      txHash: event.transaction.hash,
+      revealed: false,
+      cancelled: false,
+      poolIndex: null,
+      revealBlockNumber: null,
+      revealTimestamp: null,
+      revealTxHash: null,
+      cancelBlockNumber: null,
+      cancelTimestamp: null,
+      cancelTxHash: null,
+    })
+    .onConflictDoUpdate({
+      qualifyingWallet,
+      tokenId,
+      index,
+      committer,
+      committedOwner,
+      blockNumber: event.block.number,
+      timestamp: event.block.timestamp,
+      txHash: event.transaction.hash,
+      revealed: false,
+      cancelled: false,
+      poolIndex: null,
+      revealBlockNumber: null,
+      revealTimestamp: null,
+      revealTxHash: null,
+      cancelBlockNumber: null,
+      cancelTimestamp: null,
+      cancelTxHash: null,
+    });
+});
+
+ponder.on("NormiesZombie:ZombieConverted", async ({ event, context }) => {
+  const { commitId, tokenId, qualifyingWallet, poolIndex } = event.args;
+  const meta = eventMeta(event);
+  const item = await getStoredZombiePoolItem(context, poolIndex, meta);
+
+  const commitment = await context.db.find(zombieCommitment, { commitId });
+  if (commitment) {
+    await context.db.update(zombieCommitment, { commitId }).set({
+      revealed: true,
+      cancelled: false,
+      poolIndex,
+      revealBlockNumber: event.block.number,
+      revealTimestamp: event.block.timestamp,
+      revealTxHash: event.transaction.hash,
+    });
+  }
+
+  await upsertZombieTokenState(
+    context,
+    tokenId,
+    {
+      isZombie: true,
+      poolIndex,
+      bitmap: item.bitmap,
+      attributesJson: item.attributesJson,
+      qualifyingWallet,
+      commitId,
+    },
+    meta,
+  );
+});
+
+ponder.on("NormiesZombie:ZombieCommitCancelled", async ({ event, context }) => {
+  const { commitId } = event.args;
+  const commitment = await context.db.find(zombieCommitment, { commitId });
+  if (!commitment) return;
+
+  await context.db.update(zombieCommitment, { commitId }).set({
+    revealed: false,
+    cancelled: true,
+    cancelBlockNumber: event.block.number,
+    cancelTimestamp: event.block.timestamp,
+    cancelTxHash: event.transaction.hash,
+  });
+});
+
+// ──────────────────────────────────────────────
+//  NormiesLegendaryCanvas: Optional Artist Trait
+// ──────────────────────────────────────────────
+
+ponder.on("NormiesLegendaryCanvas:LegendaryCanvasSet", async ({ event, context }) => {
+  const { tokenId, artistName, operator } = event.args;
+
+  await context.db
+    .insert(legendaryCanvasTrait)
+    .values({
+      tokenId,
+      isLegendary: true,
+      artistName,
+      operator,
+      blockNumber: event.block.number,
+      timestamp: event.block.timestamp,
+      txHash: event.transaction.hash,
+    })
+    .onConflictDoUpdate({
+      isLegendary: true,
+      artistName,
+      operator,
+      blockNumber: event.block.number,
+      timestamp: event.block.timestamp,
+      txHash: event.transaction.hash,
+    });
+});
+
+ponder.on("NormiesLegendaryCanvas:LegendaryCanvasCleared", async ({ event, context }) => {
+  const { tokenId, operator } = event.args;
+
+  await context.db
+    .insert(legendaryCanvasTrait)
+    .values({
+      tokenId,
+      isLegendary: false,
+      artistName: null,
+      operator,
+      blockNumber: event.block.number,
+      timestamp: event.block.timestamp,
+      txHash: event.transaction.hash,
+    })
+    .onConflictDoUpdate({
+      isLegendary: false,
+      artistName: null,
+      operator,
+      blockNumber: event.block.number,
+      timestamp: event.block.timestamp,
+      txHash: event.transaction.hash,
+    });
 });
 
 // ──────────────────────────────────────────────

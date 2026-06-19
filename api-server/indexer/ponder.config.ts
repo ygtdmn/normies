@@ -8,7 +8,8 @@ function requiredEnv(name: string): string {
 }
 
 const chainId = Number(requiredEnv("PONDER_CHAIN_ID"));
-const chainName = chainId === 1 ? "mainnet" : "sepolia";
+const chainName =
+  chainId === 1 ? "mainnet" : chainId === 11_155_111 ? "sepolia" : "anvil";
 const startBlock = Number(requiredEnv("PONDER_START_BLOCK"));
 
 const TransferEvent = parseAbiItem(
@@ -34,6 +35,34 @@ const PixelsTransformedEvent = parseAbiItem(
 );
 const AgentBoundEvent = parseAbiItem(
   "event AgentBound(uint256 indexed agentId, uint8 indexed standard, address indexed tokenContract, uint256 tokenId, address registeredBy)",
+);
+const ZombieAddedEvent = parseAbiItem(
+  "event ZombieAdded(uint256 indexed poolIndex, address bitmapPointer, address attributesPointer)",
+);
+const PoolSealedEvent = parseAbiItem("event PoolSealed(uint256 poolSize)");
+const ZombieSetEvent = parseAbiItem(
+  "event ZombieSet(uint256 indexed tokenId, uint256 indexed poolIndex)",
+);
+const MerkleRootSetEvent = parseAbiItem("event MerkleRootSet(bytes32 merkleRoot)");
+const SeedBlockSetEvent = parseAbiItem("event SeedBlockSet(uint256 seedBlock)");
+const SeedLockedEvent = parseAbiItem(
+  "event SeedLocked(bytes32 seed, uint256 poolSize)",
+);
+const PausedSetEvent = parseAbiItem("event PausedSet(bool paused)");
+const ZombieConvertCommittedEvent = parseAbiItem(
+  "event ZombieConvertCommitted(uint256 indexed commitId, address indexed qualifyingWallet, uint256 indexed tokenId, uint256 index, address committer, address committedOwner)",
+);
+const ZombieConvertedEvent = parseAbiItem(
+  "event ZombieConverted(uint256 indexed commitId, uint256 indexed tokenId, address indexed qualifyingWallet, uint256 poolIndex)",
+);
+const ZombieCommitCancelledEvent = parseAbiItem(
+  "event ZombieCommitCancelled(uint256 indexed commitId, address indexed qualifyingWallet, uint256 indexed tokenId)",
+);
+const LegendaryCanvasSetEvent = parseAbiItem(
+  "event LegendaryCanvasSet(uint256 indexed tokenId, string artistName, address indexed operator)",
+);
+const LegendaryCanvasClearedEvent = parseAbiItem(
+  "event LegendaryCanvasCleared(uint256 indexed tokenId, address indexed operator)",
 );
 
 export default createConfig({
@@ -74,6 +103,38 @@ export default createConfig({
       address: requiredEnv("PONDER_ADAPTER_ADDRESS") as `0x${string}`,
       startBlock: Number(
         process.env.PONDER_ADAPTER_START_BLOCK ?? startBlock,
+      ),
+    },
+    NormiesZombieStorage: {
+      abi: [ZombieAddedEvent, PoolSealedEvent, ZombieSetEvent],
+      chain: chainName,
+      address: requiredEnv("PONDER_ZOMBIE_STORAGE_ADDRESS") as `0x${string}`,
+      startBlock: Number(
+        process.env.PONDER_ZOMBIE_STORAGE_START_BLOCK ??
+          process.env.PONDER_ZOMBIE_START_BLOCK ??
+          startBlock,
+      ),
+    },
+    NormiesZombie: {
+      abi: [
+        MerkleRootSetEvent,
+        SeedBlockSetEvent,
+        SeedLockedEvent,
+        PausedSetEvent,
+        ZombieConvertCommittedEvent,
+        ZombieConvertedEvent,
+        ZombieCommitCancelledEvent,
+      ],
+      chain: chainName,
+      address: requiredEnv("PONDER_ZOMBIE_ADDRESS") as `0x${string}`,
+      startBlock: Number(process.env.PONDER_ZOMBIE_START_BLOCK ?? startBlock),
+    },
+    NormiesLegendaryCanvas: {
+      abi: [LegendaryCanvasSetEvent, LegendaryCanvasClearedEvent],
+      chain: chainName,
+      address: requiredEnv("PONDER_LEGENDARY_CANVAS_ADDRESS") as `0x${string}`,
+      startBlock: Number(
+        process.env.PONDER_LEGENDARY_CANVAS_START_BLOCK ?? startBlock,
       ),
     },
   },

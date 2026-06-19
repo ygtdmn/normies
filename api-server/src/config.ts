@@ -17,12 +17,23 @@ export const CANVAS_ADDRESS = (process.env.CANVAS_ADDRESS ?? "0x64951d92e345C503
 export const CANVAS_STORAGE_ADDRESS = (process.env.CANVAS_STORAGE_ADDRESS ?? "0xC255BE0983776BAB027a156681b6925cde47B2D1") as `0x${string}` | undefined;
 export const CANVAS_ENABLED = !!(CANVAS_ADDRESS && CANVAS_STORAGE_ADDRESS);
 
+// Zombie contract addresses (optional until deployed — if not set, zombie features are disabled)
+export const ZOMBIE_ADDRESS = process.env.ZOMBIE_ADDRESS as `0x${string}` | undefined;
+export const ZOMBIE_STORAGE_ADDRESS = process.env.ZOMBIE_STORAGE_ADDRESS as `0x${string}` | undefined;
+export const ZOMBIE_RENDERER_ADDRESS = process.env.ZOMBIE_RENDERER_ADDRESS as `0x${string}` | undefined;
+export const ZOMBIE_ENABLED = !!(ZOMBIE_ADDRESS && ZOMBIE_STORAGE_ADDRESS);
+export const LEGENDARY_CANVAS_ADDRESS = process.env.LEGENDARY_CANVAS_ADDRESS as `0x${string}` | undefined;
+export const LEGENDARY_CANVAS_ENABLED = !!LEGENDARY_CANVAS_ADDRESS;
+
 // Cache settings
 export const CACHE_MAX_ENTRIES = Number(process.env.CACHE_MAX_ENTRIES ?? 10_000);
 export const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS ?? 3_600_000); // 1 hour default
 export const CANVAS_CACHE_TTL_MS = Number(process.env.CANVAS_CACHE_TTL_MS ?? 60_000); // 1 minute
 export const CANVAS_INFO_CACHE_TTL_MS = Number(process.env.CANVAS_INFO_CACHE_TTL_MS ?? 60_000); // 1 minute
 export const CANVAS_STATUS_CACHE_TTL_MS = Number(process.env.CANVAS_STATUS_CACHE_TTL_MS ?? 300_000); // 5 minutes
+export const ZOMBIE_CACHE_TTL_MS = Number(process.env.ZOMBIE_CACHE_TTL_MS ?? 60_000); // 1 minute
+export const ZOMBIE_STATUS_CACHE_TTL_MS = Number(process.env.ZOMBIE_STATUS_CACHE_TTL_MS ?? 300_000); // 5 minutes
+export const LEGENDARY_CANVAS_CACHE_TTL_MS = Number(process.env.LEGENDARY_CANVAS_CACHE_TTL_MS ?? 60_000); // 1 minute
 
 // Rate limiting
 export const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
