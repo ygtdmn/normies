@@ -649,3 +649,7 @@ All errors return JSON: { "error": "message" }
 - NormiesCanvas: 0x64951d92e345C50381267380e2975f66810E869c — Burn-to-edit orchestrator: commit-reveal burns, action points, pixel transforms
 - NormiesCanvasStorage: 0xC255BE0983776BAB027a156681b6925cde47B2D1 — SSTORE2 storage for transform layer bitmaps (plaintext, no XOR)
 - NormiesRendererV4: 0x8eC46Cc1f306652868a4dfbAAae87CBa2715A0eB — V4: Canvas-aware renderer with composited SVG & extra traits
+- NormiesZombie: 0x18533ad55a54c3847Da06A48b51aD7DcB2551202 — Merkle-gated commit-reveal converter that turns eligible Normies into bespoke Zombies
+- NormiesZombieStorage: 0xA331bD22C90D1DA096934Db8bc6b69F0e1491E26 — SSTORE2 storage for the zombie pool assets & conversion records (plaintext, no XOR)
+- NormiesLegendaryCanvas: 0xfA55f6592522dA74224a67c7D3Fd1DF759c628e8 — Owner-managed registry of selected Legendary Canvas artist traits
+- NormiesRendererV5: 0x7c726f02C5e840e1656b522A5C22caaf87C1C35C — V5: V4-compatible renderer adding a zombie metadata & art branch
