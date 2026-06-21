@@ -9,6 +9,10 @@ export const cacheHeaders: MiddlewareHandler = async (c, next) => {
     const path = c.req.path;
     if (path.startsWith("/canvas/status")) {
         c.header("Cache-Control", `public, max-age=${canvasStatusMaxAge}, s-maxage=${canvasStatusMaxAge}`);
+    } else if (path.startsWith("/rarity/admin/") || path.startsWith("/rarity/listings/stream")) {
+        c.header("Cache-Control", "no-store");
+    } else if (path.startsWith("/rarity/")) {
+        c.header("Cache-Control", "public, max-age=15, s-maxage=30, stale-while-revalidate=120");
     } else if (path.includes("/canvas/info")) {
         c.header("Cache-Control", `public, max-age=${canvasInfoMaxAge}, s-maxage=${canvasInfoMaxAge}`);
     } else if (path.includes("/owner") || path.startsWith("/holders/")) {

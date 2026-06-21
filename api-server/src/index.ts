@@ -15,6 +15,7 @@ import { llms } from "./routes/llms.js";
 import { agents } from "./routes/agents.js";
 import { zombies } from "./routes/zombies.js";
 import { legendaryCanvas } from "./routes/legendary-canvas.js";
+import { rarity } from "./routes/rarity.js";
 
 const app = new Hono();
 
@@ -27,6 +28,7 @@ app.use("/history/*", cacheHeaders);
 app.use("/holders/*", cacheHeaders);
 app.use("/zombies/*", cacheHeaders);
 app.use("/legendary-canvas/*", cacheHeaders);
+app.use("/rarity/*", cacheHeaders);
 
 app.onError(errorHandler);
 
@@ -39,6 +41,7 @@ app.route("/holders", holders);
 app.route("/agents", agents);
 app.route("/zombies", zombies);
 app.route("/legendary-canvas", legendaryCanvas);
+app.route("/rarity", rarity);
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 

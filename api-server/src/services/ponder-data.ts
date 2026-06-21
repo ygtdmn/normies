@@ -49,6 +49,26 @@ async function ponderPost<T>(path: string, body: unknown): Promise<T> {
     return res.json() as Promise<T>;
 }
 
+async function ponderPut<T>(path: string, body: unknown): Promise<T> {
+    let res: Response;
+    try {
+        res = await fetch(`${PONDER_API_URL}${path}`, {
+            method: "PUT",
+            headers: ponderHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(15_000),
+        });
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(`Ponder API request failed: ${message}`);
+    }
+    if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Ponder API ${res.status}: ${text}`);
+    }
+    return res.json() as Promise<T>;
+}
+
 // ──────────────────────────────────────────────
 //  Types
 // ──────────────────────────────────────────────
@@ -104,6 +124,56 @@ export interface StatsData {
     totalZombies: number;
     totalLegendaryCanvases: number;
     totalActionPointsDistributed: string;
+}
+
+export interface RaritySnapshotToken extends IndexedTokenData {
+    owner: string | null;
+    canvas: IndexedCanvasState | null;
+    zombie: IndexedZombieState | null;
+    legendaryCanvas: IndexedLegendaryCanvasState | null;
+    displayPixelCount?: number | null;
+}
+
+export interface RaritySnapshotBurnHolder {
+    wallet: string;
+    customizedTokensHeld: number;
+    totalRecursiveBurnCount: number;
+    totalDirectBurnCount: number;
+    tokenIds: number[];
+}
+
+export interface RaritySnapshotData {
+    blockNumber?: string;
+    historical?: boolean;
+    tokens: RaritySnapshotToken[];
+    burnedTokenIds: string[];
+    burnCounts: {
+        direct: Record<string, number>;
+        recursive: Record<string, number>;
+    };
+    recursiveBurnHolders: {
+        wallets: RaritySnapshotBurnHolder[];
+    };
+    agentBindings: AgentBindingData[];
+    stats: {
+        totalTokenData: number;
+        totalOwners: number;
+        totalBurnedTokens: number;
+        totalBurnCommitments: number;
+        totalAgentBindings: number;
+    };
+}
+
+export interface RarityLegendaryItem {
+    id: number;
+    artist: string;
+}
+
+export interface RarityLegendaryConfig {
+    current: RarityLegendaryItem[];
+    upcoming: RarityLegendaryItem[];
+    updatedAt?: string;
+    updatedBy?: string | null;
 }
 
 export interface IndexedTokenData {
@@ -302,6 +372,16 @@ export async function getIndexedLegendaryCanvases(limit = 50, offset = 0): Promi
     return ponderFetch(`/legendary-canvas?limit=${limit}&offset=${offset}`);
 }
 
+export async function getRarityLegendaryConfig(): Promise<RarityLegendaryConfig> {
+    return ponderFetch("/rarity/legendary-config");
+}
+
+export async function putRarityLegendaryConfig(
+    config: RarityLegendaryConfig & { updatedBy?: string | null },
+): Promise<RarityLegendaryConfig> {
+    return ponderPut("/rarity/legendary-config", config);
+}
+
 // ──────────────────────────────────────────────
 //  Burns
 // ──────────────────────────────────────────────
@@ -385,6 +465,17 @@ export async function getCustomizedEvents(opts: {
 
 export async function getStats(): Promise<StatsData> {
     return ponderFetch("/stats");
+}
+
+export async function getRaritySnapshot(tokenContract?: string, blockNumber?: bigint | number | string): Promise<RaritySnapshotData> {
+    const params = new URLSearchParams();
+    if (tokenContract) params.set("tokenContract", tokenContract.toLowerCase());
+    const qs = params.toString();
+    if (blockNumber !== undefined) {
+        const path = `/rarity/snapshot/block/${blockNumber.toString()}`;
+        return ponderFetch<RaritySnapshotData>(qs ? `${path}?${qs}` : path);
+    }
+    return ponderFetch<RaritySnapshotData>(qs ? `/rarity/snapshot?${qs}` : "/rarity/snapshot");
 }
 
 // ──────────────────────────────────────────────

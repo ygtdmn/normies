@@ -58,6 +58,11 @@
             font-weight: 600;
         }
         .desc { margin-top: 0.5rem; color: #6b6d6f; }
+        .meta {
+            margin-top: 0.55rem;
+            font-size: 0.86rem;
+            color: #6b6d6f;
+        }
         code {
             background: #f4f4f4;
             padding: 0.15rem 0.4rem;
@@ -93,6 +98,7 @@
             text-align: left;
             padding: 0.5rem 0.75rem;
             border-bottom: 1px solid #d0d2d3;
+            vertical-align: top;
         }
         th { font-weight: 600; background: #f4f4f4; }
         a { color: #48494b; font-weight: 600; }
@@ -118,990 +124,570 @@
         <p class="subtitle">On-Chain Normies Data for Builders</p>
 
         <p>
-            The Normies API provides programmatic access to on-chain Normies NFT data.
-            Retrieve pixel data, traits, images, and metadata for any minted Normie.
+            The Normies API provides programmatic access to on-chain Normies NFT data,
+            active rendering, Canvas history, Zombies, ERC-8004 agents, Legendary Canvas,
+            and rarity data.
         </p>
 
         <div class="note">
-            All data is sourced directly from the Ethereum mainnet smart contracts.
-            Token IDs range from <code>0</code> to <code>9999</code>.
-            See also: <a href="/llms.txt">/llms.txt</a> for LLM-friendly documentation.
+            Base URL: <code>https://api.normies.art</code>. Token IDs range from
+            <code>0</code> to <code>9999</code>. Most mutable data is served from the
+            Ponder indexer to avoid per-request RPC reads. See also:
+            <a href="/llms.txt">/llms.txt</a> for LLM-friendly documentation.
         </div>
 
         <h2>Endpoints</h2>
 
         <div class="note">
-            <strong>Active Rendering:</strong> The <code>/normie/:id/pixels</code>, <code>/normie/:id/image.svg</code>,
-            <code>/normie/:id/image.png</code>, and <code>/normie/:id/metadata</code> endpoints now return
-            active V5-style token data. Zombie-converted tokens use zombie art and attributes; Canvas-edited
-            tokens use active base art XOR transform. Use the <code>/normie/:id/original/*</code> endpoints
-            to access original mint data, ignoring both Canvas edits and zombie conversion.
+            <strong>Active Rendering:</strong> The active <code>/normie/:id/*</code> endpoints
+            apply current zombie and Canvas state. Zombie-converted tokens use zombie art and
+            attributes; Canvas-edited tokens use active base art XOR transform. Use
+            <code>/normie/:id/original/*</code> for original mint data.
+        </div>
+
+        <h3>Core</h3>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/</span><span class="response-type">text/html</span>
+            <p class="desc">Human-readable API documentation.</p>
+            <p class="meta">Cache: none</p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/:id/pixels</span>
-            <span class="response-type">text/plain</span>
-            <p class="desc">
-                Returns the 40x40 monochrome bitmap as a 1600-character binary string of <code>0</code>s and <code>1</code>s.
-                Row-major order, top-left to bottom-right.
-                <code>1</code> = pixel on (#48494b), <code>0</code> = pixel off (#e3e5e4 background).
-                If the Normie is a zombie, returns zombie art. If customized, returns active base art XOR transform.
-            </p>
-            <pre><code>curl https://your-api-domain.com/normie/0/pixels
-
-# Response: 1600 characters
-# 0000000000000000000000000000000000000000
-# 0000000001111111111111100000000000000000
-# ...</code></pre>
+            <span class="method">GET</span><span class="path">/llms.txt</span><span class="response-type">text/plain</span>
+            <p class="desc">Markdown-style documentation intended for LLM and tool ingestion.</p>
+            <p class="meta">Cache: none</p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/:id/traits/binary</span>
-            <span class="response-type">text/plain</span>
-            <p class="desc">
-                Returns the raw <code>bytes8</code> trait data as a hex string.
-                Each byte is an index into a trait category (8 categories total).
-            </p>
-            <pre><code>curl https://your-api-domain.com/normie/0/traits/binary
+            <span class="method">GET</span><span class="path">/health</span><span class="response-type">application/json</span>
+            <p class="desc">Health check returning <code>{ "status": "ok" }</code>.</p>
+            <p class="meta">Cache: none</p>
+        </div>
 
-# Response: 0x0001000305010200</code></pre>
+        <h3>Normie Token Data</h3>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/normie/all/original</span><span class="response-type">application/json</span>
+            <p class="desc">Bulk original mint dump with token ID, raw image data, decoded traits, pixel count, block number, timestamp, and transaction hash.</p>
+            <p class="meta">Cache: <code>public, max-age=60, s-maxage=300</code></p>
+            <pre><code>curl https://your-api-domain.com/normie/all/original</code></pre>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/:id/traits</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Returns decoded traits as a JSON object with human-readable labels.
-            </p>
-            <pre><code>curl https://your-api-domain.com/normie/0/traits
-
-# Response:
-{
-  "raw": "0x0001000305010200",
-  "attributes": [
-    { "trait_type": "Type", "value": "Human" },
-    { "trait_type": "Gender", "value": "Female" },
-    { "trait_type": "Age", "value": "Young" },
-    { "trait_type": "Hair Style", "value": "Straight Hair" },
-    { "trait_type": "Facial Feature", "value": "Shadow Beard" },
-    { "trait_type": "Eyes", "value": "Big Shades" },
-    { "trait_type": "Expression", "value": "Serious" },
-    { "trait_type": "Accessory", "value": "Top Hat" }
-  ]
-}</code></pre>
+            <span class="method">GET</span><span class="path">/normie/all/original/data</span><span class="response-type">application/json</span>
+            <p class="desc">Alias-style bulk original mint dump with the same token rows.</p>
+            <p class="meta">Cache: <code>public, max-age=300, s-maxage=3600</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/:id/image.svg</span>
-            <span class="response-type">image/svg+xml</span>
-            <p class="desc">
-                Returns the Normie image as an SVG. 1000x1000 output with a 40x40 viewBox.
-                Matches the on-chain renderer output exactly (RLE row-scan optimization).
-                If the Normie is a zombie, returns zombie art. If customized, returns the composited image.
-            </p>
-            <pre><code>curl https://your-api-domain.com/normie/0/image.svg -o normie.svg
-
-# Or use directly in HTML:
-# &lt;img src="https://your-api-domain.com/normie/0/image.svg" /&gt;</code></pre>
+            <span class="method">GET</span><span class="path">/normie/all/original/traits</span><span class="response-type">application/json</span>
+            <p class="desc">Decoded original traits for all indexed tokens.</p>
+            <p class="meta">Cache: <code>public, max-age=300, s-maxage=3600</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/:id/image.png</span>
-            <span class="response-type">image/png</span>
-            <p class="desc">
-                Returns the Normie image as a 1000x1000 PNG. Rasterized from the SVG with pixel-perfect rendering.
-                If the Normie is a zombie, returns zombie art. If customized, returns the composited image.
-            </p>
-            <pre><code>curl https://your-api-domain.com/normie/0/image.png -o normie.png</code></pre>
+            <span class="method">GET</span><span class="path">/normie/all/original/traits/binary</span><span class="response-type">application/json</span>
+            <p class="desc">Raw original <code>bytes8</code> trait hex for all indexed tokens.</p>
+            <p class="meta">Cache: <code>public, max-age=300, s-maxage=3600</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/:id/metadata</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Returns the full NFT metadata JSON, matching the active on-chain <code>tokenURI()</code> output.
-                Human tokens keep original mint traits; zombie tokens use zombie attributes.
-                Includes name, attributes (with Level, Action Points, Customized), SVG image, and animation URL.
-                If customized, uses the active composited image.
-                Selected tokens may also include a <code>Legendary Canvas</code> artist trait.
-            </p>
-            <pre><code>curl https://your-api-domain.com/normie/0/metadata
-
-# Response:
-{
-  "name": "Normie #0",
-  "attributes": [
-    { "trait_type": "Type", "value": "Human" },
-    ...
-    { "display_type": "number", "trait_type": "Level", "value": 1 },
-    { "display_type": "number", "trait_type": "Pixel Count", "value": 527 },
-    { "display_type": "number", "trait_type": "Action Points", "value": 0 },
-    { "trait_type": "Customized", "value": "No" }
-  ],
-  "image": "data:image/svg+xml;base64,...",
-  "animation_url": "data:text/html;base64,..."
-}</code></pre>
-        </div>
-
-        <h2>Ownership Endpoints</h2>
-
-        <p>
-            Look up current NFT ownership, powered by the Ponder indexer.
-            Tracks all Transfer events to maintain a real-time ownership index.
-        </p>
-
-        <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/:id/owner</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Returns the current owner of a Normie. Returns 404 if the token has been burned or was never minted.
-            </p>
-            <pre><code>curl https://your-api-domain.com/normie/42/owner
-
-# Response:
-{
-  "tokenId": "42",
-  "owner": "0x1234...abcd"
-}</code></pre>
+            <span class="method">GET</span><span class="path">/normie/all/original/pixels</span><span class="response-type">application/json</span>
+            <p class="desc">Original raw image data and pixel counts for all indexed tokens.</p>
+            <p class="meta">Cache: <code>public, max-age=300, s-maxage=3600</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/holders/:address</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Returns all Normie token IDs currently owned by the given wallet address.
-            </p>
-            <pre><code>curl https://your-api-domain.com/holders/0x1234...abcd
-
-# Response:
-{
-  "address": "0x1234...abcd",
-  "tokenIds": ["42", "100", "1337"]
-}</code></pre>
-        </div>
-
-        <h2>Original Endpoints (Pre-Transform)</h2>
-
-        <p>These endpoints always return the original Normie mint data, ignoring any Canvas customizations and zombie conversion.</p>
-
-        <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/all/original</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Returns a compact static dump of every indexed original Normie: original 200-byte bitmap hex,
-                pixel count, decoded traits, and index metadata. Alias: <code>/normie/all/original/data</code>.
-            </p>
-            <pre><code>curl https://your-api-domain.com/normie/all/original
-
-# Response:
-{
-  "count": 10000,
-  "tokens": [
-    {
-      "tokenId": "0",
-      "rawImageData": "0x...",
-      "pixelCount": 527,
-      "traits": { "raw": "0x...", "attributes": [...] },
-      "blockNumber": "12345678",
-      "timestamp": "1700000000",
-      "txHash": "0x..."
-    }
-  ]
-}</code></pre>
+            <span class="method">GET</span><span class="path">/normie/all/original/canvas</span><span class="response-type">application/json</span>
+            <p class="desc">Canvas-oriented alias for original bitmap rows.</p>
+            <p class="meta">Cache: <code>public, max-age=300, s-maxage=3600</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/all/original/traits</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">Returns decoded original traits for every indexed Normie.</p>
+            <span class="method">GET</span><span class="path">/normie/:id/owner</span><span class="response-type">application/json</span>
+            <p class="desc">Current indexed owner for a token. Returns upstream <code>404</code> if burned or not indexed.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=10, s-maxage=10</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/all/original/traits/binary</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">Returns raw <code>bytes8</code> original trait hex for every indexed Normie.</p>
+            <span class="method">GET</span><span class="path">/normie/:id/pixels</span><span class="response-type">text/plain</span>
+            <p class="desc">Returns the active 40x40 bitmap as a 1600-character binary string. Zombie art and Canvas transforms are applied when present.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+            <pre><code>curl https://your-api-domain.com/normie/0/pixels</code></pre>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/all/original/pixels</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Returns compact original bitmap data for every indexed Normie as <code>rawImageData</code>
-                plus <code>pixelCount</code>. Alias: <code>/normie/all/original/canvas</code>.
-            </p>
+            <span class="method">GET</span><span class="path">/normie/:id/traits/binary</span><span class="response-type">text/plain</span>
+            <p class="desc">Returns the raw original mint <code>bytes8</code> trait data as a hex string.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=300, s-maxage=3600</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/:id/original/pixels</span>
-            <span class="response-type">text/plain</span>
-            <p class="desc">Returns the original 40x40 bitmap as a 1600-character binary string, before any Canvas edits or zombie conversion.</p>
+            <span class="method">GET</span><span class="path">/normie/:id/traits</span><span class="response-type">application/json</span>
+            <p class="desc">Returns decoded original mint traits as human-readable attributes.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=300, s-maxage=3600</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/:id/original/image.svg</span>
-            <span class="response-type">image/svg+xml</span>
-            <p class="desc">Returns the original Normie SVG image, before any Canvas edits or zombie conversion.</p>
+            <span class="method">GET</span><span class="path">/normie/:id/image.svg</span><span class="response-type">image/svg+xml</span>
+            <p class="desc">Returns the active SVG image. Zombie art and Canvas transforms are applied when present.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+            <pre><code>curl https://your-api-domain.com/normie/0/image.svg -o normie.svg</code></pre>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/:id/original/image.png</span>
-            <span class="response-type">image/png</span>
-            <p class="desc">Returns the original Normie PNG image, before any Canvas edits or zombie conversion.</p>
-        </div>
-
-        <h2>Zombie Endpoints</h2>
-
-        <p>
-            These endpoints expose NormiesZombie conversion state, pool status, and zombie-specific assets.
-            The default <code>/normie/:id</code> render and metadata endpoints already use zombie data when a token is converted.
-        </p>
-
-        <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/zombies/status</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">Returns global NormiesZombie status: paused state, merkle root, seed state, pool size, and pool seal state.</p>
+            <span class="method">GET</span><span class="path">/normie/:id/image.png</span><span class="response-type">image/png</span>
+            <p class="desc">Returns the active 1000x1000 PNG image rendered from the active SVG.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/zombies/conversions</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">Lists zombie conversion commitments, newest first. Supports <code>?limit=50&amp;offset=0</code>.</p>
+            <span class="method">GET</span><span class="path">/normie/:id/metadata</span><span class="response-type">application/json</span>
+            <p class="desc">Returns active NFT metadata including Level, Pixel Count, Action Points, Customized, zombie attributes when converted, and Legendary Canvas artist when set.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/zombies/wallet/:address</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">Lists zombie conversion commitments for a qualifying wallet. Supports <code>?limit=50&amp;offset=0</code>.</p>
+            <span class="method">GET</span><span class="path">/normie/:id/legendary-canvas</span><span class="response-type">application/json</span>
+            <p class="desc">Legendary Canvas state for a token.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/zombies/token/:id</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">Returns zombie state plus conversion history for a token. Equivalent token aliases exist under <code>/normie/:id/zombie/*</code>.</p>
+            <span class="method">GET</span><span class="path">/normie/:id/original/pixels</span><span class="response-type">text/plain</span>
+            <p class="desc">Original mint bitmap as a 1600-character binary string, ignoring zombie and Canvas state.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=300, s-maxage=3600</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/zombies/token/:id/attributes</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">Returns parsed zombie attributes for a converted token.</p>
+            <span class="method">GET</span><span class="path">/normie/:id/original/image.svg</span><span class="response-type">image/svg+xml</span>
+            <p class="desc">Original mint SVG, ignoring zombie and Canvas state.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=300, s-maxage=3600</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/zombies/token/:id/pixels</span>
-            <span class="response-type">text/plain</span>
-            <p class="desc">Returns the base zombie bitmap as a 1600-character binary string.</p>
+            <span class="method">GET</span><span class="path">/normie/:id/original/image.png</span><span class="response-type">image/png</span>
+            <p class="desc">Original mint PNG, ignoring zombie and Canvas state.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=300, s-maxage=3600</code></p>
+        </div>
+
+        <h3>Canvas</h3>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/canvas/status</span><span class="response-type">application/json</span>
+            <p class="desc">Global Canvas contract status: paused state, max burn percent, tier thresholds, and tier minimum percents.</p>
+            <p class="meta">Cache: <code>public, max-age=300, s-maxage=300</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/zombies/token/:id/image.svg</span>
-            <span class="response-type">image/svg+xml</span>
-            <p class="desc">Returns the base zombie SVG image.</p>
+            <span class="method">GET</span><span class="path">/normie/:id/canvas/pixels</span><span class="response-type">text/plain</span>
+            <p class="desc">Canvas transform bitmap as a 1600-character string.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/zombies/token/:id/image.png</span>
-            <span class="response-type">image/png</span>
-            <p class="desc">Returns the base zombie PNG image.</p>
-        </div>
-
-        <h2>Legendary Canvas Endpoints</h2>
-
-        <p>
-            Legendary Canvas is an owner-managed optional trait for selected Normies.
-            When set, <code>/normie/:id/metadata</code> includes the artist name as
-            <code>{"trait_type":"Legendary Canvas","value":"Artist Name"}</code>.
-        </p>
-
-        <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/legendary-canvas</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">Lists active Legendary Canvas entries, newest first. Supports <code>?limit=50&amp;offset=0</code>.</p>
+            <span class="method">GET</span><span class="path">/normie/:id/canvas/diff</span><span class="response-type">application/json</span>
+            <p class="desc">Pixel diff between active base art and Canvas transform: added, removed, and net change.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/legendary-canvas/token/:id</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">Returns Legendary Canvas state for a token: active state, artist name, operator, block number, timestamp, and tx hash.</p>
+            <span class="method">GET</span><span class="path">/normie/:id/canvas/info</span><span class="response-type">application/json</span>
+            <p class="desc">Canvas level, action points, customized flag, delegate, and delegate setter.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=60</code></p>
         </div>
 
-        <h2>Canvas Endpoints</h2>
-
-        <p>These endpoints expose NormiesCanvas data: transform layers, pixel diffs, action points, delegations, and contract status.</p>
+        <h3>History</h3>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/:id/canvas/pixels</span>
-            <span class="response-type">text/plain</span>
-            <p class="desc">
-                Returns the transform layer (XOR overlay) as a 1600-character binary string.
-                Each <code>1</code> represents a pixel that was flipped by the Canvas edit.
-                Returns all <code>0</code>s if the Normie has not been customized.
-            </p>
+            <span class="method">GET</span><span class="path">/history/burns</span><span class="response-type">application/json</span>
+            <p class="desc">Paginated Canvas burn commitments.</p>
+            <p class="meta">Query: <code>limit</code> 1-100, <code>offset</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/:id/canvas/diff</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Returns a pixel-level diff between the active base image and the Canvas edits.
-                Lists which pixels were added (turned on) and removed (turned off).
-            </p>
-            <pre><code>curl https://your-api-domain.com/normie/42/canvas/diff
-
-# Response:
-{
-  "added": [{ "x": 10, "y": 5 }, { "x": 11, "y": 5 }],
-  "removed": [{ "x": 20, "y": 15 }],
-  "addedCount": 2,
-  "removedCount": 1,
-  "netChange": 1
-}</code></pre>
+            <span class="method">GET</span><span class="path">/history/burns/:commitId</span><span class="response-type">application/json</span>
+            <p class="desc">One burn commitment plus its burned token details.</p>
+            <p class="meta">Parameters: <code>commitId</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/normie/:id/canvas/info</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Returns Canvas metadata for a Normie: action points, level, customization status, and delegate info.
-            </p>
-            <pre><code>curl https://your-api-domain.com/normie/42/canvas/info
-
-# Response:
-{
-  "actionPoints": 25,
-  "level": 3,
-  "customized": true,
-  "delegate": "0x0000000000000000000000000000000000000000",
-  "delegateSetBy": "0x0000000000000000000000000000000000000000"
-}</code></pre>
+            <span class="method">GET</span><span class="path">/history/burns/address/:address</span><span class="response-type">application/json</span>
+            <p class="desc">Burn commitments created by a wallet.</p>
+            <p class="meta">Parameters: Ethereum address. Query: <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/canvas/status</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Returns the global NormiesCanvas contract status: paused state and burn tier configuration.
-            </p>
-            <pre><code>curl https://your-api-domain.com/canvas/status
-
-# Response:
-{
-  "paused": false,
-  "maxBurnPercent": 4,
-  "tierThresholds": [490, 890],
-  "tierMinPercents": [1, 2, 3]
-}</code></pre>
+            <span class="method">GET</span><span class="path">/history/burns/receiver/:tokenId</span><span class="response-type">application/json</span>
+            <p class="desc">Burn commitments that transferred action points to a receiver token.</p>
+            <p class="meta">Parameters: <code>tokenId</code>. Query: <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
         </div>
 
-        <h2>History Endpoints</h2>
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/history/burned-tokens</span><span class="response-type">application/json</span>
+            <p class="desc">Paginated list of burned token records.</p>
+            <p class="meta">Query: <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
 
-        <p>
-            Historical data from on-chain NormiesCanvas events, powered by the Ponder indexer.
-            Explore burn history, transform history, and view past versions of Normies.
-        </p>
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/history/burned/:tokenId</span><span class="response-type">application/json</span>
+            <p class="desc">Burn record for a token.</p>
+            <p class="meta">Parameters: <code>tokenId</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/history/burned/:tokenId/image.svg</span><span class="response-type">image/svg+xml</span>
+            <p class="desc">Original SVG for a burned token.</p>
+            <p class="meta">Parameters: <code>tokenId</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/history/burned/:tokenId/image.png</span><span class="response-type">image/png</span>
+            <p class="desc">Original PNG for a burned token.</p>
+            <p class="meta">Parameters: <code>tokenId</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/history/customized</span><span class="response-type">application/json</span>
+            <p class="desc">Canvas transform event sync feed. Returns events, unique token IDs, count, pagination flag, and requested timestamp cursor.</p>
+            <p class="meta">Query: <code>limit</code>, <code>offset</code>, <code>after_timestamp</code> or <code>since_timestamp</code>, <code>sort=asc|desc</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/history/normie/:id/versions</span><span class="response-type">application/json</span>
+            <p class="desc">Transform versions for a token with change count, new pixel count, transformer, block, timestamp, and transaction hash.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Query: <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/history/normie/:id/version/:version/pixels</span><span class="response-type">text/plain</span>
+            <p class="desc">Historical composited pixel string for a transform version.</p>
+            <p class="meta">Parameters: <code>id</code>, zero-based <code>version</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/history/normie/:id/version/:version/image.svg</span><span class="response-type">image/svg+xml</span>
+            <p class="desc">Historical composited SVG for a transform version.</p>
+            <p class="meta">Parameters: <code>id</code>, zero-based <code>version</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/history/normie/:id/version/:version/image.png</span><span class="response-type">image/png</span>
+            <p class="desc">Historical composited PNG for a transform version.</p>
+            <p class="meta">Parameters: <code>id</code>, zero-based <code>version</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/history/stats</span><span class="response-type">application/json</span>
+            <p class="desc">Indexer summary counts for burn commitments, burned tokens, transforms, token data, zombies, Legendary Canvas, and total action points.</p>
+            <p class="meta">Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <h3>Holders</h3>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/holders/:address</span><span class="response-type">application/json</span>
+            <p class="desc">Current indexed token IDs held by a wallet.</p>
+            <p class="meta">Parameters: Ethereum address. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <h3>Zombies</h3>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/zombies/status</span><span class="response-type">application/json</span>
+            <p class="desc">Zombie contract status and pool configuration.</p>
+            <p class="meta">Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/zombies/conversions</span><span class="response-type">application/json</span>
+            <p class="desc">Paginated zombie conversion commitments and reveal state.</p>
+            <p class="meta">Query: <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/zombies/wallet/:address</span><span class="response-type">application/json</span>
+            <p class="desc">Zombie conversions for a qualifying wallet.</p>
+            <p class="meta">Parameters: Ethereum address. Query: <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/zombies/token/:id</span><span class="response-type">application/json</span>
+            <p class="desc">Zombie info plus conversion history for a token.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/zombies/token/:id/attributes</span><span class="response-type">application/json</span>
+            <p class="desc">Zombie attributes for a token.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/zombies/token/:id/pixels</span><span class="response-type">text/plain</span>
+            <p class="desc">Zombie bitmap as a 1600-character string.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/zombies/token/:id/image.svg</span><span class="response-type">image/svg+xml</span>
+            <p class="desc">Zombie SVG image.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/zombies/token/:id/image.png</span><span class="response-type">image/png</span>
+            <p class="desc">Zombie PNG image.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <h3>Legendary Canvas</h3>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/legendary-canvas</span><span class="response-type">application/json</span>
+            <p class="desc">Paginated list of tokens marked with the Legendary Canvas artist trait.</p>
+            <p class="meta">Query: <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/legendary-canvas/token/:id</span><span class="response-type">application/json</span>
+            <p class="desc">Legendary Canvas state for a single token.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <h3>ERC-8004 Agents</h3>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/agents/metadata/:tokenId</span><span class="response-type">application/json</span>
+            <p class="desc">ERC-8004 metadata JSON served as the on-chain agent URI.</p>
+            <p class="meta">Parameters: <code>tokenId</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=120, stale-while-revalidate=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/agents/persona-preview/:tokenId</span><span class="response-type">application/json</span>
+            <p class="desc">Persona JSON for any token, whether or not it is registered as an agent.</p>
+            <p class="meta">Parameters: <code>tokenId</code> 0-9999. Cache: <code>public, max-age=30, s-maxage=60, stale-while-revalidate=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/agents/identity/:tokenId</span><span class="response-type">application/json</span>
+            <p class="desc">Trait-derived agent name, type, and raw trait map.</p>
+            <p class="meta">Parameters: <code>tokenId</code> 0-9999. Cache: <code>public, max-age=300, s-maxage=600, stale-while-revalidate=3600</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/agents/info/:tokenId</span><span class="response-type">application/json</span>
+            <p class="desc">Registered-agent persona, traits, live Canvas state, registration metadata, and placeholder interaction/MCP status.</p>
+            <p class="meta">Parameters: <code>tokenId</code> 0-9999. Cache: <code>public, max-age=30, s-maxage=60, stale-while-revalidate=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/agents/by-agent-id/:agentId/info</span><span class="response-type">application/json</span>
+            <p class="desc">Reverse lookup by ERC-8004 agent ID, returning the same shape as <code>/agents/info/:tokenId</code>.</p>
+            <p class="meta">Parameters: <code>agentId</code> integer string. Cache: <code>public, max-age=30, s-maxage=60, stale-while-revalidate=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/agents/list</span><span class="response-type">application/json</span>
+            <p class="desc">Paginated registered-agent gallery feed enriched with identity.</p>
+            <p class="meta">Query: <code>limit</code> 1-100, <code>sort=newest|oldest</code>, optional <code>cursor</code> agent ID. Cache: <code>public, max-age=30, s-maxage=60, stale-while-revalidate=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/agents/search</span><span class="response-type">application/json</span>
+            <p class="desc">Search registered agents by name, token ID, or agent ID.</p>
+            <p class="meta">Query: <code>q</code>, <code>limit</code> 1-50. Cache when <code>q</code> is present: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code>; empty <code>q</code>: none.</p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/agents/count</span><span class="response-type">application/json</span>
+            <p class="desc">Total registered Normies agents.</p>
+            <p class="meta">Cache: <code>public, max-age=30, s-maxage=60, stale-while-revalidate=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/agents/agent-card/:tokenId</span><span class="response-type">application/json</span>
+            <p class="desc">A2A v0.3.0 Agent Card JSON linked from ERC-8004 metadata.</p>
+            <p class="meta">Parameters: <code>tokenId</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=120, stale-while-revalidate=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/agents/image/:tokenId</span><span class="response-type">image/svg+xml</span>
+            <p class="desc">Composited SVG image for an agent.</p>
+            <p class="meta">Parameters: <code>tokenId</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=60, stale-while-revalidate=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/agents/binding/:tokenId</span><span class="response-type">application/json</span>
+            <p class="desc">Normies-only ERC-8004 binding lookup for one token.</p>
+            <p class="meta">Parameters: <code>tokenId</code> 0-9999. Cache: <code>public, max-age=30, s-maxage=60, stale-while-revalidate=300</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">POST</span><span class="path">/agents/binding/batch</span><span class="response-type">application/json</span>
+            <p class="desc">Batch ERC-8004 binding lookup. Body: <code>{ "tokenIds": [...] }</code>.</p>
+            <p class="meta">Cache: <code>public, max-age=30, s-maxage=60</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/agents/by-agent-id/:agentId</span><span class="response-type">application/json</span>
+            <p class="desc">Reverse lookup returning the raw binding for an agent ID.</p>
+            <p class="meta">Parameters: <code>agentId</code> integer string. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <h3>Rarity</h3>
 
         <div class="note">
-            <strong>Note:</strong> The API server requires the Ponder indexer to be running and configured via <code>PONDER_API_URL</code>.
-            Burned Normie images are still readable from on-chain SSTORE2 storage even after the token is burned.
-        </div>
-
-        <h3>Burn History</h3>
-
-        <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/history/burns</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Lists all burn commitments (newest first).
-                Supports pagination via <code>?limit=50&amp;offset=0</code> (max 100 per page).
-            </p>
-            <pre><code>curl https://your-api-domain.com/history/burns?limit=10
-
-# Response:
-[
-  {
-    "commitId": "0",
-    "owner": "0x1234...abcd",
-    "receiverTokenId": "42",
-    "tokenCount": 3,
-    "transferredActionPoints": "0",
-    "blockNumber": "12345678",
-    "timestamp": "1700000000",
-    "txHash": "0xabc...def",
-    "revealed": true,
-    "totalActions": "15",
-    "expired": false
-  }
-]</code></pre>
+            These routes power <code>rarity.normies.art</code>. They are backed by a bulk
+            Ponder snapshot plus short API-server caches. Historical routes recompute
+            ownership, burn counts, traits, and ranks at an Ethereum block number from
+            indexed event state; marketplace listings are current-only and omitted from
+            historical responses.
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/history/burns/:commitId</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Returns a single burn commitment with its array of burned tokens.
-                Each burned token includes the token ID and its pixel count at the time of burn.
-            </p>
-            <pre><code>curl https://your-api-domain.com/history/burns/0
-
-# Response:
-{
-  "commitId": "0",
-  "owner": "0x1234...abcd",
-  "receiverTokenId": "42",
-  "tokenCount": 3,
-  "revealed": true,
-  "totalActions": "15",
-  "burnedTokens": [
-    { "tokenId": "100", "pixelCount": 527 },
-    { "tokenId": "200", "pixelCount": 490 },
-    { "tokenId": "300", "pixelCount": 612 }
-  ]
-}</code></pre>
+            <span class="method">GET</span><span class="path">/rarity/docs</span><span class="response-type">application/json</span>
+            <p class="desc">Small JSON list of rarity endpoints.</p>
+            <p class="meta">Cache: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/history/burns/address/:address</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">Returns burn commitments by owner address. Paginated.</p>
+            <span class="method">GET</span><span class="path">/rarity/stats</span><span class="response-type">application/json</span>
+            <p class="desc">Live rarity stats: indexed count, live supply, burned count, weights, listing count, floor price, and awakened-agent count.</p>
+            <p class="meta">Cache: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/history/burns/receiver/:tokenId</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">Returns burn commitments where the specified token was the receiver of action points. Paginated.</p>
-        </div>
-
-        <h3>Burned Tokens</h3>
-
-        <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/history/burned-tokens</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">Lists all individually burned tokens (newest first). Paginated.</p>
+            <span class="method">GET</span><span class="path">/rarity/normies</span><span class="response-type">application/json</span>
+            <p class="desc">Paginated live rarity list with rank, score, attributes, listing data, fair value, underpriced flag, burn count, and awakened-agent metadata.</p>
+            <p class="meta">Query: <code>page</code>, <code>limit</code> 1-100, <code>sort=rank|id|score|level|action_points|pixel_count|price|awake_registered</code>, <code>order=asc|desc</code>, <code>search</code>, <code>listed=1</code>, <code>underpriced=1</code>, <code>the100=1</code>, <code>awake=1</code>, <code>px_tier=low,mid,high</code>, <code>wallet_ids</code>, <code>trait_*</code> filters. Cache: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/history/burned/:tokenId</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">Returns burn info for a specific token: which commitment it was burned in, pixel count at time of burn.</p>
+            <span class="method">GET</span><span class="path">/rarity/normie/:id</span><span class="response-type">application/json</span>
+            <p class="desc">Full live rarity detail for one token. Returns <code>410</code> if burned.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/history/burned/:tokenId/image.svg</span>
-            <span class="response-type">image/svg+xml</span>
-            <p class="desc">
-                Returns the SVG image of a burned Normie. SSTORE2 data persists on-chain even after the token is burned,
-                so the original image is still readable.
-            </p>
-            <pre><code>curl https://your-api-domain.com/history/burned/100/image.svg -o burned-normie.svg</code></pre>
+            <span class="method">POST</span><span class="path">/rarity/normie/:id/refresh</span><span class="response-type">application/json</span>
+            <p class="desc">Forces the live rarity collection cache to reload, then returns the same detail shape as <code>/rarity/normie/:id</code>.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/history/burned/:tokenId/image.png</span>
-            <span class="response-type">image/png</span>
-            <p class="desc">Returns the PNG image of a burned Normie.</p>
-        </div>
-
-        <h3>Transform History &amp; Historical Versions</h3>
-
-        <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/history/customized</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Lists NormiesCanvas customization events with token IDs and event metadata. Supports
-                <code>after_timestamp</code> for incremental syncs; <code>since_timestamp</code> is accepted as an alias.
-                Default sort is newest first, or oldest first when a timestamp filter is supplied.
-            </p>
-            <pre><code>curl "https://your-api-domain.com/history/customized?after_timestamp=1700000000"
-
-# Response:
-{
-  "events": [
-    {
-      "id": "12345678-42",
-      "tokenId": "42",
-      "transformer": "0x1234...abcd",
-      "changeCount": 12,
-      "newPixelCount": 535,
-      "blockNumber": "12345678",
-      "timestamp": "1700000001",
-      "txHash": "0xabc...def"
-    }
-  ],
-  "tokenIds": ["42"],
-  "count": 1,
-  "hasMore": false,
-  "afterTimestamp": "1700000000"
-}</code></pre>
+            <span class="method">GET</span><span class="path">/rarity/normie/:id/persona</span><span class="response-type">application/json</span>
+            <p class="desc">Awakened-agent persona fields used by the rarity modal. Returns <code>404</code> if the token is not an agent.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/history/normie/:id/versions</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Lists all transform versions for a token. Each entry represents a <code>setTransformBitmap</code> call
-                with metadata about pixel changes. Versions are 0-indexed chronologically.
-            </p>
-            <pre><code>curl https://your-api-domain.com/history/normie/42/versions
-
-# Response:
-[
-  {
-    "version": 0,
-    "changeCount": 12,
-    "newPixelCount": 535,
-    "transformer": "0x1234...abcd",
-    "blockNumber": "12345678",
-    "timestamp": "1700000000",
-    "txHash": "0xabc...def"
-  }
-]</code></pre>
+            <span class="method">GET</span><span class="path">/rarity/traits</span><span class="response-type">application/json</span>
+            <p class="desc">Trait filter counts over live, non-burned tokens.</p>
+            <p class="meta">Cache: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/history/normie/:id/version/:version/image.svg</span>
-            <span class="response-type">image/svg+xml</span>
-            <p class="desc">
-                Returns the SVG image for a historical version. Reconstructed by XOR-compositing the original
-                image with the stored transform bitmap from that version.
-            </p>
-            <pre><code>curl https://your-api-domain.com/history/normie/42/version/0/image.svg -o version-0.svg</code></pre>
+            <span class="method">GET</span><span class="path">/rarity/holder/:address</span><span class="response-type">application/json</span>
+            <p class="desc">Current indexed rarity holdings for a wallet. ENS names are accepted and resolved at request time.</p>
+            <p class="meta">Parameters: Ethereum address or ENS name. Cache: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/history/normie/:id/version/:version/image.png</span>
-            <span class="response-type">image/png</span>
-            <p class="desc">Returns the PNG image for a historical version.</p>
+            <span class="method">GET</span><span class="path">/rarity/recursive-burn-holders</span><span class="response-type">application/json</span>
+            <p class="desc">Leaderboard of current wallets by recursive burn count of held customized tokens.</p>
+            <p class="meta">Query: <code>limit</code> 1-200, optional <code>wallet</code>. Cache: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/history/normie/:id/version/:version/pixels</span>
-            <span class="response-type">text/plain</span>
-            <p class="desc">Returns the composited 1600-character pixel string for a historical version.</p>
-        </div>
-
-        <h3>Statistics</h3>
-
-        <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/history/stats</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Returns global Canvas activity statistics.
-            </p>
-            <pre><code>curl https://your-api-domain.com/history/stats
-
-# Response:
-{
-  "totalBurnCommitments": 25,
-  "totalBurnedTokens": 100,
-  "totalTransforms": 50,
-  "totalActionPointsDistributed": "1500"
-}</code></pre>
-        </div>
-
-        <h2>Agent Endpoints (ERC-8004)</h2>
-
-        <p>
-            Endpoints that back the ERC-8004 agentic flow: live persona generation, dynamic agent
-            metadata, agent-binding lookups, and a paginated gallery feed. Personas are generated
-            deterministically from a Normie&apos;s immutable mint traits + current canvas state on
-            <em>every</em> request &mdash; nothing is stored. Name and type are stable per tokenId;
-            backstory, tagline, personality, voice, quirks, greeting, and system prompt evolve as the
-            Normie&apos;s canvas state crosses level bands (untouched / early / mid / late). The
-            Ponder indexer is the source of truth for &ldquo;is this Normie registered?&rdquo;; the
-            metadata / info / agent-card endpoints lazy-reconcile against it on read so an on-chain
-            registration is reachable here within the next read window even if the original frontend
-            handshake was abandoned.
-        </p>
-
-        <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/agents/metadata/:tokenId</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                ERC-8004 registration metadata for the agent bound to this Normie. This is the URL stored on-chain
-                as the agent&apos;s <code>agentURI</code>. Reachable for both <em>pending</em> (not yet on-chain) and
-                <em>registered</em> rows so 8004 indexers can resolve metadata the moment a register tx confirms.
-            </p>
-            <pre><code>curl https://your-api-domain.com/agents/metadata/42
-
-# Response:
-{
-  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
-  "name": "Normie #42 - Pixelpriest",
-  "description": "A patient archivist of static lines. Pixelpriest...",
-  "image": "https://your-api-domain.com/agents/image/42",
-  "services": [
-    {
-      "name": "web",
-      "endpoint": "https://your-api-domain.com/agents/info/42",
-      "version": "1"
-    },
-    {
-      "name": "A2A",
-      "endpoint": "https://your-api-domain.com/agents/agent-card/42",
-      "version": "0.3.0"
-    }
-  ],
-  "active": true,
-  "x402Support": false,
-  "updatedAt": 1747200000
-}</code></pre>
+            <span class="method">GET</span><span class="path">/rarity/historical/:blockNumber/stats</span><span class="response-type">application/json</span>
+            <p class="desc">Rarity stats recomputed at an Ethereum block number. Listings and floor price are omitted.</p>
+            <p class="meta">Parameters: <code>blockNumber</code>. Cache: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/agents/info/:tokenId</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Rich persona JSON for explorers, agent UIs, and LLM clients. Persona text is
-                regenerated live from current on-chain canvas state on every request (no DB
-                persistence), then merged with the agent&apos;s registration facts (agentId,
-                chainId, registeredBy, txHash). Returns <code>404</code> only when the indexer
-                has no <code>AgentBound</code> event for the token &mdash; if the Ponder
-                indexer knows about it, this endpoint serves it.
-            </p>
-            <pre><code>curl https://your-api-domain.com/agents/info/42
-
-# Response:
-{
-  "tokenId": "42",
-  "agentId": "7",
-  "chainId": 1,
-  "name": "Pixelpriest",
-  "type": "Alien",
-  "tagline": "Tends the static lines so they outlast every fork",
-  "backstory": "...",
-  "greeting": "I keep the old shapes...",
-  "personalityTraits": ["...", "...", "..."],
-  "communicationStyle": "Measured, archival, fond of references...",
-  "quirks": ["...", "...", "..."],
-  "systemPrompt": "...",
-  "traits": {
-    "name": "Pixelpriest",
-    "attributes": {
-      "Type": "Alien", "Gender": "Non-Binary", "Age": "Old",
-      "Hair Style": "Bald", "Facial Feature": "Clean Shaven",
-      "Eyes": "Round Glasses", "Expression": "Peaceful", "Accessory": "Hoodie"
-    }
-  },
-  "canvas": {
-    "level": 3,
-    "actionPoints": 25,
-    "customized": true,
-    "diff": { "addedCount": 12, "removedCount": 3, "netChange": 9 }
-  },
-  "registeredBy": "0x1234...abcd",
-  "registeredAt": "2026-05-14T12:00:00.000Z",
-  "txHash": "0xabc...def",
-  "interactions": { "status": "coming_soon" },
-  "mcp": { "status": "coming_soon" }
-}</code></pre>
+            <span class="method">GET</span><span class="path">/rarity/historical/:blockNumber/normies</span><span class="response-type">application/json</span>
+            <p class="desc">Paginated rarity list at a block number. Supports the same non-marketplace filters and sort modes as the live list.</p>
+            <p class="meta">Parameters: <code>blockNumber</code>. Query: live list query parameters except listing-dependent filters have no matches. Cache: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/agents/agent-card/:tokenId</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                <a href="https://a2aproject.github.io/A2A/" target="_blank" rel="noopener noreferrer">A2A (Agent2Agent)</a>
-                Agent Card for this Normie. Derived from the live persona (<code>name</code>,
-                <code>description</code>, <code>iconUrl</code>, a single conversational
-                <code>skill</code>) &mdash; same dynamic regeneration as <code>/info</code>, so
-                edits to the Normie&apos;s canvas flow into the card on the next cache window.
-                Linked from <code>/agents/metadata/:tokenId</code>&apos;s
-                <code>services</code> array as <code>{"name": "A2A", ...}</code> so any ERC-8004 indexer
-                can discover the A2A surface. Returns <code>404</code> only when the indexer has no
-                <code>AgentBound</code> event for the token.
-            </p>
-            <pre><code>curl https://your-api-domain.com/agents/agent-card/42
-
-# Response (abbreviated):
-{
-  "name": "Pixelpriest",
-  "description": "Tends the static lines so they outlast every fork. ...",
-  "supportedInterfaces": [
-    {
-      "url": "https://your-api-domain.com/agents/a2a/42",
-      "protocolBinding": "HTTP+JSON",
-      "protocolVersion": "1.0"
-    }
-  ],
-  "provider": { "organization": "Normies", "url": "https://normies.art" },
-  "iconUrl": "https://your-api-domain.com/agents/image/42",
-  "version": "1.0.0",
-  "documentationUrl": "https://your-api-domain.com/docs",
-  "capabilities": {
-    "streaming": false,
-    "pushNotifications": false,
-    "stateTransitionHistory": false,
-    "extendedAgentCard": false
-  },
-  "securitySchemes": {},
-  "security": [],
-  "defaultInputModes": ["text/plain"],
-  "defaultOutputModes": ["text/plain"],
-  "skills": [
-    {
-      "id": "converse",
-      "name": "Converse with Pixelpriest",
-      "description": "Tends the static lines so they outlast every fork",
-      "tags": ["alien", "conversation", "erc-8004"],
-      "examples": ["I keep the old shapes..."],
-      "inputModes": ["text/plain"],
-      "outputModes": ["text/plain"]
-    }
-  ]
-}</code></pre>
+            <span class="method">GET</span><span class="path">/rarity/historical/:blockNumber/normie/:id</span><span class="response-type">application/json</span>
+            <p class="desc">Full rarity detail for one token at a block number. Returns <code>410</code> if burned at that block and <code>404</code> if not indexed yet.</p>
+            <p class="meta">Parameters: <code>blockNumber</code>, <code>id</code> 0-9999. Cache: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/agents/image/:tokenId</span>
-            <span class="response-type">image/svg+xml</span>
-            <p class="desc">
-                Composited Normie SVG used as the agent&apos;s portrait. Reflects live canvas state — edit the
-                Normie via Canvas and the agent image updates within the cache window. Same renderer as
-                <code>/normie/:id/image.svg</code> but mounted under <code>/agents</code> for symmetry with
-                the rest of the agent endpoints.
-            </p>
-            <pre><code>curl https://your-api-domain.com/agents/image/42 -o agent.svg</code></pre>
+            <span class="method">GET</span><span class="path">/rarity/historical/:blockNumber/traits</span><span class="response-type">application/json</span>
+            <p class="desc">Trait filter counts over live, non-burned tokens at a block number.</p>
+            <p class="meta">Parameters: <code>blockNumber</code>. Cache: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/agents/persona-preview/:tokenId</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Full <code>Persona</code> JSON for any token, regardless of registration status.
-                Used by the lab during the awakening flow so the reveal sequence and the
-                <code>/info</code> endpoint share one source of persona text. Cache window is
-                short (30&nbsp;s public, 60&nbsp;s shared) since the response depends on live
-                canvas state.
-            </p>
-            <pre><code>curl https://your-api-domain.com/agents/persona-preview/42</code></pre>
+            <span class="method">GET</span><span class="path">/rarity/historical/:blockNumber/holder/:address</span><span class="response-type">application/json</span>
+            <p class="desc">Indexed wallet holdings at a block number. ENS names are accepted but resolved at request time.</p>
+            <p class="meta">Parameters: <code>blockNumber</code>, address or ENS name. Cache: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/agents/identity/:tokenId</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Lightweight <code>{ tokenId, name, type, traits }</code>. Pure
-                trait-derived &mdash; no canvas reads &mdash; with a long cache window
-                (5&nbsp;min public, 10&nbsp;min shared). Used by gallery lists and bindings
-                where the full persona is overkill.
-            </p>
-            <pre><code>curl https://your-api-domain.com/agents/identity/42
-
-# Response:
-{
-  "tokenId": 42,
-  "name": "Pixelpriest",
-  "type": "Alien",
-  "traits": {
-    "Type": "Alien", "Gender": "Non-Binary", "Age": "Old",
-    "Hair Style": "Bald", "Facial Feature": "Clean Shaven",
-    "Eyes": "Round Glasses", "Expression": "Peaceful", "Accessory": "Hoodie"
-  }
-}</code></pre>
-        </div>
-
-        <h3>Gallery Feed</h3>
-
-        <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/agents/list</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Paginated registry of every registered Normies agent, enriched per row with
-                <code>name</code> and <code>type</code> from cached on-chain trait reads. Pagination
-                source is the Ponder indexer (newest registration first by default), so a newly
-                bound agent appears here as soon as the indexer sees the <code>AgentBound</code>
-                event &mdash; no DB sweep required.
-            </p>
-            <p class="desc">
-                Query params: <code>sort</code> (<code>newest</code> | <code>oldest</code>, default
-                <code>newest</code>), <code>limit</code> (1&ndash;100, default <code>24</code>),
-                <code>cursor</code> (last seen <code>agentId</code> from the previous page; the next
-                page returns rows past it in the sort direction).
-            </p>
-            <pre><code>curl "https://your-api-domain.com/agents/list?sort=newest&amp;limit=24"
-
-# Response:
-{
-  "items": [
-    {
-      "agentId": "7",
-      "tokenId": "42",
-      "name": "Pixelpriest",
-      "type": "Alien",
-      "registeredBy": "0x1234...abcd",
-      "registeredAt": "1747200000",
-      "txHash": "0xabc...def"
-    }
-    // ...
-  ],
-  "hasMore": true
-}</code></pre>
+            <span class="method">GET</span><span class="path">/rarity/historical/:blockNumber/recursive-burn-holders</span><span class="response-type">application/json</span>
+            <p class="desc">Leaderboard of wallets by recursive burn count of held customized tokens at a block number.</p>
+            <p class="meta">Parameters: <code>blockNumber</code>. Query: <code>limit</code> 1-200, optional <code>wallet</code>. Cache: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/agents/count</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Total count of registered Normies agents. Sourced from the Ponder indexer (filtered
-                to the Normies contract), so it advances with the chain rather than with any
-                product-DB cache. Useful for gallery headers.
-            </p>
-            <pre><code>curl https://your-api-domain.com/agents/count
-
-# Response:
-{ "count": 137 }</code></pre>
-        </div>
-
-        <h3>Agent Binding Lookups</h3>
-
-        <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/agents/binding/:tokenId</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Resolves a Normie token to its bound <code>agentId</code> via the Ponder indexer (which
-                watches the Adapter8004 <code>AgentBound</code> event). Returns
-                <code>{ "binding": null }</code> if the Normie has not been registered as an agent.
-            </p>
-            <pre><code>curl https://your-api-domain.com/agents/binding/42
-
-# Response (bound):
-{
-  "binding": {
-    "id": "0:0x9eb6...12438:42",
-    "agentId": "7",
-    "standard": 0,
-    "tokenContract": "0x9eb6e2025b64f340691e424b7fe7022ffde12438",
-    "tokenId": "42",
-    "registeredBy": "0x1234...abcd",
-    "blockNumber": "12345678",
-    "timestamp": "1747200000",
-    "txHash": "0xabc...def"
-  }
-}
-
-# Response (unbound):
-{ "binding": null }</code></pre>
+            <span class="method">GET</span><span class="path">/rarity/listings/stream</span><span class="response-type">text/event-stream</span>
+            <p class="desc">Server-Sent Events for listing changes: <code>listed</code>, <code>sold</code>, and <code>cancelled</code>.</p>
+            <p class="meta">Cache: <code>no-store</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">POST</span>
-            <span class="path">/agents/binding/batch</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Batch version of the above for resolving many Normies at once. Body is
-                <code>{ "tokenIds": ["42", "100", ...] }</code>. Response keys are token IDs as strings;
-                unbound tokens are simply absent from the map.
-            </p>
-            <pre><code>curl -X POST https://your-api-domain.com/agents/binding/batch \
-  -H "Content-Type: application/json" \
-  -d '{ "tokenIds": ["42", "100", "1337"] }'
-
-# Response:
-{
-  "bindings": {
-    "42": {
-      "agentId": "7",
-      "tokenContract": "0x9eb6...12438",
-      "tokenId": "42",
-      "registeredBy": "0x1234...abcd",
-      "blockNumber": "12345678",
-      "timestamp": "1747200000",
-      "txHash": "0xabc...def"
-    }
-    // tokens 100 and 1337 omitted — not bound
-  }
-}</code></pre>
+            <span class="method">GET</span><span class="path">/rarity/legendary</span><span class="response-type">application/json</span>
+            <p class="desc">Rarity-app Legendary Canvas curation config with <code>current</code> and <code>upcoming</code> arrays, loaded from the indexer database.</p>
+            <p class="meta">Cache: <code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/agents/by-agent-id/:agentId</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Reverse lookup — given an Adapter8004 <code>agentId</code>, returns the bound Normie token
-                (or <code>null</code> if no such agent exists in the index).
-            </p>
-            <pre><code>curl https://your-api-domain.com/agents/by-agent-id/7
-
-# Response:
-{
-  "binding": {
-    "agentId": "7",
-    "tokenContract": "0x9eb6...12438",
-    "tokenId": "42",
-    "registeredBy": "0x1234...abcd",
-    "blockNumber": "12345678",
-    "timestamp": "1747200000",
-    "txHash": "0xabc...def"
-  }
-}</code></pre>
+            <span class="method">PUT</span><span class="path">/rarity/admin/legendary</span><span class="response-type">application/json</span>
+            <p class="desc">Admin-only save for Legendary Canvas curation config into the indexer database.</p>
+            <p class="meta">Requires <code>x-admin-key</code>. Body: <code>{ "current": [...], "upcoming": [...] }</code>. Cache: <code>no-store</code></p>
         </div>
 
-        <div class="endpoint">
-            <span class="method">GET</span>
-            <span class="path">/agents/by-agent-id/:agentId/info</span>
-            <span class="response-type">application/json</span>
-            <p class="desc">
-                Reverse-lookup convenience that resolves <code>agentId</code> &rarr; <code>tokenId</code>
-                via the indexer and then returns the same payload as <code>/agents/info/:tokenId</code>.
-                Lets agent UIs (which carry the <code>agentId</code> in URLs) load the full persona
-                + canvas state in a single round trip. Returns <code>404</code> when the indexer has
-                no binding for the given <code>agentId</code>.
-            </p>
-            <pre><code>curl https://your-api-domain.com/agents/by-agent-id/7/info
-# Same response shape as /agents/info/:tokenId</code></pre>
-        </div>
+        <h2>Cache Policy</h2>
+
+        <p>Every public endpoint above lists the <code>Cache-Control</code> header this server sets. <code>none</code> means the API server does not set an explicit cache header for that endpoint.</p>
+
+        <table>
+            <tr><th>Route family</th><th>Public cache header</th><th>Notes</th></tr>
+            <tr><td><code>/rarity/*</code></td><td><code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></td><td>Except admin routes and listing stream.</td></tr>
+            <tr><td><code>/rarity/admin/*</code>, <code>/rarity/listings/stream</code></td><td><code>no-store</code></td><td>The SSE route also emits event-stream headers.</td></tr>
+            <tr><td><code>/canvas/status</code></td><td><code>public, max-age=300, s-maxage=300</code></td><td>Derived from <code>CANVAS_STATUS_CACHE_TTL_MS</code>.</td></tr>
+            <tr><td><code>* /canvas/info</code></td><td><code>public, max-age=60, s-maxage=60</code></td><td>Derived from <code>CANVAS_INFO_CACHE_TTL_MS</code>.</td></tr>
+            <tr><td>Owner and holder routes</td><td><code>public, max-age=10, s-maxage=10</code></td><td><code>/normie/:id/owner</code> and <code>/holders/:address</code>.</td></tr>
+            <tr><td>Original data and traits routes</td><td><code>public, max-age=300, s-maxage=3600</code></td><td>Immutable mint data.</td></tr>
+            <tr><td><code>/history/*</code></td><td><code>public, max-age=60, s-maxage=300</code></td><td>Indexed append-only history and version rendering.</td></tr>
+            <tr><td>Default rendered/indexed routes</td><td><code>public, max-age=60, s-maxage=300</code></td><td>Active images, metadata, zombie aliases, Legendary Canvas, and uncategorized cached routes.</td></tr>
+            <tr><td><code>/agents/*</code></td><td>Varies by endpoint</td><td>Agent routes set explicit cache headers per endpoint.</td></tr>
+            <tr><td><code>/favicon.png</code>, <code>/favicon.ico</code></td><td><code>public, max-age=86400</code></td><td>Static icon.</td></tr>
+        </table>
+
+        <h2>Server-Side Cache Defaults</h2>
+
+        <table>
+            <tr><th>Setting</th><th>Default</th><th>Used for</th></tr>
+            <tr><td><code>CACHE_TTL_MS</code></td><td>3600000 ms / 3600 s</td><td>Bulk token dump cache and positive agent binding cache.</td></tr>
+            <tr><td><code>CANVAS_CACHE_TTL_MS</code></td><td>60000 ms / 60 s</td><td>Canvas transform and transformed-state caches.</td></tr>
+            <tr><td><code>CANVAS_INFO_CACHE_TTL_MS</code></td><td>60000 ms / 60 s</td><td>Canvas info cache, agent response cache, and negative agent binding TTL.</td></tr>
+            <tr><td><code>CANVAS_STATUS_CACHE_TTL_MS</code></td><td>300000 ms / 300 s</td><td>Canvas global status cache.</td></tr>
+            <tr><td><code>ZOMBIE_CACHE_TTL_MS</code></td><td>60000 ms / 60 s</td><td>Zombie token info and bitmap caches.</td></tr>
+            <tr><td><code>ZOMBIE_STATUS_CACHE_TTL_MS</code></td><td>300000 ms / 300 s</td><td>Configured zombie status TTL. Current public zombie status response uses the default route cache.</td></tr>
+            <tr><td><code>LEGENDARY_CANVAS_CACHE_TTL_MS</code></td><td>60000 ms / 60 s</td><td>Legendary Canvas token info cache.</td></tr>
+            <tr><td><code>RARITY_CACHE_TTL_MS</code></td><td>60000 ms / 60 s</td><td>Live and historical rarity collection snapshots; historical cache keeps up to 32 block snapshots.</td></tr>
+            <tr><td><code>RARITY_LISTINGS_REFRESH_MS</code></td><td>60000 ms / 60 s</td><td>OpenSea listing poll interval for rarity listings.</td></tr>
+            <tr><td><code>transformHistoryCache</code></td><td>30000 ms / 30 s</td><td>Per-token transform history in memory.</td></tr>
+            <tr><td>Immutable token caches</td><td>No TTL</td><td>Original image data, raw traits, and decoded traits are cached in-process because mint data is immutable.</td></tr>
+        </table>
 
         <h2>Trait Categories</h2>
 
@@ -1119,16 +705,16 @@
 
         <h2>Pixel Data Format</h2>
 
-        <p>Each Normie is a 40x40 monochrome bitmap stored as 200 bytes on-chain (1 bit per pixel, MSB first).</p>
+        <p>Each Normie is a 40x40 monochrome bitmap stored as 200 bytes on-chain: 1 bit per pixel, MSB first.</p>
 
         <table>
             <tr><th>Property</th><th>Value</th></tr>
             <tr><td>Grid Size</td><td>40 x 40 pixels</td></tr>
-            <tr><td>Bit Order</td><td>MSB first (most significant bit = leftmost pixel)</td></tr>
-            <tr><td>Layout</td><td>Row-major (top-left to bottom-right)</td></tr>
-            <tr><td>Pixel On</td><td><code>1</code> — dark gray (#48494b)</td></tr>
-            <tr><td>Pixel Off</td><td><code>0</code> — light gray (#e3e5e4)</td></tr>
-            <tr><td>Storage Size</td><td>200 bytes (1600 bits)</td></tr>
+            <tr><td>Bit Order</td><td>MSB first; most significant bit is the leftmost pixel</td></tr>
+            <tr><td>Layout</td><td>Row-major, top-left to bottom-right</td></tr>
+            <tr><td>Pixel On</td><td><code>1</code> - dark gray (#48494b)</td></tr>
+            <tr><td>Pixel Off</td><td><code>0</code> - light gray (#e3e5e4)</td></tr>
+            <tr><td>Storage Size</td><td>200 bytes / 1600 bits</td></tr>
         </table>
 
         <h3>Pixel Access Formula</h3>
@@ -1143,25 +729,29 @@ pixel     = (data[byteIndex] >> bitPos) & 1</code></pre>
 
         <table>
             <tr><th>Limit</th><th>Value</th></tr>
-            <tr><td>Requests</td><td>60 per minute</td></tr>
+            <tr><td>Requests</td><td>60 per minute by default</td></tr>
             <tr><td>Window</td><td>Sliding 60 seconds</td></tr>
         </table>
 
-        <p>Rate limit headers are included in every response:</p>
+        <p>Rate limit headers are included in responses:</p>
         <ul style="margin: 0.5rem 0 0.5rem 1.5rem;">
-            <li><code>X-RateLimit-Limit</code> — Max requests per window</li>
-            <li><code>X-RateLimit-Remaining</code> — Remaining requests in current window</li>
-            <li><code>Retry-After</code> — Seconds until window resets (only on 429)</li>
+            <li><code>X-RateLimit-Limit</code> - max requests per window</li>
+            <li><code>X-RateLimit-Remaining</code> - remaining requests in the current window</li>
+            <li><code>Retry-After</code> - seconds until retry is allowed, only on <code>429</code></li>
         </ul>
 
         <h2>Errors</h2>
 
         <table>
             <tr><th>Status</th><th>Meaning</th></tr>
-            <tr><td>400</td><td>Invalid token ID (must be integer 0-9999)</td></tr>
-            <tr><td>404</td><td>Token not found or data not set on-chain</td></tr>
+            <tr><td>400</td><td>Invalid token, address, query, or body</td></tr>
+            <tr><td>401</td><td>Invalid admin key</td></tr>
+            <tr><td>403</td><td>Admin disabled</td></tr>
+            <tr><td>404</td><td>Not found, not indexed, or data not set on-chain</td></tr>
+            <tr><td>410</td><td>Burned token on rarity detail</td></tr>
             <tr><td>429</td><td>Rate limit exceeded</td></tr>
             <tr><td>500</td><td>Internal server error</td></tr>
+            <tr><td>502</td><td>Upstream indexer, RPC, or provider failure</td></tr>
         </table>
 
         <p>Error responses are JSON:</p>
@@ -1171,80 +761,24 @@ pixel     = (data[byteIndex] >> bitPos) & 1</code></pre>
 
         <table>
             <tr><th>Contract</th><th>Address</th><th>Description</th></tr>
-            <tr>
-                <td>Normies</td>
-                <td><code>0x9Eb6E2025B64f340691e424b7fe7022fFDE12438</code></td>
-                <td>Core ERC721C token with ERC-2981 royalties</td>
-            </tr>
-            <tr>
-                <td>NormiesStorage</td>
-                <td><code>0x1B976bAf51cF51F0e369C070d47FBc47A706e602</code></td>
-                <td>SSTORE2 bitmap &amp; trait storage with XOR encryption</td>
-            </tr>
-            <tr>
-                <td>NormiesRenderer</td>
-                <td><code>0xBe57fC4D0c729b8e8d33b638Dd441F57365e4c25</code></td>
-                <td>V1 — Animated noise pre-reveal, static SVG post-reveal</td>
-            </tr>
-            <tr>
-                <td>NormiesRendererV2</td>
-                <td><code>0x7818f24d3239c945510e0a1a523dd9971812c6c0</code></td>
-                <td>V2 — Static noise pre-reveal</td>
-            </tr>
-            <tr>
-                <td>NormiesRendererV3</td>
-                <td><code>0x1af01b902256d77cf9499a14ef4e494897380b05</code></td>
-                <td>V3 — RLE-optimized SVG, Pixel Count trait, canvas animation_url</td>
-            </tr>
-            <tr>
-                <td>NormiesMinter</td>
-                <td><code>0xC74994dD70FFb621CC514cE18a4F6F52124e296d</code></td>
-                <td>V1 — EIP-191 signature-verified minting</td>
-            </tr>
-            <tr>
-                <td>NormiesMinterV2</td>
-                <td><code>0xc513272597d3022D77b3d7EEBA92cea5D7fb2808</code></td>
-                <td>V2 — Adds delegate.xyz v1/v2 cold wallet delegation</td>
-            </tr>
-            <tr>
-                <td>NormiesCanvas</td>
-                <td><code>0x64951d92e345C50381267380e2975f66810E869c</code></td>
-                <td>Burn-to-edit orchestrator: commit-reveal burns, action points, pixel transforms</td>
-            </tr>
-            <tr>
-                <td>NormiesCanvasStorage</td>
-                <td><code>0xC255BE0983776BAB027a156681b6925cde47B2D1</code></td>
-                <td>SSTORE2 storage for transform layer bitmaps (plaintext, no XOR)</td>
-            </tr>
-            <tr>
-                <td>NormiesRendererV4</td>
-                <td><code>0x8eC46Cc1f306652868a4dfbAAae87CBa2715A0eB</code></td>
-                <td>V4 — Canvas-aware renderer with composited SVG &amp; extra traits</td>
-            </tr>
-            <tr>
-                <td>NormiesZombie</td>
-                <td><code>0x18533ad55a54c3847Da06A48b51aD7DcB2551202</code></td>
-                <td>Merkle-gated commit-reveal converter that turns eligible Normies into bespoke Zombies</td>
-            </tr>
-            <tr>
-                <td>NormiesZombieStorage</td>
-                <td><code>0xA331bD22C90D1DA096934Db8bc6b69F0e1491E26</code></td>
-                <td>SSTORE2 storage for the zombie pool assets &amp; conversion records (plaintext, no XOR)</td>
-            </tr>
-            <tr>
-                <td>NormiesLegendaryCanvas</td>
-                <td><code>0xfA55f6592522dA74224a67c7D3Fd1DF759c628e8</code></td>
-                <td>Owner-managed registry of selected Legendary Canvas artist traits</td>
-            </tr>
-            <tr>
-                <td>NormiesRendererV5</td>
-                <td><code>0x7c726f02C5e840e1656b522A5C22caaf87C1C35C</code></td>
-                <td>V5 — V4-compatible renderer adding a zombie metadata &amp; art branch</td>
-            </tr>
+            <tr><td>Normies</td><td><code>0x9Eb6E2025B64f340691e424b7fe7022fFDE12438</code></td><td>Core ERC721C token with ERC-2981 royalties</td></tr>
+            <tr><td>NormiesStorage</td><td><code>0x1B976bAf51cF51F0e369C070d47FBc47A706e602</code></td><td>SSTORE2 bitmap and trait storage with XOR encryption</td></tr>
+            <tr><td>NormiesRenderer</td><td><code>0xBe57fC4D0c729b8e8d33b638Dd441F57365e4c25</code></td><td>V1 renderer: animated noise pre-reveal, static SVG post-reveal</td></tr>
+            <tr><td>NormiesRendererV2</td><td><code>0x7818f24d3239c945510e0a1a523dd9971812c6c0</code></td><td>V2 renderer: static noise pre-reveal</td></tr>
+            <tr><td>NormiesRendererV3</td><td><code>0x1af01b902256d77cf9499a14ef4e494897380b05</code></td><td>V3 renderer: RLE-optimized SVG, Pixel Count trait, canvas animation URL</td></tr>
+            <tr><td>NormiesMinter</td><td><code>0xC74994dD70FFb621CC514cE18a4F6F52124e296d</code></td><td>V1 EIP-191 signature-verified minting</td></tr>
+            <tr><td>NormiesMinterV2</td><td><code>0xc513272597d3022D77b3d7EEBA92cea5D7fb2808</code></td><td>V2 minting with delegate.xyz v1/v2 cold wallet delegation</td></tr>
+            <tr><td>NormiesCanvas</td><td><code>0x64951d92e345C50381267380e2975f66810E869c</code></td><td>Burn-to-edit orchestrator: commit-reveal burns, action points, and pixel transforms</td></tr>
+            <tr><td>NormiesCanvasStorage</td><td><code>0xC255BE0983776BAB027a156681b6925cde47B2D1</code></td><td>SSTORE2 storage for transform layer bitmaps</td></tr>
+            <tr><td>NormiesRendererV4</td><td><code>0x8eC46Cc1f306652868a4dfbAAae87CBa2715A0eB</code></td><td>V4 Canvas-aware renderer with composited SVG and extra traits</td></tr>
+            <tr><td>NormiesZombie</td><td><code>0x18533ad55a54c3847Da06A48b51aD7DcB2551202</code></td><td>Merkle-gated commit-reveal converter that turns eligible Normies into bespoke Zombies</td></tr>
+            <tr><td>NormiesZombieStorage</td><td><code>0xA331bD22C90D1DA096934Db8bc6b69F0e1491E26</code></td><td>SSTORE2 storage for zombie pool assets and conversion records</td></tr>
+            <tr><td>NormiesLegendaryCanvas</td><td><code>0xfA55f6592522dA74224a67c7D3Fd1DF759c628e8</code></td><td>Owner-managed registry of selected Legendary Canvas artist traits</td></tr>
+            <tr><td>NormiesRendererV5</td><td><code>0x7c726f02C5e840e1656b522A5C22caaf87C1C35C</code></td><td>V5 renderer: V4-compatible renderer with zombie metadata and art branches</td></tr>
         </table>
 
         <div class="footer">
-            <p>Normies — On-Chain Generative Faces</p>
+            <p>Normies &mdash; On-Chain Generative Faces</p>
             <p>
                 <a href="https://x.com/serc1n" target="_blank">@serc1n</a> &middot;
                 <a href="https://x.com/yigitduman" target="_blank">@yigitduman</a>

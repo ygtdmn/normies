@@ -138,6 +138,34 @@ normie.get("/:id/traits", async (c) => {
     return c.json(decoded);
 });
 
+// Batch SVG fetch: GET /normie/images?ids=1,2,3 -> { images: { "1": "<svg…>", … } }
+// Lets clients render a whole page of cards from a single request instead of
+// one HTTP request per token (which otherwise trips the rate limiter).
+const MAX_BATCH_IMAGES = 200;
+
+normie.get("/images", async (c) => {
+    const ids = (c.req.query("ids") ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
+    if (ids.length === 0) return c.json({ error: "Provide ids, e.g. ?ids=1,2,3" }, 400);
+    if (ids.length > MAX_BATCH_IMAGES) return c.json({ error: `Too many ids (max ${MAX_BATCH_IMAGES})` }, 400);
+
+    const images: Record<string, string> = {};
+    await Promise.all(ids.map(async (id) => {
+        const result = parseTokenId(id);
+        if ("error" in result) return;
+        try {
+            images[result.tokenId] = renderSvg(await getActiveImageData(result.tokenId));
+        } catch {
+            // skip tokens that fail to render
+        }
+    }));
+
+    return c.json({ images });
+});
+
 normie.get("/:id/image.svg", async (c) => {
     const result = parseTokenId(c.req.param("id"));
     if ("error" in result) return c.json({ error: result.error }, 400);

@@ -1,723 +1,469 @@
 # Normies API
 
-> On-Chain Normies Data for Builders
-
-Normies is a 10,000-piece on-chain generative NFT collection on Ethereum.
-Each Normie is a 40x40 monochrome bitmap stored entirely on-chain.
-
-## Base URL
-
-Replace `{base}` with the deployed API URL.
-
-## Endpoints
-
-Note: The /normie/{id}/pixels, /image.svg, /image.png, and /metadata endpoints return
-the active V5-style token state. If a Normie has been converted, these endpoints use
-the zombie bitmap and zombie attributes; if it has also been edited via NormiesCanvas,
-they return zombie XOR transform. Use /normie/{id}/original/* endpoints to access
-the original mint data, ignoring both Canvas edits and zombie conversion.
-
-### GET /normie/{id}/pixels
-Returns the active 40x40 bitmap as a 1600-character string of 0s and 1s.
-Zombie-converted tokens use the zombie bitmap; customized tokens use the active base XOR Canvas transform.
-- Content-Type: text/plain
-- Parameters: id (integer, 0-9999)
-- Response: 1600 characters, row-major order, top-left to bottom-right
-- 1 = pixel on (dark gray #48494b), 0 = pixel off (light gray #e3e5e4)
-- Example: `curl {base}/normie/0/pixels`
-
-### GET /normie/{id}/traits/binary
-Returns the raw bytes8 trait data as a hex string.
-- Content-Type: text/plain
-- Parameters: id (integer, 0-9999)
-- Response: hex string like 0x0001000305010200 (8 bytes = 16 hex chars)
-- Each byte is an index into a trait category
-- Example: `curl {base}/normie/0/traits/binary`
-
-### GET /normie/{id}/traits
-Returns decoded traits as JSON with human-readable labels.
-- Content-Type: application/json
-- Parameters: id (integer, 0-9999)
-- Response format:
-  {
-    "raw": "0x0001000305010200",
-    "attributes": [
-      { "trait_type": "Type", "value": "Human" },
-      { "trait_type": "Gender", "value": "Female" },
-      { "trait_type": "Age", "value": "Young" },
-      { "trait_type": "Hair Style", "value": "Straight Hair" },
-      { "trait_type": "Facial Feature", "value": "Shadow Beard" },
-      { "trait_type": "Eyes", "value": "Big Shades" },
-      { "trait_type": "Expression", "value": "Serious" },
-      { "trait_type": "Accessory", "value": "Top Hat" }
-    ]
-  }
-
-### GET /normie/{id}/image.svg
-Returns the active Normie as an SVG image.
-- Content-Type: image/svg+xml
-- Parameters: id (integer, 0-9999)
-- Output: 1000x1000 SVG with 40x40 viewBox, crispEdges rendering
-- Background: #e3e5e4 (light gray), Pixels: #48494b (dark gray)
-- Example: `curl {base}/normie/0/image.svg -o normie.svg`
-
-### GET /normie/{id}/image.png
-Returns the active Normie as a PNG image.
-- Content-Type: image/png
-- Parameters: id (integer, 0-9999)
-- Output: 1000x1000 PNG, pixel-perfect rasterization
-- Example: `curl {base}/normie/0/image.png -o normie.png`
-
-### GET /normie/{id}/metadata
-Returns full NFT metadata JSON matching the active on-chain tokenURI() renderer.
-Human tokens keep original mint traits. Zombie tokens use zombie attributes.
-Includes canvas-aware attributes: Level, Action Points, Customized.
-If customized, uses the active composited image.
-Selected tokens may also include { "trait_type": "Legendary Canvas", "value": "<Artist Name>" }.
-- Content-Type: application/json
-- Parameters: id (integer, 0-9999)
-- Response format:
-  {
-    "name": "Normie #0",
-    "attributes": [
-      { "trait_type": "Type", "value": "Human" },
-      { "trait_type": "Gender", "value": "Female" },
-      { "trait_type": "Age", "value": "Young" },
-      { "trait_type": "Hair Style", "value": "Straight Hair" },
-      { "trait_type": "Facial Feature", "value": "Shadow Beard" },
-      { "trait_type": "Eyes", "value": "Big Shades" },
-      { "trait_type": "Expression", "value": "Serious" },
-      { "trait_type": "Accessory", "value": "Top Hat" },
-      { "display_type": "number", "trait_type": "Level", "value": 1 },
-      { "display_type": "number", "trait_type": "Pixel Count", "value": 527 },
-      { "display_type": "number", "trait_type": "Action Points", "value": 0 },
-      { "trait_type": "Customized", "value": "No" }
-    ],
-    "image": "data:image/svg+xml;base64,...",
-    "animation_url": "data:text/html;base64,..."
-  }
-
-### GET /health
-Health check endpoint.
-- Response: { "status": "ok" }
-
-## Ownership Endpoints
-
-Look up current NFT ownership, powered by the Ponder indexer.
-Tracks all Transfer events to maintain a real-time ownership index.
-
-### GET /normie/{id}/owner
-Returns the current owner of a Normie. Returns 404 if burned or never minted.
-- Content-Type: application/json
-- Parameters: id (integer, 0-9999)
-- Response format:
-  {
-    "tokenId": "42",
-    "owner": "0x1234...abcd"
-  }
-
-### GET /holders/{address}
-Returns all Normie token IDs currently owned by the given wallet address.
-- Content-Type: application/json
-- Parameters: address (Ethereum address, 0x-prefixed)
-- Response format:
-  {
-    "address": "0x1234...abcd",
-    "tokenIds": ["42", "100", "1337"]
-  }
-
-## Original Endpoints (Pre-Transform)
-
-These endpoints always return the original Normie mint data, ignoring Canvas customizations and zombie conversion.
-
-### GET /normie/all/original
-Returns a compact static dump of all indexed original Normie mint data.
-- Content-Type: application/json
-- Response fields:
-  {
-    "count": 10000,
-    "tokens": [
-      {
-        "tokenId": "0",
-        "rawImageData": "0x...",
-        "pixelCount": 527,
-        "traits": {
-          "raw": "0x0001000305010200",
-          "attributes": [
-            { "trait_type": "Type", "value": "Human" }
-          ]
-        },
-        "blockNumber": "12345678",
-        "timestamp": "1700000000",
-        "txHash": "0x..."
-      }
-    ]
-  }
-- Aliases: /normie/all/original/data
-- rawImageData is the original 200-byte bitmap hex, before Canvas edits or zombie conversion.
-
-### GET /normie/all/original/traits
-Returns decoded original traits for all indexed Normies.
-- Content-Type: application/json
-- Response: { "count": 10000, "tokens": [{ "tokenId": "0", "traits": { "raw": "0x...", "attributes": [...] } }] }
-
-### GET /normie/all/original/traits/binary
-Returns raw bytes8 original trait hex for all indexed Normies.
-- Content-Type: application/json
-- Response: { "count": 10000, "tokens": [{ "tokenId": "0", "traitsHex": "0x..." }] }
-
-### GET /normie/all/original/pixels
-Returns compact original bitmap data for all indexed Normies.
-- Content-Type: application/json
-- Response: { "count": 10000, "tokens": [{ "tokenId": "0", "rawImageData": "0x...", "pixelCount": 527 }] }
-- Alias: /normie/all/original/canvas
-
-### GET /normie/{id}/original/pixels
-Returns the original 40x40 bitmap before any Canvas edits or zombie conversion.
-- Content-Type: text/plain
-- Parameters: id (integer, 0-9999)
-
-### GET /normie/{id}/original/image.svg
-Returns the original Normie SVG before any Canvas edits or zombie conversion.
-- Content-Type: image/svg+xml
-- Parameters: id (integer, 0-9999)
-
-### GET /normie/{id}/original/image.png
-Returns the original Normie PNG before any Canvas edits or zombie conversion.
-
-## Zombie Endpoints
-
-Zombie endpoints expose conversion state and zombie-specific assets, powered by the Ponder indexer.
-The default /normie/{id}/pixels, image, and metadata endpoints already use zombie data when a token is converted.
-
-### GET /zombies/status
-Returns global NormiesZombie status.
-- Content-Type: application/json
-- Response fields: paused, merkleRoot, seedBlock, seed, seedLocked, poolSize, poolSealed, blockNumber, timestamp, txHash
-
-### GET /zombies/conversions
-Lists zombie conversion commitments, newest first.
-- Content-Type: application/json
-- Query: ?limit=50&offset=0 (pagination, max 100)
-
-### GET /zombies/wallet/{address}
-Lists conversion commitments for a qualifying wallet.
-- Content-Type: application/json
-- Query: ?limit=50&offset=0 (pagination, max 100)
-
-### GET /zombies/token/{id}
-Returns zombie state and conversion history for a token.
-- Content-Type: application/json
-
-### GET /zombies/token/{id}/attributes
-Returns parsed zombie attributes for a converted token.
-- Content-Type: application/json
-
-### GET /zombies/token/{id}/pixels
-Returns the base zombie bitmap as a 1600-character string of 0s and 1s.
-- Content-Type: text/plain
-
-### GET /zombies/token/{id}/image.svg
-Returns the base zombie SVG.
-- Content-Type: image/svg+xml
-
-### GET /zombies/token/{id}/image.png
-Returns the base zombie PNG.
-- Content-Type: image/png
-
-Equivalent token-scoped aliases are also available under /normie/{id}/zombie/*.
-
-## Legendary Canvas Endpoints
-
-Legendary Canvas is an owner-managed optional trait for selected Normies.
-When set, /normie/{id}/metadata includes:
-{ "trait_type": "Legendary Canvas", "value": "<Artist Name>" }.
-Tokens without a registered artist do not include this trait.
-
-### GET /legendary-canvas
-Lists active Legendary Canvas entries, newest first.
-- Content-Type: application/json
-- Query: ?limit=50&offset=0 (pagination, max 100)
-
-### GET /legendary-canvas/token/{id}
-Returns Legendary Canvas state for a token.
-- Content-Type: application/json
-- Response fields: tokenId, isLegendary, artistName, operator, blockNumber, timestamp, txHash
-
-### GET /normie/{id}/legendary-canvas
-Token-scoped alias for /legendary-canvas/token/{id}.
-- Content-Type: application/json
-
-## Canvas Endpoints
-
-These endpoints expose NormiesCanvas data: transform layers, pixel diffs, action points, delegations, and contract status.
-
-### GET /normie/{id}/canvas/pixels
-Returns the transform layer (XOR overlay) as a 1600-character binary string.
-Each 1 represents a pixel that was flipped by the Canvas edit.
-Returns all 0s if the Normie has not been customized.
-- Content-Type: text/plain
-- Parameters: id (integer, 0-9999)
-
-### GET /normie/{id}/canvas/diff
-Returns a pixel-level diff between the active base image and the Canvas edits.
-- Content-Type: application/json
-- Parameters: id (integer, 0-9999)
-- Response format:
-  {
-    "added": [{ "x": 10, "y": 5 }, { "x": 11, "y": 5 }],
-    "removed": [{ "x": 20, "y": 15 }],
-    "addedCount": 2,
-    "removedCount": 1,
-    "netChange": 1
-  }
-- added: pixels turned ON by the edit (active base was off)
-- removed: pixels turned OFF by the edit (active base was on)
-
-### GET /normie/{id}/canvas/info
-Returns Canvas metadata for a Normie.
-- Content-Type: application/json
-- Parameters: id (integer, 0-9999)
-- Response format:
-  {
-    "actionPoints": 25,
-    "level": 3,
-    "customized": true,
-    "delegate": "0x0000000000000000000000000000000000000000",
-    "delegateSetBy": "0x0000000000000000000000000000000000000000"
-  }
-- actionPoints: total pixel-change budget earned from burns
-- level: display level (actionPoints / 10 + 1)
-- customized: whether the Normie has been edited
-- delegate: address authorized to transform pixels (zero if none)
-- delegateSetBy: address of the owner who set the delegate
-
-### GET /canvas/status
-Returns global NormiesCanvas contract status.
-- Content-Type: application/json
-- Response format:
-  {
-    "paused": false,
-    "maxBurnPercent": 4,
-    "tierThresholds": [490, 890],
-    "tierMinPercents": [1, 2, 3]
-  }
-- paused: whether canvas operations are paused
-- maxBurnPercent: max percentage of burned pixel count earned as action points
-- tierThresholds: pixel count thresholds for burn tier escalation
-- tierMinPercents: minimum burn percentage for each tier
-
-## History Endpoints
-
-Historical data from on-chain events, powered by the Ponder indexer.
-These endpoints let you explore burn history, transform history, and view past versions of Normies.
-
-Note: The API server requires the Ponder indexer to be running and configured via PONDER_API_URL.
-Burned Normie images are still readable from on-chain SSTORE2 storage even after the token is burned.
-
-### GET /history/burns
-Lists all burn commitments (newest first).
-- Content-Type: application/json
-- Query: ?limit=50&offset=0 (pagination, max 100)
-- Response: array of burn commitment objects
-- Example: `curl {base}/history/burns?limit=10`
-- Response format:
-  [
-    {
-      "commitId": "0",
-      "owner": "0x1234...abcd",
-      "receiverTokenId": "42",
-      "tokenCount": 3,
-      "transferredActionPoints": "0",
-      "blockNumber": "12345678",
-      "timestamp": "1700000000",
-      "txHash": "0xabc...def",
-      "revealed": true,
-      "totalActions": "15",
-      "expired": false,
-      "revealBlockNumber": "12345690",
-      "revealTimestamp": "1700000120",
-      "revealTxHash": "0x123...456"
-    }
-  ]
-
-### GET /history/burns/{commitId}
-Returns a single burn commitment with its burned tokens.
-- Content-Type: application/json
-- Parameters: commitId (integer)
-- Response: commitment object with burnedTokens array
-- Example: `curl {base}/history/burns/0`
-- Response format:
-  {
-    "commitId": "0",
-    "owner": "0x1234...abcd",
-    "receiverTokenId": "42",
-    "tokenCount": 3,
-    ...
-    "burnedTokens": [
-      { "id": "0-100", "commitId": "0", "tokenId": "100", "pixelCount": 527, ... },
-      { "id": "0-200", "commitId": "0", "tokenId": "200", "pixelCount": 490, ... }
-    ]
-  }
-
-### GET /history/burns/address/{address}
-Returns burn commitments by owner address.
-- Content-Type: application/json
-- Parameters: address (Ethereum address)
-- Query: ?limit=50&offset=0
-
-### GET /history/burns/receiver/{tokenId}
-Returns burn commitments where tokenId was the receiver of action points.
-- Content-Type: application/json
-- Parameters: tokenId (integer, 0-9999)
-- Query: ?limit=50&offset=0
-
-### GET /history/burned-tokens
-Lists all burned tokens (newest first).
-- Content-Type: application/json
-- Query: ?limit=50&offset=0
-- Response: array of burned token objects with commitId, tokenId, pixelCount, blockNumber, timestamp
-
-### GET /history/burned/{tokenId}
-Returns burn info for a specific token (which commitment it was burned in, pixel count).
-- Content-Type: application/json
-- Parameters: tokenId (integer, 0-9999)
-
-### GET /history/burned/{tokenId}/image.svg
-Returns the SVG image of a burned Normie. SSTORE2 data persists after burn.
-- Content-Type: image/svg+xml
-- Parameters: tokenId (integer, 0-9999)
-- Example: `curl {base}/history/burned/100/image.svg -o burned-normie.svg`
-
-### GET /history/burned/{tokenId}/image.png
-Returns the PNG image of a burned Normie.
-- Content-Type: image/png
-- Parameters: tokenId (integer, 0-9999)
-
-### GET /history/normie/{id}/versions
-Lists all transform versions for a token (newest first). Each entry represents a
-setTransformBitmap call with metadata about pixel changes.
-- Content-Type: application/json
-- Parameters: id (integer, 0-9999)
-- Query: ?limit=50&offset=0
-- Response format:
-  [
-    {
-      "version": 0,
-      "changeCount": 12,
-      "newPixelCount": 535,
-      "transformer": "0x1234...abcd",
-      "blockNumber": "12345678",
-      "timestamp": "1700000000",
-      "txHash": "0xabc...def"
-    }
-  ]
-
-### GET /history/customized
-Lists NormiesCanvas customization events.
-- Content-Type: application/json
-- Query: ?limit=50&offset=0&after_timestamp=1700000000
-- since_timestamp is accepted as an alias for after_timestamp.
-- Default sort is newest first; when after_timestamp or since_timestamp is supplied, default sort is oldest first. Use sort=asc or sort=desc to override.
-- Response format:
-  {
-    "events": [
-      {
-        "id": "12345678-42",
-        "tokenId": "42",
-        "transformer": "0x1234...abcd",
-        "changeCount": 12,
-        "newPixelCount": 535,
-        "blockNumber": "12345678",
-        "timestamp": "1700000001",
-        "txHash": "0xabc...def"
-      }
-    ],
-    "tokenIds": ["42"],
-    "count": 1,
-    "hasMore": false,
-    "afterTimestamp": "1700000000"
-  }
-
-### GET /history/normie/{id}/version/{version}/pixels
-Returns the composited pixel string for a historical version.
-Each version is the result of XOR-compositing the original image with the stored transform bitmap.
-- Content-Type: text/plain
-- Parameters: id (integer, 0-9999), version (integer, 0-indexed)
-
-### GET /history/normie/{id}/version/{version}/image.svg
-Returns the SVG image for a historical version.
-- Content-Type: image/svg+xml
-- Parameters: id (integer, 0-9999), version (integer, 0-indexed)
-- Example: `curl {base}/history/normie/42/version/0/image.svg -o version-0.svg`
-
-### GET /history/normie/{id}/version/{version}/image.png
-Returns the PNG image for a historical version.
-- Content-Type: image/png
-- Parameters: id (integer, 0-9999), version (integer, 0-indexed)
-
-### GET /history/stats
-Returns global Canvas activity statistics.
-- Content-Type: application/json
-- Response format:
-  {
-    "totalBurnCommitments": 25,
-    "totalBurnedTokens": 100,
-    "totalTransforms": 50,
-    "totalActionPointsDistributed": "1500"
-  }
-
-## How Historical Versions Work
-
-Each Canvas edit calls setTransformBitmap(tokenId, bitmap) which stores a 200-byte XOR overlay.
-The transform bitmap is decoded from the transaction calldata and stored by the Ponder indexer.
-To reconstruct any historical version:
-  composited = original XOR transformBitmap
-The original image data persists on-chain via SSTORE2 (never deleted, even after burn).
-Version numbers are 0-indexed in chronological order (version 0 = first edit).
-
-## Agent Endpoints (ERC-8004)
-
-Endpoints backing the agentic flow: live persona generation, dynamic agent metadata, agent-binding
-lookups, and a paginated gallery feed. Personas are generated deterministically from a Normie's
-immutable mint traits + current canvas state on every request — nothing is stored. Name and type
-are stable per tokenId; backstory, tagline, personality, voice, quirks, greeting, and system prompt
-evolve as the Normie's canvas state crosses level bands (untouched / early / mid / late). The
-Ponder indexer is the source of truth for "is this Normie registered?"; the metadata / info /
-agent-card endpoints lazy-reconcile against it on read so an on-chain registration is reachable
-here within the next read window even if the original frontend handshake was abandoned.
-
-### GET /agents/metadata/{tokenId}
-ERC-8004 registration metadata for the agent bound to this Normie. This is the URL stored on-chain
-as the agent's agentURI. Reachable for both pending and registered rows so 8004 indexers can resolve
-metadata the moment a register tx confirms.
-- Content-Type: application/json
-- Parameters: tokenId (integer, 0-9999)
-- Response format:
-  {
-    "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
-    "name": "Normie #42 - Pixelpriest",
-    "description": "Tagline. Backstory…",
-    "image": "{base}/agents/image/42",
-    "services": [
-      { "name": "web", "endpoint": "{base}/agents/info/42", "version": "1" },
-      { "name": "A2A", "endpoint": "{base}/agents/agent-card/42", "version": "0.3.0" }
-    ],
-    "active": true,
-    "x402Support": false,
-    "updatedAt": 1747200000
-  }
-
-### GET /agents/info/{tokenId}
-Rich persona JSON. Persona text is regenerated live from current on-chain canvas state on every
-request, then merged with registration facts (agentId, chainId, registeredBy, txHash). Returns 404
-only when the Ponder indexer has no AgentBound event for the token.
-- Content-Type: application/json
-- Parameters: tokenId (integer, 0-9999)
-- Response format:
-  {
-    "tokenId": "42",
-    "agentId": "7",
-    "chainId": 1,
-    "name": "...",
-    "type": "Alien",
-    "tagline": "...",
-    "backstory": "...",
-    "greeting": "...",
-    "personalityTraits": ["...", "...", "..."],
-    "communicationStyle": "...",
-    "quirks": ["...", "...", "..."],
-    "systemPrompt": "...",
-    "traits": { "name": "...", "attributes": { "Type": "Alien", ... } },
-    "canvas": {
-      "level": 3,
-      "actionPoints": 25,
-      "customized": true,
-      "diff": { "addedCount": 12, "removedCount": 3, "netChange": 9 }
-    },
-    "registeredBy": "0x...",
-    "registeredAt": "ISO date",
-    "txHash": "0x...",
-    "interactions": { "status": "coming_soon" },
-    "mcp": { "status": "coming_soon" }
-  }
-
-### GET /agents/agent-card/{tokenId}
-A2A (Agent2Agent) Agent Card for this Normie. Derived from the live persona — name, description,
-iconUrl, and a single conversational skill. Linked from /agents/metadata/{tokenId}'s `services`
-array as `{"name": "A2A", ...}` so any ERC-8004 indexer can discover the A2A surface.
-Spec reference: https://a2aproject.github.io/A2A/
-- Content-Type: application/json
-- Parameters: tokenId (integer, 0-9999)
-- Returns 404 only when the Ponder indexer has no AgentBound event for the token.
-- Response format (abbreviated):
-  {
-    "name": "Pixelpriest",
-    "description": "Tagline. Backstory…",
-    "supportedInterfaces": [
-      {
-        "url": "{base}/agents/a2a/42",
-        "protocolBinding": "HTTP+JSON",
-        "protocolVersion": "1.0"
-      }
-    ],
-    "provider": { "organization": "Normies", "url": "https://normies.art" },
-    "iconUrl": "{base}/agents/image/42",
-    "version": "1.0.0",
-    "documentationUrl": "{base}/docs",
-    "capabilities": {
-      "streaming": false,
-      "pushNotifications": false,
-      "stateTransitionHistory": false,
-      "extendedAgentCard": false
-    },
-    "securitySchemes": {},
-    "security": [],
-    "defaultInputModes": ["text/plain"],
-    "defaultOutputModes": ["text/plain"],
-    "skills": [
-      {
-        "id": "converse",
-        "name": "Converse with Pixelpriest",
-        "description": "Tagline",
-        "tags": ["alien", "conversation", "erc-8004"],
-        "examples": ["First-words greeting"],
-        "inputModes": ["text/plain"],
-        "outputModes": ["text/plain"]
-      }
-    ]
-  }
-
-### GET /agents/image/{tokenId}
-Composited Normie SVG used as the agent's portrait. Reflects live canvas state — same renderer as
-/normie/{id}/image.svg but mounted under /agents for symmetry with the rest of the agent endpoints.
-- Content-Type: image/svg+xml
-- Parameters: tokenId (integer, 0-9999)
-- Example: `curl {base}/agents/image/42 -o agent.svg`
-
-### GET /agents/list
-Paginated registry of every registered Normies agent, enriched per row with name + type from cached
-on-chain trait reads. Pagination source is the Ponder indexer (newest registration first by
-default), so a newly bound agent appears here as soon as the indexer sees the AgentBound event.
-- Content-Type: application/json
-- Query params:
-  - sort: "newest" | "oldest" (default "newest")
-  - limit: 1-100 (default 24)
-  - cursor: last seen agentId from the previous page; returns rows past it in the sort direction
-- Response format:
-  {
-    "items": [
-      {
-        "agentId": "7",
-        "tokenId": "42",
-        "name": "Pixelpriest",
-        "type": "Alien",
-        "registeredBy": "0x...",
-        "registeredAt": "1747200000",
-        "txHash": "0x..."
-      }
-    ],
-    "hasMore": true
-  }
-
-### GET /agents/count
-Total count of registered Normies agents. Sourced from the Ponder indexer (filtered to the Normies
-contract). Useful for gallery headers.
-- Content-Type: application/json
-- Response format: { "count": 137 }
-
-### GET /agents/binding/{tokenId}
-Resolves a Normie token to its bound agentId via the Ponder indexer (which watches the Adapter8004
-AgentBound event). Returns { "binding": null } if the Normie has not been registered as an agent.
-- Content-Type: application/json
-- Response format:
-  {
-    "binding": {
-      "id": "0:0x9eb6...:42",
-      "agentId": "7",
-      "standard": 0,
-      "tokenContract": "0x9eb6...",
-      "tokenId": "42",
-      "registeredBy": "0x...",
-      "blockNumber": "12345678",
-      "timestamp": "1747200000",
-      "txHash": "0x..."
-    }
-  }
-
-### POST /agents/binding/batch
-Batch resolves many Normies at once. Body: { "tokenIds": ["42", "100", …] }. Response keys are token
-IDs as strings; unbound tokens are absent from the map.
-- Content-Type: application/json
-- Request body: { "tokenIds": [string|number, …] }
-- Response: { "bindings": { "<tokenId>": <AgentBinding>, … } }
-
-### GET /agents/by-agent-id/{agentId}
-Reverse lookup — given an Adapter8004 agentId, returns the bound Normie token (or null if no such
-agent exists in the index).
-- Content-Type: application/json
-- Response format: { "binding": <AgentBinding> | null }
-
-### GET /agents/by-agent-id/{agentId}/info
-Reverse-lookup convenience that resolves agentId → tokenId via the indexer and returns the same
-payload as /agents/info/{tokenId}. Lets agent UIs (which carry the agentId in URLs) load the full
-persona + canvas state in a single round trip.
-- Content-Type: application/json
-- Returns 404 when the indexer has no binding for the given agentId.
-- Response format: same as /agents/info/{tokenId}
-
-## Bitmap Data Format
-
-Each Normie is a 40x40 monochrome bitmap stored as 200 bytes on-chain.
-
-- Grid: 40 x 40 pixels (1600 total)
-- Encoding: 1 bit per pixel, MSB first
-- Layout: Row-major (top-left to bottom-right)
-- Storage: 200 bytes via SSTORE2
-
-Pixel access formula:
-  flatIndex = y * 40 + x
-  byteIndex = flatIndex >> 3
-  bitPos = 7 - (flatIndex & 7)
-  pixel = (data[byteIndex] >> bitPos) & 1
-
-## Trait Categories
-
-Byte 0 - Type: Human, Cat, Alien, Agent
-Byte 1 - Gender: Male, Female, Non-Binary
-Byte 2 - Age: Young, Middle-Aged, Old
-Byte 3 - Hair Style: Short Hair, Long Hair, Curly Hair, Straight Hair, Wavy Hair, Spiky Hair, Wild Hair, Messy Hair, Mohawk, Crazy Hair, Braided Hair, Bald, Ponytail, Pigtails, Afro, Buzz Cut, Frumpy Hair, Stringy Hair, Peak Spike, Half Shaved, Knitted Cap
-Byte 4 - Facial Feature: Full Beard, Mustache, Goatee, Chin Strap, Muttonchops, Shadow Beard, Luxurious Beard, Handlebars, Big Beard, Normal Beard, Clean Shaven, Freckles, Mole, Rosy Cheeks, Dimples, High Cheekbones, Spots
-Byte 5 - Eyes: Classic Shades, Big Shades, Regular Shades, Small Shades, Horned Rim Glasses, Nerd Glasses, VR Headset, 3D Glasses, Eye Mask, Eye Patch, Round Glasses, Square Glasses, Aviators, No Glasses
-Byte 6 - Expression: Neutral, Slight Smile, Serious, Content, Peaceful, Confident, Friendly
-Byte 7 - Accessory: Top Hat, Fedora, Cowboy Hat, Beanie, Cap, Cap Forward, Bandana, Headband, Do-Rag, Hoodie, Earring, Gold Chain, Silver Chain, Bow Tie, No Accessories
-
-## Rate Limiting
-
-- 60 requests per minute per IP (sliding window)
-- Headers: X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After (on 429)
-
-## Error Responses
-
-All errors return JSON: { "error": "message" }
-- 400: Invalid token ID
-- 404: Token not found or data not set
-- 429: Rate limit exceeded
-- 500: Internal server error
+Base URL: `https://api.normies.art`
+
+Normies is a 10,000-token on-chain NFT collection on Ethereum. Token IDs are `0` through `9999`.
+The API serves token rendering, original mint data, Canvas state, burn/customization history,
+zombie state, Legendary Canvas state, ERC-8004 agent metadata, and rarity data.
+
+Most mutable data is read from the Ponder indexer rather than from per-request RPC calls.
+
+## Cache Policy
+
+Every endpoint below lists the public `Cache-Control` header set by the API server.
+`none` means the API server does not set an explicit `Cache-Control` header.
+
+Route-family defaults:
+- `/rarity/*`: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+- `/rarity/admin/*`: `no-store`
+- `/rarity/listings/stream`: `no-store`
+- `/canvas/status`: `public, max-age=300, s-maxage=300`
+- Any path containing `/canvas/info`: `public, max-age=60, s-maxage=60`
+- Owner and holder paths: `public, max-age=10, s-maxage=10`
+- Paths containing `/original/` or `/traits`: `public, max-age=300, s-maxage=3600`
+- `/history/*`: `public, max-age=60, s-maxage=300`
+- Default `/normie/*`, `/zombies/*`, `/legendary-canvas/*`: `public, max-age=60, s-maxage=300`
+- `/favicon.png` and `/favicon.ico`: `public, max-age=86400`
+- `/agents/*`: set per endpoint.
+
+Server-side cache defaults:
+- `CACHE_TTL_MS`: 3600000 ms / 3600 s. Bulk token dump cache and positive agent binding cache.
+- `CANVAS_CACHE_TTL_MS`: 60000 ms / 60 s. Canvas transform and transformed-state caches.
+- `CANVAS_INFO_CACHE_TTL_MS`: 60000 ms / 60 s. Canvas info cache, agent response cache, negative agent binding TTL.
+- `CANVAS_STATUS_CACHE_TTL_MS`: 300000 ms / 300 s. Canvas status cache.
+- `ZOMBIE_CACHE_TTL_MS`: 60000 ms / 60 s. Zombie token info and bitmap caches.
+- `ZOMBIE_STATUS_CACHE_TTL_MS`: 300000 ms / 300 s. Configured zombie status TTL; current public zombie status response uses the default route cache.
+- `LEGENDARY_CANVAS_CACHE_TTL_MS`: 60000 ms / 60 s. Legendary Canvas token info cache.
+- `RARITY_CACHE_TTL_MS`: 60000 ms / 60 s. Live and historical rarity collection snapshots; historical cache keeps up to 32 block snapshots.
+- `RARITY_LISTINGS_REFRESH_MS`: 60000 ms / 60 s. OpenSea listing poll interval for rarity listings.
+- `transformHistoryCache`: 30000 ms / 30 s. Per-token transform history.
+- Immutable token image data, raw traits, and decoded traits are cached in-process with no TTL.
+
+## Core Endpoints
+
+- `GET /`
+  - Human-readable API documentation.
+  - Cache: `none`
+
+- `GET /llms.txt`
+  - LLM/tool-readable API documentation.
+  - Cache: `none`
+
+- `GET /favicon.png`
+  - PNG favicon.
+  - Cache: `public, max-age=86400`
+
+- `GET /favicon.ico`
+  - PNG favicon served at the ICO path.
+  - Cache: `public, max-age=86400`
+
+- `GET /health`
+  - Health check. Response: `{ "status": "ok" }`.
+  - Cache: `none`
+
+## Normie Token Data
+
+Active endpoints apply zombie and Canvas state. Original endpoints ignore zombie conversion and Canvas edits.
+
+- `GET /normie/all/original`
+  - Bulk original mint dump with token ID, raw image data, decoded traits, pixel count, block number, timestamp, and tx hash.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /normie/all/original/data`
+  - Alias-style bulk original mint dump with the same token rows.
+  - Cache: `public, max-age=300, s-maxage=3600`
+
+- `GET /normie/all/original/traits`
+  - Decoded original traits for all indexed tokens.
+  - Cache: `public, max-age=300, s-maxage=3600`
+
+- `GET /normie/all/original/traits/binary`
+  - Raw original `bytes8` trait hex for all indexed tokens.
+  - Cache: `public, max-age=300, s-maxage=3600`
+
+- `GET /normie/all/original/pixels`
+  - Original raw image data and pixel counts for all indexed tokens.
+  - Cache: `public, max-age=300, s-maxage=3600`
+
+- `GET /normie/all/original/canvas`
+  - Canvas-oriented alias for the original bitmap rows.
+  - Cache: `public, max-age=300, s-maxage=3600`
+
+- `GET /normie/{id}/owner`
+  - Current indexed owner. `id` must be 0-9999.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /normie/{id}/pixels`
+  - Active 40x40 bitmap as a 1600-character `0`/`1` string.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /normie/{id}/traits/binary`
+  - Raw original mint trait hex.
+  - Cache: `public, max-age=300, s-maxage=3600`
+
+- `GET /normie/{id}/traits`
+  - Decoded original mint traits.
+  - Cache: `public, max-age=300, s-maxage=3600`
+
+- `GET /normie/{id}/image.svg`
+  - Active SVG image. Zombie art and Canvas transforms are applied when present.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /normie/{id}/image.png`
+  - Active 1000x1000 PNG image rendered from the active SVG.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /normie/{id}/metadata`
+  - Active NFT metadata JSON with Level, Pixel Count, Action Points, Customized, zombie attributes when converted, and Legendary Canvas artist when set.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /normie/{id}/legendary-canvas`
+  - Legendary Canvas state for a token.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /normie/{id}/original/pixels`
+  - Original mint bitmap as a 1600-character `0`/`1` string.
+  - Cache: `public, max-age=300, s-maxage=3600`
+
+- `GET /normie/{id}/original/image.svg`
+  - Original mint SVG.
+  - Cache: `public, max-age=300, s-maxage=3600`
+
+- `GET /normie/{id}/original/image.png`
+  - Original mint PNG.
+  - Cache: `public, max-age=300, s-maxage=3600`
+
+- `GET /normie/{id}/zombie`
+  - Token-scoped zombie info plus conversion history.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /normie/{id}/zombie/attributes`
+  - Zombie attributes for a converted token, or an empty list if not converted.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /normie/{id}/zombie/pixels`
+  - Zombie bitmap as a 1600-character string.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /normie/{id}/zombie/image.svg`
+  - Zombie SVG image.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /normie/{id}/zombie/image.png`
+  - Zombie PNG image.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /normie/{id}/canvas/pixels`
+  - Canvas transform bitmap as a 1600-character string.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /normie/{id}/canvas/diff`
+  - Pixel diff between active base art and Canvas transform.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /normie/{id}/canvas/info`
+  - Canvas level, action points, customized flag, delegate, and delegate setter.
+  - Cache: `public, max-age=60, s-maxage=60`
+
+## Canvas
+
+- `GET /canvas/status`
+  - Global Canvas contract status: paused state, max burn percent, tier thresholds, and tier minimum percents.
+  - Cache: `public, max-age=300, s-maxage=300`
+
+## History
+
+- `GET /history/burns`
+  - Paginated Canvas burn commitments.
+  - Query: `limit` 1-100, `offset`.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /history/burns/{commitId}`
+  - One burn commitment plus burned token details.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /history/burns/address/{address}`
+  - Burn commitments created by a wallet.
+  - Query: `limit`, `offset`.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /history/burns/receiver/{tokenId}`
+  - Burn commitments that transferred action points to a receiver token.
+  - Query: `limit`, `offset`.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /history/burned-tokens`
+  - Paginated list of burned token records.
+  - Query: `limit`, `offset`.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /history/burned/{tokenId}`
+  - Burn record for a token.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /history/burned/{tokenId}/image.svg`
+  - Original SVG for a burned token.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /history/burned/{tokenId}/image.png`
+  - Original PNG for a burned token.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /history/customized`
+  - Canvas transform event sync feed. Returns events, unique token IDs, count, `hasMore`, and requested timestamp cursor.
+  - Query: `limit`, `offset`, `after_timestamp` or `since_timestamp`, `sort=asc|desc`.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /history/normie/{id}/versions`
+  - Transform versions for a token with change count, new pixel count, transformer, block, timestamp, and tx hash.
+  - Query: `limit`, `offset`.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /history/normie/{id}/version/{version}/pixels`
+  - Historical composited pixel string for a transform version.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /history/normie/{id}/version/{version}/image.svg`
+  - Historical composited SVG for a transform version.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /history/normie/{id}/version/{version}/image.png`
+  - Historical composited PNG for a transform version.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /history/stats`
+  - Indexer summary counts for burn commitments, burned tokens, transforms, token data, zombies, Legendary Canvas, and total action points.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+## Holders
+
+- `GET /holders/{address}`
+  - Current indexed token IDs held by a wallet.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+## Zombies
+
+- `GET /zombies/status`
+  - Zombie contract status and pool configuration.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /zombies/conversions`
+  - Paginated zombie conversion commitments and reveal state.
+  - Query: `limit`, `offset`.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /zombies/wallet/{address}`
+  - Zombie conversions for a qualifying wallet.
+  - Query: `limit`, `offset`.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /zombies/token/{id}`
+  - Zombie info plus conversion history for a token.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /zombies/token/{id}/attributes`
+  - Zombie attributes for a token.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /zombies/token/{id}/pixels`
+  - Zombie bitmap as a 1600-character string.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /zombies/token/{id}/image.svg`
+  - Zombie SVG image.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /zombies/token/{id}/image.png`
+  - Zombie PNG image.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+## Legendary Canvas
+
+- `GET /legendary-canvas`
+  - Paginated list of tokens marked with the Legendary Canvas artist trait.
+  - Query: `limit`, `offset`.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /legendary-canvas/token/{id}`
+  - Legendary Canvas state for one token.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+## ERC-8004 Agents
+
+- `GET /agents/metadata/{tokenId}`
+  - ERC-8004 metadata JSON served as the on-chain agent URI.
+  - Cache: `public, max-age=60, s-maxage=120, stale-while-revalidate=300`
+
+- `GET /agents/persona-preview/{tokenId}`
+  - Persona JSON for any token, whether or not it is registered as an agent.
+  - Cache: `public, max-age=30, s-maxage=60, stale-while-revalidate=300`
+
+- `GET /agents/identity/{tokenId}`
+  - Trait-derived agent name, type, and raw trait map.
+  - Cache: `public, max-age=300, s-maxage=600, stale-while-revalidate=3600`
+
+- `GET /agents/info/{tokenId}`
+  - Registered-agent persona, traits, live canvas state, registration metadata, and placeholder interaction/MCP status.
+  - Cache: `public, max-age=30, s-maxage=60, stale-while-revalidate=300`
+
+- `GET /agents/by-agent-id/{agentId}/info`
+  - Reverse lookup by ERC-8004 agent ID, returning the same shape as `/agents/info/{tokenId}`.
+  - Cache: `public, max-age=30, s-maxage=60, stale-while-revalidate=300`
+
+- `GET /agents/list`
+  - Paginated registered-agent gallery feed enriched with identity.
+  - Query: `limit` 1-100, `sort=newest|oldest`, optional `cursor` agent ID.
+  - Cache: `public, max-age=30, s-maxage=60, stale-while-revalidate=300`
+
+- `GET /agents/search`
+  - Search registered agents by name, token ID, or agent ID.
+  - Query: `q`, `limit` 1-50.
+  - Cache: q present: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`; empty q: `none`
+
+- `GET /agents/count`
+  - Total registered Normies agents.
+  - Cache: `public, max-age=30, s-maxage=60, stale-while-revalidate=300`
+
+- `GET /agents/agent-card/{tokenId}`
+  - A2A v0.3.0 Agent Card JSON linked from ERC-8004 metadata.
+  - Cache: `public, max-age=60, s-maxage=120, stale-while-revalidate=300`
+
+- `GET /agents/image/{tokenId}`
+  - Composited SVG image for an agent.
+  - Cache: `public, max-age=60, s-maxage=60, stale-while-revalidate=300`
+
+- `GET /agents/binding/{tokenId}`
+  - Normies-only ERC-8004 binding lookup for one token.
+  - Cache: `public, max-age=30, s-maxage=60, stale-while-revalidate=300`
+
+- `POST /agents/binding/batch`
+  - Batch binding lookup. Body: `{ "tokenIds": [...] }`.
+  - Cache: `public, max-age=30, s-maxage=60`
+
+- `GET /agents/by-agent-id/{agentId}`
+  - Reverse lookup returning the raw binding for an agent ID.
+  - Cache: `public, max-age=60, s-maxage=300`
+
+## Rarity
+
+Rarity endpoints power `rarity.normies.art`. They are backed by a bulk Ponder snapshot and short API-server caches.
+Historical routes recompute ownership, burn counts, traits, and ranks at an Ethereum block number from indexed event state.
+Historical routes omit OpenSea listings and floor price because those are current external marketplace state.
+
+- `GET /rarity/docs`
+  - Small JSON list of rarity endpoints.
+  - Cache: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+
+- `GET /rarity/stats`
+  - Live rarity stats: indexed count, live supply, burned count, weights, listing count, floor price, and awakened-agent count.
+  - Cache: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+
+- `GET /rarity/normies`
+  - Paginated live rarity list with rank, score, attributes, listing data, fair value, underpriced flag, burn count, and awakened-agent metadata.
+  - Query: `page`, `limit` 1-100, `sort=rank|id|score|level|action_points|pixel_count|price|awake_registered`, `order=asc|desc`, `search`, `listed=1`, `underpriced=1`, `the100=1`, `awake=1`, `px_tier=low,mid,high`, `wallet_ids`, `trait_*` filters.
+  - Cache: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+
+- `GET /rarity/normie/{id}`
+  - Full live rarity detail for one token. Returns 410 if burned.
+  - Cache: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+
+- `POST /rarity/normie/{id}/refresh`
+  - Forces the live rarity collection cache to reload, then returns the same detail shape as `/rarity/normie/{id}`.
+  - Cache: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+
+- `GET /rarity/normie/{id}/persona`
+  - Awakened-agent persona fields used by the rarity modal. Returns 404 if the token is not an agent.
+  - Cache: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+
+- `GET /rarity/traits`
+  - Trait filter counts over live, non-burned tokens.
+  - Cache: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+
+- `GET /rarity/holder/{addressOrEns}`
+  - Current indexed rarity holdings for a wallet. ENS names are accepted and resolved at request time.
+  - Cache: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+
+- `GET /rarity/recursive-burn-holders`
+  - Leaderboard of current wallets by recursive burn count of held customized tokens.
+  - Query: `limit` 1-200, optional `wallet`.
+  - Cache: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+
+- `GET /rarity/historical/{blockNumber}/stats`
+  - Rarity stats recomputed at an Ethereum block number. Listings and floor price are omitted.
+  - Cache: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+
+- `GET /rarity/historical/{blockNumber}/normies`
+  - Paginated rarity list at a block number. Supports the same non-marketplace filters and sort modes as the live list.
+  - Cache: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+
+- `GET /rarity/historical/{blockNumber}/normie/{id}`
+  - Full rarity detail for one token at a block number. Returns 410 if burned at that block and 404 if not indexed yet.
+  - Cache: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+
+- `GET /rarity/historical/{blockNumber}/traits`
+  - Trait filter counts over live, non-burned tokens at a block number.
+  - Cache: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+
+- `GET /rarity/historical/{blockNumber}/holder/{addressOrEns}`
+  - Indexed wallet holdings at a block number. ENS names are accepted but resolved at request time.
+  - Cache: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+
+- `GET /rarity/historical/{blockNumber}/recursive-burn-holders`
+  - Leaderboard of wallets by recursive burn count of held customized tokens at a block number.
+  - Query: `limit` 1-200, optional `wallet`.
+  - Cache: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+
+- `GET /rarity/listings/stream`
+  - Server-Sent Events for listing changes: `listed`, `sold`, `cancelled`.
+  - Cache: `no-store`
+
+- `GET /rarity/legendary`
+  - Rarity-app Legendary Canvas curation config with `current` and `upcoming` arrays, loaded from the indexer database.
+  - Cache: `public, max-age=15, s-maxage=30, stale-while-revalidate=120`
+
+- `PUT /rarity/admin/legendary`
+  - Admin-only save for Legendary Canvas curation config into the indexer database. Requires `x-admin-key`.
+  - Body: `{ "current": [{ "id": number, "artist": string }], "upcoming": [...] }`
+  - Cache: `no-store`
 
 ## Smart Contracts (Ethereum Mainnet)
 
-- Normies (ERC721): 0x9Eb6E2025B64f340691e424b7fe7022fFDE12438 — Core ERC721C token with ERC-2981 royalties
-- NormiesStorage: 0x1B976bAf51cF51F0e369C070d47FBc47A706e602 — SSTORE2 bitmap & trait storage with XOR encryption
-- NormiesRenderer: 0xBe57fC4D0c729b8e8d33b638Dd441F57365e4c25 — V1: Animated noise pre-reveal, static SVG post-reveal
-- NormiesRendererV2: 0x7818f24d3239c945510e0a1a523dd9971812c6c0 — V2: Static noise pre-reveal
-- NormiesRendererV3: 0x1af01b902256d77cf9499a14ef4e494897380b05 — V3: RLE-optimized SVG, Pixel Count trait, canvas animation_url
-- NormiesMinter: 0xC74994dD70FFb621CC514cE18a4F6F52124e296d — V1: EIP-191 signature-verified minting
-- NormiesMinterV2: 0xc513272597d3022D77b3d7EEBA92cea5D7fb2808 — V2: Adds delegate.xyz v1/v2 cold wallet delegation
-- NormiesCanvas: 0x64951d92e345C50381267380e2975f66810E869c — Burn-to-edit orchestrator: commit-reveal burns, action points, pixel transforms
-- NormiesCanvasStorage: 0xC255BE0983776BAB027a156681b6925cde47B2D1 — SSTORE2 storage for transform layer bitmaps (plaintext, no XOR)
-- NormiesRendererV4: 0x8eC46Cc1f306652868a4dfbAAae87CBa2715A0eB — V4: Canvas-aware renderer with composited SVG & extra traits
-- NormiesZombie: 0x18533ad55a54c3847Da06A48b51aD7DcB2551202 — Merkle-gated commit-reveal converter that turns eligible Normies into bespoke Zombies
-- NormiesZombieStorage: 0xA331bD22C90D1DA096934Db8bc6b69F0e1491E26 — SSTORE2 storage for the zombie pool assets & conversion records (plaintext, no XOR)
-- NormiesLegendaryCanvas: 0xfA55f6592522dA74224a67c7D3Fd1DF759c628e8 — Owner-managed registry of selected Legendary Canvas artist traits
-- NormiesRendererV5: 0x7c726f02C5e840e1656b522A5C22caaf87C1C35C — V5: V4-compatible renderer adding a zombie metadata & art branch
+- Normies: `0x9Eb6E2025B64f340691e424b7fe7022fFDE12438`
+  - Core ERC721C token with ERC-2981 royalties.
+- NormiesStorage: `0x1B976bAf51cF51F0e369C070d47FBc47A706e602`
+  - SSTORE2 bitmap and trait storage with XOR encryption.
+- NormiesRenderer: `0xBe57fC4D0c729b8e8d33b638Dd441F57365e4c25`
+  - V1 renderer: animated noise pre-reveal, static SVG post-reveal.
+- NormiesRendererV2: `0x7818f24d3239c945510e0a1a523dd9971812c6c0`
+  - V2 renderer: static noise pre-reveal.
+- NormiesRendererV3: `0x1af01b902256d77cf9499a14ef4e494897380b05`
+  - V3 renderer: RLE-optimized SVG, Pixel Count trait, canvas animation URL.
+- NormiesMinter: `0xC74994dD70FFb621CC514cE18a4F6F52124e296d`
+  - V1 EIP-191 signature-verified minting.
+- NormiesMinterV2: `0xc513272597d3022D77b3d7EEBA92cea5D7fb2808`
+  - V2 minting with delegate.xyz v1/v2 cold wallet delegation.
+- NormiesCanvas: `0x64951d92e345C50381267380e2975f66810E869c`
+  - Burn-to-edit orchestrator: commit-reveal burns, action points, and pixel transforms.
+- NormiesCanvasStorage: `0xC255BE0983776BAB027a156681b6925cde47B2D1`
+  - SSTORE2 storage for transform layer bitmaps.
+- NormiesRendererV4: `0x8eC46Cc1f306652868a4dfbAAae87CBa2715A0eB`
+  - V4 Canvas-aware renderer with composited SVG and extra traits.
+- NormiesZombie: `0x18533ad55a54c3847Da06A48b51aD7DcB2551202`
+  - Merkle-gated commit-reveal converter that turns eligible Normies into bespoke Zombies.
+- NormiesZombieStorage: `0xA331bD22C90D1DA096934Db8bc6b69F0e1491E26`
+  - SSTORE2 storage for zombie pool assets and conversion records.
+- NormiesLegendaryCanvas: `0xfA55f6592522dA74224a67c7D3Fd1DF759c628e8`
+  - Owner-managed registry of selected Legendary Canvas artist traits.
+- NormiesRendererV5: `0x7c726f02C5e840e1656b522A5C22caaf87C1C35C`
+  - V5 renderer: V4-compatible renderer with zombie metadata and art branches.
+
+## Status Codes
+
+Common responses:
+- `200`: success
+- `400`: invalid token, address, query, or body
+- `401`: invalid admin key
+- `403`: admin disabled
+- `404`: not found or not indexed
+- `410`: burned token on rarity detail
+- `502`: upstream indexer, RPC, or provider failure

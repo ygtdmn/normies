@@ -34,10 +34,14 @@ export const CANVAS_STATUS_CACHE_TTL_MS = Number(process.env.CANVAS_STATUS_CACHE
 export const ZOMBIE_CACHE_TTL_MS = Number(process.env.ZOMBIE_CACHE_TTL_MS ?? 60_000); // 1 minute
 export const ZOMBIE_STATUS_CACHE_TTL_MS = Number(process.env.ZOMBIE_STATUS_CACHE_TTL_MS ?? 300_000); // 5 minutes
 export const LEGENDARY_CANVAS_CACHE_TTL_MS = Number(process.env.LEGENDARY_CANVAS_CACHE_TTL_MS ?? 60_000); // 1 minute
+export const RARITY_CACHE_TTL_MS = Number(process.env.RARITY_CACHE_TTL_MS ?? 60_000); // 1 minute
+export const RARITY_LISTINGS_REFRESH_MS = Number(process.env.RARITY_LISTINGS_REFRESH_MS ?? 60_000); // 1 minute
+export const OPENSEA_API_KEY = process.env.OPENSEA_API_KEY || undefined;
+export const OPENSEA_COLLECTION_SLUG = process.env.OPENSEA_COLLECTION_SLUG || "normies";
 
 // Rate limiting
 export const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
-export const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX ?? 60);
+export const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX ?? 300);
 
 // Internal bypass secret (unset = bypass disabled)
 export const INTERNAL_SECRET = process.env.INTERNAL_SECRET || undefined;
