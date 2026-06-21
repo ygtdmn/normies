@@ -36,6 +36,11 @@ export const ZOMBIE_STATUS_CACHE_TTL_MS = Number(process.env.ZOMBIE_STATUS_CACHE
 export const LEGENDARY_CANVAS_CACHE_TTL_MS = Number(process.env.LEGENDARY_CANVAS_CACHE_TTL_MS ?? 60_000); // 1 minute
 export const RARITY_CACHE_TTL_MS = Number(process.env.RARITY_CACHE_TTL_MS ?? 60_000); // 1 minute
 export const RARITY_LISTINGS_REFRESH_MS = Number(process.env.RARITY_LISTINGS_REFRESH_MS ?? 60_000); // 1 minute
+// Consecutive refreshes a token must be absent from OpenSea before its listing is
+// evicted. Debounces transient under-fetches (truncated pages / premature cursor
+// end) that would otherwise flicker prices off and on. 3 -> absorbs up to 2
+// consecutive bad cycles (~2 min) before trusting a removal.
+export const LISTING_REMOVAL_GRACE = Math.max(1, Number(process.env.LISTING_REMOVAL_GRACE ?? 3));
 export const OPENSEA_API_KEY = process.env.OPENSEA_API_KEY || undefined;
 export const OPENSEA_COLLECTION_SLUG = process.env.OPENSEA_COLLECTION_SLUG || "normies";
 

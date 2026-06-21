@@ -1,4 +1,5 @@
 import {
+    LISTING_REMOVAL_GRACE,
     NORMIES_ADDRESS,
     OPENSEA_API_KEY,
     OPENSEA_COLLECTION_SLUG,
@@ -21,6 +22,9 @@ export interface ListingEvent {
 const OPENSEA_ITEM_URL = `https://opensea.io/item/ethereum/${NORMIES_ADDRESS.toLowerCase()}`;
 
 const listings = new Map<number, RarityListing>();
+// tokenId -> consecutive refreshes the token has been absent from OpenSea. Used to
+// debounce removals so a transient under-fetch doesn't evict a live listing.
+const missStreak = new Map<number, number>();
 const listeners = new Set<(event: ListingEvent) => void>();
 let started = false;
 let refreshPromise: Promise<void> | null = null;
@@ -90,19 +94,33 @@ async function refreshListings(initial: boolean): Promise<void> {
                 return;
             }
 
-            for (const [tokenId] of listings) {
-                if (!fresh.has(tokenId)) {
-                    listings.delete(tokenId);
-                    broadcast({ event: "sold", tokenId, priceEth: null });
-                }
-            }
-
+            // Additions and price changes come straight from OpenSea, so trust them
+            // immediately. Seeing a token also clears any pending miss streak.
             for (const [tokenId, listing] of fresh) {
+                missStreak.delete(tokenId);
                 const previous = listings.get(tokenId);
                 if (!previous || previous.priceEth !== listing.priceEth) {
                     listings.set(tokenId, listing);
                     broadcast({ event: "listed", tokenId, priceEth: listing.priceEth });
                 }
+            }
+
+            // Removals are debounced. A single truncated page (OpenSea ending
+            // pagination early under load) can drop a genuinely-listed token —
+            // disproportionately the high-priced tail like #235 at 56 ETH — so only
+            // evict after it has been absent for LISTING_REMOVAL_GRACE consecutive
+            // fetches. This rides out transient under-fetches without flickering
+            // prices off and on across the grid.
+            for (const [tokenId] of listings) {
+                if (fresh.has(tokenId)) continue;
+                const misses = (missStreak.get(tokenId) ?? 0) + 1;
+                if (misses < LISTING_REMOVAL_GRACE) {
+                    missStreak.set(tokenId, misses);
+                    continue;
+                }
+                missStreak.delete(tokenId);
+                listings.delete(tokenId);
+                broadcast({ event: "sold", tokenId, priceEth: null });
             }
 
             lastFetch = Date.now();
