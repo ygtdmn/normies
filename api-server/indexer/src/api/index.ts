@@ -1,9 +1,35 @@
 import { db } from "ponder:api";
 import schema from "ponder:schema";
 import { Hono } from "hono";
-import { eq, desc, count, sum, asc, and, gt, lt, inArray } from "ponder";
+import { eq, desc, count, sum, asc, and, gt, lt, lte, inArray } from "ponder";
 
 const app = new Hono();
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const RARITY_LEGENDARY_CONFIG_ID = "default";
+const writableDb = db as typeof db & {
+  insert: (table: unknown) => {
+    values: (value: unknown) => {
+      onConflictDoNothing: () => Promise<unknown>;
+      onConflictDoUpdate: (value: unknown) => Promise<unknown>;
+    };
+  };
+};
+
+const RARITY_LEGENDARY_DEFAULT = {
+  current: [
+    { id: 603, artist: "a.c.k." },
+    { id: 45, artist: "Snowfro" },
+    { id: 6576, artist: "Deekay" },
+    { id: 4698, artist: "Jack Butcher" },
+    { id: 5974, artist: "Timpers" },
+    { id: 7409, artist: "PIV" },
+    { id: 4354, artist: "Serc" },
+  ],
+  upcoming: [
+    { id: 0, artist: "" },
+    { id: 9993, artist: "Serc" },
+  ],
+};
 
 // ──────────────────────────────────────────────
 //  Helpers
@@ -81,6 +107,314 @@ function emptyLegendaryCanvasState(tokenId: bigint): Record<string, unknown> {
     blockNumber: null,
     timestamp: null,
     txHash: null,
+  };
+}
+
+function buildBurnSummaries(
+  commitments: Array<{
+    receiverTokenId: bigint;
+    tokenCount: number;
+    txHash: `0x${string}`;
+  }>,
+  burnedTokens: Array<{
+    tokenId: bigint;
+    txHash: `0x${string}`;
+  }>,
+) {
+  const burnedByTx = new Map<string, bigint[]>();
+  for (const row of burnedTokens) {
+    const key = row.txHash.toLowerCase();
+    const rows = burnedByTx.get(key) ?? [];
+    rows.push(row.tokenId);
+    burnedByTx.set(key, rows);
+  }
+
+  const receiverBurnedTokens = new Map<bigint, bigint[]>();
+  const directCounts = new Map<bigint, number>();
+  for (const commitment of commitments) {
+    const receiverId = commitment.receiverTokenId;
+    directCounts.set(receiverId, (directCounts.get(receiverId) ?? 0) + commitment.tokenCount);
+
+    const tokenIds = burnedByTx.get(commitment.txHash.toLowerCase()) ?? [];
+    if (tokenIds.length > 0) {
+      const rows = receiverBurnedTokens.get(receiverId) ?? [];
+      rows.push(...tokenIds);
+      receiverBurnedTokens.set(receiverId, rows);
+    }
+  }
+
+  function resolveDeep(tokenId: bigint, visited: Set<bigint>): number {
+    if (visited.has(tokenId)) return 0;
+    visited.add(tokenId);
+
+    const tokenIds = receiverBurnedTokens.get(tokenId) ?? [];
+    let total = 0;
+    for (const burnedTokenId of tokenIds) {
+      total += 1;
+      if (receiverBurnedTokens.has(burnedTokenId)) {
+        total += resolveDeep(burnedTokenId, visited);
+      }
+    }
+    return total;
+  }
+
+  const recursiveCounts = new Map<bigint, number>();
+  for (const receiverId of receiverBurnedTokens.keys()) {
+    recursiveCounts.set(receiverId, resolveDeep(receiverId, new Set()));
+  }
+
+  return { directCounts, recursiveCounts };
+}
+
+function numberMapToRecord(map: Map<bigint, number>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [tokenId, count] of map) out[tokenId.toString()] = count;
+  return out;
+}
+
+function parseBlockNumberParam(raw: string | undefined): bigint | null {
+  if (!raw || !/^\d+$/.test(raw)) return null;
+  const blockNumber = BigInt(raw);
+  return blockNumber >= 0n ? blockNumber : null;
+}
+
+function logIndexFromId(id: string): number {
+  const raw = id.split("-").pop();
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function compareBlockLog(
+  a: { id?: string; blockNumber: bigint; logIndex?: number },
+  b: { id?: string; blockNumber: bigint; logIndex?: number },
+): number {
+  if (a.blockNumber !== b.blockNumber) return a.blockNumber < b.blockNumber ? -1 : 1;
+  const aLog = a.logIndex ?? (a.id ? logIndexFromId(a.id) : 0);
+  const bLog = b.logIndex ?? (b.id ? logIndexFromId(b.id) : 0);
+  return aLog - bLog;
+}
+
+function latestByToken<T extends { tokenId: bigint; blockNumber: bigint; id?: string; logIndex?: number }>(
+  rows: T[],
+): Map<bigint, T> {
+  const latest = new Map<bigint, T>();
+  for (const row of [...rows].sort(compareBlockLog)) {
+    latest.set(row.tokenId, row);
+  }
+  return latest;
+}
+
+function buildHistoricalOwners(
+  transfers: Array<{
+    tokenId: bigint;
+    from: `0x${string}`;
+    to: `0x${string}`;
+    blockNumber: bigint;
+    logIndex: number;
+  }>,
+): Map<bigint, `0x${string}`> {
+  const owners = new Map<bigint, `0x${string}`>();
+  for (const row of [...transfers].sort(compareBlockLog)) {
+    if (row.to.toLowerCase() === ZERO_ADDRESS) owners.delete(row.tokenId);
+    else owners.set(row.tokenId, row.to);
+  }
+  return owners;
+}
+
+function buildHistoricalCanvasStates(
+  blockNumber: bigint,
+  tokenRows: Array<{ tokenId: bigint; blockNumber: bigint; timestamp: bigint; txHash: `0x${string}` }>,
+  transforms: Array<{
+    id: string;
+    tokenId: bigint;
+    newPixelCount: number;
+    transformBitmap: `0x${string}` | null;
+    blockNumber: bigint;
+    timestamp: bigint;
+    txHash: `0x${string}`;
+  }>,
+  commitments: Array<{
+    receiverTokenId: bigint;
+    revealed: boolean;
+    totalActions: bigint | null;
+    revealBlockNumber: bigint | null;
+    revealTimestamp: bigint | null;
+    revealTxHash: `0x${string}` | null;
+  }>,
+) {
+  const actionPoints = new Map<bigint, bigint>();
+  const actionMeta = new Map<bigint, { blockNumber: bigint; timestamp: bigint; txHash: `0x${string}` }>();
+  for (const row of commitments) {
+    if (!row.revealed || row.revealBlockNumber === null || row.totalActions === null) continue;
+    if (row.revealBlockNumber > blockNumber) continue;
+    const current = actionPoints.get(row.receiverTokenId) ?? 0n;
+    actionPoints.set(row.receiverTokenId, current + row.totalActions);
+    const nextMeta = {
+      blockNumber: row.revealBlockNumber,
+      timestamp: row.revealTimestamp ?? 0n,
+      txHash: row.revealTxHash ?? ZERO_ADDRESS,
+    };
+    const currentMeta = actionMeta.get(row.receiverTokenId);
+    if (!currentMeta || compareBlockLog(nextMeta, currentMeta) >= 0) {
+      actionMeta.set(row.receiverTokenId, nextMeta);
+    }
+  }
+
+  const latestTransforms = latestByToken(transforms);
+  const states = new Map<string, Record<string, unknown>>();
+  const pixelCounts = new Map<string, number>();
+  for (const row of tokenRows) {
+    const transform = latestTransforms.get(row.tokenId);
+    const apMeta = actionMeta.get(row.tokenId);
+    const meta = transform && (!apMeta || compareBlockLog(transform, apMeta) >= 0)
+      ? transform
+      : apMeta ?? row;
+
+    states.set(row.tokenId.toString(), {
+      tokenId: row.tokenId.toString(),
+      actionPoints: (actionPoints.get(row.tokenId) ?? 0n).toString(),
+      customized: Boolean(transform),
+      delegate: ZERO_ADDRESS,
+      delegateSetBy: ZERO_ADDRESS,
+      latestTransformBitmap: transform?.transformBitmap ?? null,
+      blockNumber: meta.blockNumber.toString(),
+      timestamp: meta.timestamp.toString(),
+      txHash: meta.txHash,
+    });
+    if (transform) pixelCounts.set(row.tokenId.toString(), transform.newPixelCount);
+  }
+  return { states, pixelCounts };
+}
+
+function buildHistoricalZombieStates(
+  blockNumber: bigint,
+  commitments: Array<{
+    commitId: bigint;
+    qualifyingWallet: `0x${string}`;
+    tokenId: bigint;
+    revealed: boolean;
+    cancelled: boolean;
+    poolIndex: bigint | null;
+    revealBlockNumber: bigint | null;
+    revealTimestamp: bigint | null;
+    revealTxHash: `0x${string}` | null;
+    cancelBlockNumber: bigint | null;
+  }>,
+  poolItems: Array<{ poolIndex: bigint; bitmap: `0x${string}`; attributesJson: string }>,
+) {
+  const poolByIndex = new Map(poolItems.map((item) => [item.poolIndex.toString(), item]));
+  const latest = new Map<bigint, typeof commitments[number]>();
+  for (const row of commitments) {
+    if (!row.revealed || row.revealBlockNumber === null || row.poolIndex === null) continue;
+    if (row.revealBlockNumber > blockNumber) continue;
+    if (row.cancelled && row.cancelBlockNumber !== null && row.cancelBlockNumber <= blockNumber) continue;
+    const existing = latest.get(row.tokenId);
+    if (!existing || (existing.revealBlockNumber ?? 0n) < row.revealBlockNumber) latest.set(row.tokenId, row);
+  }
+
+  const states = new Map<string, Record<string, unknown>>();
+  for (const row of latest.values()) {
+    if (row.poolIndex === null || row.revealBlockNumber === null) continue;
+    const poolItem = poolByIndex.get(row.poolIndex.toString());
+    states.set(row.tokenId.toString(), {
+      tokenId: row.tokenId.toString(),
+      isZombie: true,
+      poolIndex: row.poolIndex.toString(),
+      bitmap: poolItem?.bitmap ?? null,
+      attributesJson: poolItem?.attributesJson ?? null,
+      qualifyingWallet: row.qualifyingWallet,
+      commitId: row.commitId.toString(),
+      blockNumber: row.revealBlockNumber.toString(),
+      timestamp: row.revealTimestamp?.toString() ?? null,
+      txHash: row.revealTxHash ?? null,
+    });
+  }
+  return states;
+}
+
+function buildHistoricalLegendaryCanvasStates(
+  events: Array<{
+    id: string;
+    tokenId: bigint;
+    isLegendary: boolean;
+    artistName: string | null;
+    operator: `0x${string}` | null;
+    blockNumber: bigint;
+    timestamp: bigint;
+    txHash: `0x${string}`;
+  }>,
+) {
+  const latest = latestByToken(events);
+  const states = new Map<string, Record<string, unknown>>();
+  for (const row of latest.values()) {
+    states.set(row.tokenId.toString(), {
+      tokenId: row.tokenId.toString(),
+      isLegendary: row.isLegendary,
+      artistName: row.artistName,
+      operator: row.operator,
+      blockNumber: row.blockNumber.toString(),
+      timestamp: row.timestamp.toString(),
+      txHash: row.txHash,
+    });
+  }
+  return states;
+}
+
+function parseJsonArray(raw: string): unknown[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function getRarityLegendaryConfigRow() {
+  const [existing] = await db
+    .select()
+    .from(schema.rarityLegendaryConfig)
+    .where(eq(schema.rarityLegendaryConfig.id, RARITY_LEGENDARY_CONFIG_ID))
+    .limit(1);
+  if (existing) return existing;
+
+  const now = BigInt(Math.floor(Date.now() / 1000));
+  await writableDb
+    .insert(schema.rarityLegendaryConfig)
+    .values({
+      id: RARITY_LEGENDARY_CONFIG_ID,
+      currentJson: JSON.stringify(RARITY_LEGENDARY_DEFAULT.current),
+      upcomingJson: JSON.stringify(RARITY_LEGENDARY_DEFAULT.upcoming),
+      updatedAt: now,
+      updatedBy: "seed",
+    })
+    .onConflictDoNothing();
+
+  const [seeded] = await db
+    .select()
+    .from(schema.rarityLegendaryConfig)
+    .where(eq(schema.rarityLegendaryConfig.id, RARITY_LEGENDARY_CONFIG_ID))
+    .limit(1);
+
+  return seeded ?? {
+    id: RARITY_LEGENDARY_CONFIG_ID,
+    currentJson: JSON.stringify(RARITY_LEGENDARY_DEFAULT.current),
+    upcomingJson: JSON.stringify(RARITY_LEGENDARY_DEFAULT.upcoming),
+    updatedAt: now,
+    updatedBy: "seed",
+  };
+}
+
+function serializeRarityLegendaryConfig(row: {
+  currentJson: string;
+  upcomingJson: string;
+  updatedAt: bigint;
+  updatedBy: string | null;
+}) {
+  return {
+    current: parseJsonArray(row.currentJson),
+    upcoming: parseJsonArray(row.upcomingJson),
+    updatedAt: row.updatedAt.toString(),
+    updatedBy: row.updatedBy,
   };
 }
 
@@ -332,6 +666,41 @@ app.get("/legendary-canvas", async (c) => {
     .offset(offset);
 
   return c.json(rows.map(serializeBigints));
+});
+
+app.get("/rarity/legendary-config", async (c) => {
+  return c.json(serializeRarityLegendaryConfig(await getRarityLegendaryConfigRow()));
+});
+
+app.put("/rarity/legendary-config", async (c) => {
+  const body = (await c.req.json().catch(() => null)) as {
+    current?: unknown;
+    upcoming?: unknown;
+    updatedBy?: unknown;
+  } | null;
+  if (!body || !Array.isArray(body.current) || !Array.isArray(body.upcoming)) {
+    return c.json({ error: "Body must include current[] and upcoming[] arrays" }, 400);
+  }
+
+  const now = BigInt(Math.floor(Date.now() / 1000));
+  const updatedBy = typeof body.updatedBy === "string" ? body.updatedBy.slice(0, 120) : null;
+  await writableDb
+    .insert(schema.rarityLegendaryConfig)
+    .values({
+      id: RARITY_LEGENDARY_CONFIG_ID,
+      currentJson: JSON.stringify(body.current),
+      upcomingJson: JSON.stringify(body.upcoming),
+      updatedAt: now,
+      updatedBy,
+    })
+    .onConflictDoUpdate({
+      currentJson: JSON.stringify(body.current),
+      upcomingJson: JSON.stringify(body.upcoming),
+      updatedAt: now,
+      updatedBy,
+    });
+
+  return c.json(serializeRarityLegendaryConfig(await getRarityLegendaryConfigRow()));
 });
 
 // ──────────────────────────────────────────────
@@ -660,6 +1029,305 @@ app.get("/stats", async (c) => {
     totalActionPointsDistributed: (actionPointsSum?.total ?? "0").toString(),
   });
 });
+
+// ──────────────────────────────────────────────
+//  Rarity Snapshot
+// ──────────────────────────────────────────────
+
+app.get("/rarity/snapshot", async (c) => {
+  const tokenContractRaw = c.req.query("tokenContract");
+  const tokenContract = tokenContractRaw
+    ? (tokenContractRaw.toLowerCase() as `0x${string}`)
+    : undefined;
+
+  const [
+    tokenRows,
+    ownerRows,
+    canvasRows,
+    zombieRows,
+    legendaryCanvasRows,
+    burnedRows,
+    commitmentRows,
+  ] = await Promise.all([
+    db.select().from(schema.tokenData).orderBy(asc(schema.tokenData.tokenId)),
+    db.select().from(schema.normieOwner),
+    db.select().from(schema.canvasTokenState),
+    db.select().from(schema.zombieTokenState),
+    db.select().from(schema.legendaryCanvasTrait),
+    db.select().from(schema.burnedToken),
+    db.select().from(schema.burnCommitment),
+  ]);
+
+  const agentRows = tokenContract
+    ? await db
+        .select()
+        .from(schema.agentBinding)
+        .where(eq(schema.agentBinding.tokenContract, tokenContract))
+    : await db.select().from(schema.agentBinding);
+
+  const owners = new Map<bigint, `0x${string}`>();
+  for (const row of ownerRows) owners.set(row.tokenId, row.owner);
+
+  const canvasStates = new Map<string, Record<string, unknown>>();
+  for (const row of canvasRows) {
+    canvasStates.set(row.tokenId.toString(), serializeBigints(row));
+  }
+
+  const zombieStates = new Map<string, Record<string, unknown>>();
+  for (const row of zombieRows) {
+    zombieStates.set(row.tokenId.toString(), serializeBigints(row));
+  }
+
+  const legendaryCanvasStates = new Map<string, Record<string, unknown>>();
+  for (const row of legendaryCanvasRows) {
+    legendaryCanvasStates.set(row.tokenId.toString(), serializeBigints(row));
+  }
+
+  const { directCounts, recursiveCounts } = buildBurnSummaries(commitmentRows, burnedRows);
+
+  let ownerLookupFailures = 0;
+  const byWallet = new Map<string, {
+    wallet: string;
+    customizedTokensHeld: number;
+    totalRecursiveBurnCount: number;
+    totalDirectBurnCount: number;
+    tokenIds: number[];
+  }>();
+
+  for (const [tokenId, recursiveBurnCount] of recursiveCounts) {
+    if (recursiveBurnCount <= 0) continue;
+    const owner = owners.get(tokenId);
+    if (!owner) {
+      ownerLookupFailures += 1;
+      continue;
+    }
+
+    const wallet = owner.toLowerCase();
+    const existing = byWallet.get(wallet) ?? {
+      wallet,
+      customizedTokensHeld: 0,
+      totalRecursiveBurnCount: 0,
+      totalDirectBurnCount: 0,
+      tokenIds: [],
+    };
+    existing.customizedTokensHeld += 1;
+    existing.totalRecursiveBurnCount += recursiveBurnCount;
+    existing.totalDirectBurnCount += directCounts.get(tokenId) ?? 0;
+    existing.tokenIds.push(Number(tokenId));
+    byWallet.set(wallet, existing);
+  }
+
+  const recursiveBurnHolders = [...byWallet.values()]
+    .map((wallet) => ({
+      ...wallet,
+      tokenIds: wallet.tokenIds.sort((a, b) => a - b),
+    }))
+    .sort((a, b) =>
+      b.totalRecursiveBurnCount - a.totalRecursiveBurnCount ||
+      b.customizedTokensHeld - a.customizedTokensHeld,
+    );
+
+  const tokens = tokenRows.map((row) => {
+    const tokenId = row.tokenId.toString();
+    return {
+      ...serializeBigints(row),
+      owner: owners.get(row.tokenId)?.toLowerCase() ?? null,
+      canvas: canvasStates.get(tokenId) ?? null,
+      zombie: zombieStates.get(tokenId) ?? null,
+      legendaryCanvas: legendaryCanvasStates.get(tokenId) ?? null,
+    };
+  });
+
+  return c.json({
+    tokens,
+    burnedTokenIds: burnedRows.map((row) => row.tokenId.toString()),
+    burnCounts: {
+      direct: numberMapToRecord(directCounts),
+      recursive: numberMapToRecord(recursiveCounts),
+    },
+    recursiveBurnHolders: {
+      ownerLookupFailures,
+      wallets: recursiveBurnHolders,
+    },
+    agentBindings: agentRows.map(serializeBigints),
+    stats: {
+      totalTokenData: tokenRows.length,
+      totalOwners: ownerRows.length,
+      totalBurnedTokens: burnedRows.length,
+      totalBurnCommitments: commitmentRows.length,
+      totalAgentBindings: agentRows.length,
+    },
+  });
+});
+
+app.get("/rarity/snapshot/block/:blockNumber", async (c) => {
+  const blockNumber = parseBlockNumberParam(c.req.param("blockNumber"));
+  if (blockNumber === null) return c.json({ error: "Invalid blockNumber" }, 400);
+
+  const tokenContractRaw = c.req.query("tokenContract");
+  const tokenContract = tokenContractRaw
+    ? (tokenContractRaw.toLowerCase() as `0x${string}`)
+    : undefined;
+
+  return c.json(await buildHistoricalRaritySnapshot(blockNumber, tokenContract));
+});
+
+async function buildHistoricalRaritySnapshot(
+  blockNumber: bigint,
+  tokenContract?: `0x${string}`,
+) {
+  const [
+    tokenRows,
+    transferRows,
+    transformRows,
+    burnedRows,
+    commitmentRows,
+    zombieCommitmentRows,
+    zombiePoolRows,
+    legendaryCanvasEventRows,
+  ] = await Promise.all([
+    db
+      .select()
+      .from(schema.tokenData)
+      .where(lte(schema.tokenData.blockNumber, blockNumber))
+      .orderBy(asc(schema.tokenData.tokenId)),
+    db
+      .select()
+      .from(schema.normieTransfer)
+      .where(lte(schema.normieTransfer.blockNumber, blockNumber))
+      .orderBy(asc(schema.normieTransfer.blockNumber), asc(schema.normieTransfer.logIndex)),
+    db
+      .select()
+      .from(schema.pixelTransform)
+      .where(lte(schema.pixelTransform.blockNumber, blockNumber)),
+    db
+      .select()
+      .from(schema.burnedToken)
+      .where(lte(schema.burnedToken.blockNumber, blockNumber)),
+    db
+      .select()
+      .from(schema.burnCommitment)
+      .where(lte(schema.burnCommitment.blockNumber, blockNumber)),
+    db
+      .select()
+      .from(schema.zombieCommitment)
+      .where(lte(schema.zombieCommitment.blockNumber, blockNumber)),
+    db.select().from(schema.zombiePoolItem),
+    db
+      .select()
+      .from(schema.legendaryCanvasTraitEvent)
+      .where(lte(schema.legendaryCanvasTraitEvent.blockNumber, blockNumber)),
+  ]);
+
+  const agentRows = tokenContract
+    ? await db
+        .select()
+        .from(schema.agentBinding)
+        .where(
+          and(
+            eq(schema.agentBinding.tokenContract, tokenContract),
+            lte(schema.agentBinding.blockNumber, blockNumber),
+          ),
+        )
+    : await db
+        .select()
+        .from(schema.agentBinding)
+        .where(lte(schema.agentBinding.blockNumber, blockNumber));
+
+  const owners = buildHistoricalOwners(transferRows);
+  const { states: canvasStates, pixelCounts } = buildHistoricalCanvasStates(
+    blockNumber,
+    tokenRows,
+    transformRows,
+    commitmentRows,
+  );
+  const zombieStates = buildHistoricalZombieStates(blockNumber, zombieCommitmentRows, zombiePoolRows);
+  const legendaryCanvasStates = buildHistoricalLegendaryCanvasStates(legendaryCanvasEventRows);
+  const { directCounts, recursiveCounts } = buildBurnSummaries(commitmentRows, burnedRows);
+
+  const burnedIds = new Set<bigint>();
+  for (const row of burnedRows) burnedIds.add(row.tokenId);
+  for (const row of transferRows) {
+    if (row.to.toLowerCase() === ZERO_ADDRESS) burnedIds.add(row.tokenId);
+  }
+
+  let ownerLookupFailures = 0;
+  const byWallet = new Map<string, {
+    wallet: string;
+    customizedTokensHeld: number;
+    totalRecursiveBurnCount: number;
+    totalDirectBurnCount: number;
+    tokenIds: number[];
+  }>();
+
+  for (const [tokenId, recursiveBurnCount] of recursiveCounts) {
+    if (recursiveBurnCount <= 0) continue;
+    const owner = owners.get(tokenId);
+    if (!owner) {
+      ownerLookupFailures += 1;
+      continue;
+    }
+
+    const wallet = owner.toLowerCase();
+    const existing = byWallet.get(wallet) ?? {
+      wallet,
+      customizedTokensHeld: 0,
+      totalRecursiveBurnCount: 0,
+      totalDirectBurnCount: 0,
+      tokenIds: [],
+    };
+    existing.customizedTokensHeld += 1;
+    existing.totalRecursiveBurnCount += recursiveBurnCount;
+    existing.totalDirectBurnCount += directCounts.get(tokenId) ?? 0;
+    existing.tokenIds.push(Number(tokenId));
+    byWallet.set(wallet, existing);
+  }
+
+  const recursiveBurnHolders = [...byWallet.values()]
+    .map((wallet) => ({
+      ...wallet,
+      tokenIds: wallet.tokenIds.sort((a, b) => a - b),
+    }))
+    .sort((a, b) =>
+      b.totalRecursiveBurnCount - a.totalRecursiveBurnCount ||
+      b.customizedTokensHeld - a.customizedTokensHeld,
+    );
+
+  const tokens = tokenRows.map((row) => {
+    const tokenId = row.tokenId.toString();
+    return {
+      ...serializeBigints(row),
+      owner: owners.get(row.tokenId)?.toLowerCase() ?? null,
+      canvas: canvasStates.get(tokenId) ?? null,
+      zombie: zombieStates.get(tokenId) ?? null,
+      legendaryCanvas: legendaryCanvasStates.get(tokenId) ?? null,
+      displayPixelCount: pixelCounts.get(tokenId) ?? null,
+    };
+  });
+
+  return {
+    blockNumber: blockNumber.toString(),
+    historical: true,
+    tokens,
+    burnedTokenIds: [...burnedIds].map((id) => id.toString()).sort((a, b) => Number(a) - Number(b)),
+    burnCounts: {
+      direct: numberMapToRecord(directCounts),
+      recursive: numberMapToRecord(recursiveCounts),
+    },
+    recursiveBurnHolders: {
+      ownerLookupFailures,
+      wallets: recursiveBurnHolders,
+    },
+    agentBindings: agentRows.map(serializeBigints),
+    stats: {
+      totalTokenData: tokenRows.length,
+      totalOwners: owners.size,
+      totalBurnedTokens: burnedIds.size,
+      totalBurnCommitments: commitmentRows.length,
+      totalAgentBindings: agentRows.length,
+    },
+  };
+}
 
 // ──────────────────────────────────────────────
 //  Adapter8004: Agent Bindings

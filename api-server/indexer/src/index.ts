@@ -2,6 +2,7 @@ import { ponder } from "ponder:registry";
 import type { Context } from "ponder:registry";
 import {
   normieOwner,
+  normieTransfer,
   delegation,
   tokenData,
   canvasTokenState,
@@ -14,6 +15,7 @@ import {
   zombieCommitment,
   zombieConfig,
   legendaryCanvasTrait,
+  legendaryCanvasTraitEvent,
 } from "ponder:schema";
 import { bytesToHex, encodePacked, hexToBytes, hexToString, keccak256, parseAbi, toBytes } from "viem";
 
@@ -360,7 +362,21 @@ async function upsertZombieConfig(
 // ──────────────────────────────────────────────
 
 ponder.on("Normies:Transfer", async ({ event, context }) => {
-  const { to, tokenId } = event.args;
+  const { from, to, tokenId } = event.args;
+
+  await context.db
+    .insert(normieTransfer)
+    .values({
+      id: `${event.block.number}-${event.log.logIndex}`,
+      tokenId,
+      from,
+      to,
+      blockNumber: event.block.number,
+      timestamp: event.block.timestamp,
+      txHash: event.transaction.hash,
+      logIndex: Number(event.log.logIndex),
+    })
+    .onConflictDoNothing();
 
   if (to === ZERO_ADDRESS) {
     await context.db.delete(normieOwner, { tokenId });
@@ -730,6 +746,21 @@ ponder.on("NormiesLegendaryCanvas:LegendaryCanvasSet", async ({ event, context }
   const { tokenId, artistName, operator } = event.args;
 
   await context.db
+    .insert(legendaryCanvasTraitEvent)
+    .values({
+      id: `${event.block.number}-${event.log.logIndex}`,
+      tokenId,
+      isLegendary: true,
+      artistName,
+      operator,
+      blockNumber: event.block.number,
+      timestamp: event.block.timestamp,
+      txHash: event.transaction.hash,
+      logIndex: Number(event.log.logIndex),
+    })
+    .onConflictDoNothing();
+
+  await context.db
     .insert(legendaryCanvasTrait)
     .values({
       tokenId,
@@ -752,6 +783,21 @@ ponder.on("NormiesLegendaryCanvas:LegendaryCanvasSet", async ({ event, context }
 
 ponder.on("NormiesLegendaryCanvas:LegendaryCanvasCleared", async ({ event, context }) => {
   const { tokenId, operator } = event.args;
+
+  await context.db
+    .insert(legendaryCanvasTraitEvent)
+    .values({
+      id: `${event.block.number}-${event.log.logIndex}`,
+      tokenId,
+      isLegendary: false,
+      artistName: null,
+      operator,
+      blockNumber: event.block.number,
+      timestamp: event.block.timestamp,
+      txHash: event.transaction.hash,
+      logIndex: Number(event.log.logIndex),
+    })
+    .onConflictDoNothing();
 
   await context.db
     .insert(legendaryCanvasTrait)

@@ -11,6 +11,25 @@ export const normieOwner = onchainTable(
   }),
 );
 
+export const normieTransfer = onchainTable(
+  "normie_transfer",
+  (t) => ({
+    id: t.text().primaryKey(),
+    tokenId: t.bigint().notNull(),
+    from: t.hex().notNull(),
+    to: t.hex().notNull(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+    txHash: t.hex().notNull(),
+    logIndex: t.integer().notNull(),
+  }),
+  (table) => ({
+    tokenBlockIdx: index().on(table.tokenId, table.blockNumber),
+    blockIdx: index().on(table.blockNumber),
+    toIdx: index().on(table.to),
+  }),
+);
+
 export const delegation = onchainTable(
   "delegation",
   (t) => ({
@@ -211,6 +230,37 @@ export const legendaryCanvasTrait = onchainTable(
   (table) => ({
     activeIdx: index().on(table.isLegendary),
     operatorIdx: index().on(table.operator),
+  }),
+);
+
+export const legendaryCanvasTraitEvent = onchainTable(
+  "legendary_canvas_trait_event",
+  (t) => ({
+    id: t.text().primaryKey(),
+    tokenId: t.bigint().notNull(),
+    isLegendary: t.boolean().notNull().default(false),
+    artistName: t.text(),
+    operator: t.hex(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+    txHash: t.hex().notNull(),
+    logIndex: t.integer().notNull(),
+  }),
+  (table) => ({
+    tokenBlockIdx: index().on(table.tokenId, table.blockNumber),
+    blockIdx: index().on(table.blockNumber),
+    activeIdx: index().on(table.isLegendary),
+  }),
+);
+
+export const rarityLegendaryConfig = onchainTable(
+  "rarity_legendary_config",
+  (t) => ({
+    id: t.text().primaryKey(),
+    currentJson: t.text().notNull(),
+    upcomingJson: t.text().notNull(),
+    updatedAt: t.bigint().notNull(),
+    updatedBy: t.text(),
   }),
 );
 
