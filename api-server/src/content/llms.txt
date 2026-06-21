@@ -18,6 +18,7 @@ Route-family defaults:
 - `/rarity/admin/*`: `no-store`
 - `/rarity/listings/stream`: `no-store`
 - `/canvas/status`: `public, max-age=300, s-maxage=300`
+- `/zombies/status`: `public, max-age=10, s-maxage=10`
 - Any path containing `/canvas/info`: `public, max-age=60, s-maxage=60`
 - Owner and holder paths: `public, max-age=10, s-maxage=10`
 - Paths containing `/original/` or `/traits`: `public, max-age=300, s-maxage=3600`
@@ -32,7 +33,7 @@ Server-side cache defaults:
 - `CANVAS_INFO_CACHE_TTL_MS`: 60000 ms / 60 s. Canvas info cache, agent response cache, negative agent binding TTL.
 - `CANVAS_STATUS_CACHE_TTL_MS`: 300000 ms / 300 s. Canvas status cache.
 - `ZOMBIE_CACHE_TTL_MS`: 60000 ms / 60 s. Zombie token info and bitmap caches.
-- `ZOMBIE_STATUS_CACHE_TTL_MS`: 300000 ms / 300 s. Configured zombie status TTL; current public zombie status response uses the default route cache.
+- `ZOMBIE_STATUS_CACHE_TTL_MS`: 10000 ms / 10 s. Zombie status response cache.
 - `LEGENDARY_CANVAS_CACHE_TTL_MS`: 60000 ms / 60 s. Legendary Canvas token info cache.
 - `RARITY_CACHE_TTL_MS`: 60000 ms / 60 s. Live and historical rarity collection snapshots; historical cache keeps up to 32 block snapshots.
 - `RARITY_LISTINGS_REFRESH_MS`: 60000 ms / 60 s. OpenSea listing poll interval for rarity listings.

@@ -663,6 +663,7 @@
             <tr><td><code>/rarity/*</code></td><td><code>public, max-age=15, s-maxage=30, stale-while-revalidate=120</code></td><td>Except admin routes and listing stream.</td></tr>
             <tr><td><code>/rarity/admin/*</code>, <code>/rarity/listings/stream</code></td><td><code>no-store</code></td><td>The SSE route also emits event-stream headers.</td></tr>
             <tr><td><code>/canvas/status</code></td><td><code>public, max-age=300, s-maxage=300</code></td><td>Derived from <code>CANVAS_STATUS_CACHE_TTL_MS</code>.</td></tr>
+            <tr><td><code>/zombies/status</code></td><td><code>public, max-age=10, s-maxage=10</code></td><td>Derived from <code>ZOMBIE_STATUS_CACHE_TTL_MS</code>.</td></tr>
             <tr><td><code>* /canvas/info</code></td><td><code>public, max-age=60, s-maxage=60</code></td><td>Derived from <code>CANVAS_INFO_CACHE_TTL_MS</code>.</td></tr>
             <tr><td>Owner and holder routes</td><td><code>public, max-age=10, s-maxage=10</code></td><td><code>/normie/:id/owner</code> and <code>/holders/:address</code>.</td></tr>
             <tr><td>Original data and traits routes</td><td><code>public, max-age=300, s-maxage=3600</code></td><td>Immutable mint data.</td></tr>
@@ -681,7 +682,7 @@
             <tr><td><code>CANVAS_INFO_CACHE_TTL_MS</code></td><td>60000 ms / 60 s</td><td>Canvas info cache, agent response cache, and negative agent binding TTL.</td></tr>
             <tr><td><code>CANVAS_STATUS_CACHE_TTL_MS</code></td><td>300000 ms / 300 s</td><td>Canvas global status cache.</td></tr>
             <tr><td><code>ZOMBIE_CACHE_TTL_MS</code></td><td>60000 ms / 60 s</td><td>Zombie token info and bitmap caches.</td></tr>
-            <tr><td><code>ZOMBIE_STATUS_CACHE_TTL_MS</code></td><td>300000 ms / 300 s</td><td>Configured zombie status TTL. Current public zombie status response uses the default route cache.</td></tr>
+            <tr><td><code>ZOMBIE_STATUS_CACHE_TTL_MS</code></td><td>10000 ms / 10 s</td><td>Zombie status response cache.</td></tr>
             <tr><td><code>LEGENDARY_CANVAS_CACHE_TTL_MS</code></td><td>60000 ms / 60 s</td><td>Legendary Canvas token info cache.</td></tr>
             <tr><td><code>RARITY_CACHE_TTL_MS</code></td><td>60000 ms / 60 s</td><td>Live and historical rarity collection snapshots; historical cache keeps up to 32 block snapshots.</td></tr>
             <tr><td><code>RARITY_LISTINGS_REFRESH_MS</code></td><td>60000 ms / 60 s</td><td>OpenSea listing poll interval for rarity listings.</td></tr>
