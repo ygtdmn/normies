@@ -1085,7 +1085,6 @@ app.get("/rarity/snapshot", async (c) => {
 
   const { directCounts, recursiveCounts } = buildBurnSummaries(commitmentRows, burnedRows);
 
-  let ownerLookupFailures = 0;
   const byWallet = new Map<string, {
     wallet: string;
     customizedTokensHeld: number;
@@ -1097,10 +1096,7 @@ app.get("/rarity/snapshot", async (c) => {
   for (const [tokenId, recursiveBurnCount] of recursiveCounts) {
     if (recursiveBurnCount <= 0) continue;
     const owner = owners.get(tokenId);
-    if (!owner) {
-      ownerLookupFailures += 1;
-      continue;
-    }
+    if (!owner) continue;
 
     const wallet = owner.toLowerCase();
     const existing = byWallet.get(wallet) ?? {
@@ -1146,7 +1142,6 @@ app.get("/rarity/snapshot", async (c) => {
       recursive: numberMapToRecord(recursiveCounts),
     },
     recursiveBurnHolders: {
-      ownerLookupFailures,
       wallets: recursiveBurnHolders,
     },
     agentBindings: agentRows.map(serializeBigints),
@@ -1251,7 +1246,6 @@ async function buildHistoricalRaritySnapshot(
     if (row.to.toLowerCase() === ZERO_ADDRESS) burnedIds.add(row.tokenId);
   }
 
-  let ownerLookupFailures = 0;
   const byWallet = new Map<string, {
     wallet: string;
     customizedTokensHeld: number;
@@ -1263,10 +1257,7 @@ async function buildHistoricalRaritySnapshot(
   for (const [tokenId, recursiveBurnCount] of recursiveCounts) {
     if (recursiveBurnCount <= 0) continue;
     const owner = owners.get(tokenId);
-    if (!owner) {
-      ownerLookupFailures += 1;
-      continue;
-    }
+    if (!owner) continue;
 
     const wallet = owner.toLowerCase();
     const existing = byWallet.get(wallet) ?? {
@@ -1315,7 +1306,6 @@ async function buildHistoricalRaritySnapshot(
       recursive: numberMapToRecord(recursiveCounts),
     },
     recursiveBurnHolders: {
-      ownerLookupFailures,
       wallets: recursiveBurnHolders,
     },
     agentBindings: agentRows.map(serializeBigints),
