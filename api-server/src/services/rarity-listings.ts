@@ -72,8 +72,19 @@ async function refreshListings(initial: boolean): Promise<void> {
             }
 
             const fresh = await fetchAllOpenSeaListings();
+
+            // OpenSea occasionally answers HTTP 200 with an empty body under load
+            // or rate limiting. Never let that wipe a populated snapshot: the diff
+            // below would mark every token "sold" and, with the CDN cache on
+            // /rarity/*, prices would disappear site-wide for up to ~2 minutes
+            // before the next poll restores them. Treat empty-while-populated as a
+            // transient miss and keep the previous snapshot.
+            if (fresh.size === 0 && listings.size > 0) {
+                lastFetch = Date.now();
+                return;
+            }
+
             if (initial && listings.size === 0) {
-                listings.clear();
                 for (const [tokenId, listing] of fresh) listings.set(tokenId, listing);
                 lastFetch = Date.now();
                 return;
@@ -109,9 +120,11 @@ async function refreshListings(initial: boolean): Promise<void> {
 
 async function fetchAllOpenSeaListings(): Promise<Map<number, RarityListing>> {
     const fresh = new Map<number, RarityListing>();
+    const seenCursors = new Set<string>();
     let cursor: string | null = null;
+    const MAX_PAGES = 200; // safety cap (~20k listings) so a misbehaving cursor can't loop forever
 
-    while (true) {
+    for (let page = 0; page < MAX_PAGES; page++) {
         const url = new URL(`https://api.opensea.io/api/v2/listings/collection/${OPENSEA_COLLECTION_SLUG}/all`);
         url.searchParams.set("limit", "100");
         if (cursor) url.searchParams.set("next", cursor);
@@ -124,7 +137,6 @@ async function fetchAllOpenSeaListings(): Promise<Map<number, RarityListing>> {
 
         const data = await res.json() as { listings?: unknown[]; orders?: unknown[]; next?: string | null };
         const orders = data.listings ?? data.orders ?? [];
-        if (orders.length === 0) break;
 
         for (const order of orders) {
             const parsed = parseOpenSeaListing(order);
@@ -135,8 +147,13 @@ async function fetchAllOpenSeaListings(): Promise<Map<number, RarityListing>> {
             }
         }
 
+        // Paginate purely on the cursor. An intermediate page can legitimately come
+        // back empty while more pages remain, so stop only when OpenSea reports no
+        // next cursor — never on the first empty page (that truncated the snapshot
+        // and made listings flicker). Guard against a repeated cursor too.
         cursor = data.next ?? null;
-        if (!cursor) break;
+        if (!cursor || seenCursors.has(cursor)) break;
+        seenCursors.add(cursor);
     }
 
     return fresh;
