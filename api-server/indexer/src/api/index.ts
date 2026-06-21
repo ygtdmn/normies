@@ -2,18 +2,50 @@ import { db } from "ponder:api";
 import schema from "ponder:schema";
 import { Hono } from "hono";
 import { eq, desc, count, sum, asc, and, gt, lt, lte, inArray } from "ponder";
+import pg from "pg";
 
 const app = new Hono();
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const RARITY_LEGENDARY_CONFIG_ID = "default";
-const writableDb = db as typeof db & {
-  insert: (table: unknown) => {
-    values: (value: unknown) => {
-      onConflictDoNothing: () => Promise<unknown>;
-      onConflictDoUpdate: (value: unknown) => Promise<unknown>;
-    };
-  };
-};
+
+// Admin-editable config (legendary canvas list) must be writable at serve time
+// and survive reindexes. Ponder's `db` (ponder:api) is read-only while serving,
+// and onchain tables get rebuilt on every reindex — both make it the wrong home
+// for this. Instead we keep a plain table in the `public` schema (which Ponder
+// never touches) and read/write it through our own pool.
+// Small pool — this only serves rare admin-config reads/writes. Ponder makes its
+// own API connection read-only while serving; this separate pool talks to the
+// same writable primary the indexer writes to, so writes succeed here.
+const adminPool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 3,
+  idleTimeoutMillis: 30_000,
+});
+// An unhandled 'error' on an idle client would crash the process — log instead.
+adminPool.on("error", (err) => console.error("adminPool idle client error:", err));
+const ADMIN_CONFIG_TABLE = "public.rarity_legendary_config_admin";
+let adminTableReady: Promise<void> | null = null;
+
+function ensureAdminConfigTable(): Promise<void> {
+  if (!adminTableReady) {
+    adminTableReady = adminPool
+      .query(
+        `CREATE TABLE IF NOT EXISTS ${ADMIN_CONFIG_TABLE} (
+          id text PRIMARY KEY,
+          current_json text NOT NULL,
+          upcoming_json text NOT NULL,
+          updated_at bigint NOT NULL,
+          updated_by text
+        )`,
+      )
+      .then(() => undefined)
+      .catch((err) => {
+        adminTableReady = null; // let the next caller retry
+        throw err;
+      });
+  }
+  return adminTableReady;
+}
 
 const RARITY_LEGENDARY_DEFAULT = {
   current: [
@@ -369,39 +401,66 @@ function parseJsonArray(raw: string): unknown[] {
   }
 }
 
-async function getRarityLegendaryConfigRow() {
-  const [existing] = await db
-    .select()
-    .from(schema.rarityLegendaryConfig)
-    .where(eq(schema.rarityLegendaryConfig.id, RARITY_LEGENDARY_CONFIG_ID))
-    .limit(1);
-  if (existing) return existing;
+interface RarityLegendaryConfigRow {
+  id: string;
+  currentJson: string;
+  upcomingJson: string;
+  updatedAt: bigint;
+  updatedBy: string | null;
+}
 
-  const now = BigInt(Math.floor(Date.now() / 1000));
-  await writableDb
-    .insert(schema.rarityLegendaryConfig)
-    .values({
-      id: RARITY_LEGENDARY_CONFIG_ID,
-      currentJson: JSON.stringify(RARITY_LEGENDARY_DEFAULT.current),
-      upcomingJson: JSON.stringify(RARITY_LEGENDARY_DEFAULT.upcoming),
-      updatedAt: now,
-      updatedBy: "seed",
-    })
-    .onConflictDoNothing();
+async function getRarityLegendaryConfigRow(): Promise<RarityLegendaryConfigRow> {
+  await ensureAdminConfigTable();
+  const { rows } = await adminPool.query<{
+    id: string;
+    current_json: string;
+    upcoming_json: string;
+    updated_at: string; // pg returns bigint as string
+    updated_by: string | null;
+  }>(
+    `SELECT id, current_json, upcoming_json, updated_at, updated_by
+       FROM ${ADMIN_CONFIG_TABLE} WHERE id = $1 LIMIT 1`,
+    [RARITY_LEGENDARY_CONFIG_ID],
+  );
 
-  const [seeded] = await db
-    .select()
-    .from(schema.rarityLegendaryConfig)
-    .where(eq(schema.rarityLegendaryConfig.id, RARITY_LEGENDARY_CONFIG_ID))
-    .limit(1);
+  const existing = rows[0];
+  if (existing) {
+    return {
+      id: existing.id,
+      currentJson: existing.current_json,
+      upcomingJson: existing.upcoming_json,
+      updatedAt: BigInt(existing.updated_at),
+      updatedBy: existing.updated_by,
+    };
+  }
 
-  return seeded ?? {
+  // No row saved yet — serve the in-memory default without writing.
+  return {
     id: RARITY_LEGENDARY_CONFIG_ID,
     currentJson: JSON.stringify(RARITY_LEGENDARY_DEFAULT.current),
     upcomingJson: JSON.stringify(RARITY_LEGENDARY_DEFAULT.upcoming),
-    updatedAt: now,
-    updatedBy: "seed",
+    updatedAt: BigInt(Math.floor(Date.now() / 1000)),
+    updatedBy: "default",
   };
+}
+
+async function saveRarityLegendaryConfig(
+  current: unknown[],
+  upcoming: unknown[],
+  updatedBy: string | null,
+): Promise<void> {
+  await ensureAdminConfigTable();
+  const now = Math.floor(Date.now() / 1000);
+  await adminPool.query(
+    `INSERT INTO ${ADMIN_CONFIG_TABLE} (id, current_json, upcoming_json, updated_at, updated_by)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (id) DO UPDATE SET
+         current_json = EXCLUDED.current_json,
+         upcoming_json = EXCLUDED.upcoming_json,
+         updated_at = EXCLUDED.updated_at,
+         updated_by = EXCLUDED.updated_by`,
+    [RARITY_LEGENDARY_CONFIG_ID, JSON.stringify(current), JSON.stringify(upcoming), now, updatedBy],
+  );
 }
 
 function serializeRarityLegendaryConfig(row: {
@@ -682,23 +741,8 @@ app.put("/rarity/legendary-config", async (c) => {
     return c.json({ error: "Body must include current[] and upcoming[] arrays" }, 400);
   }
 
-  const now = BigInt(Math.floor(Date.now() / 1000));
   const updatedBy = typeof body.updatedBy === "string" ? body.updatedBy.slice(0, 120) : null;
-  await writableDb
-    .insert(schema.rarityLegendaryConfig)
-    .values({
-      id: RARITY_LEGENDARY_CONFIG_ID,
-      currentJson: JSON.stringify(body.current),
-      upcomingJson: JSON.stringify(body.upcoming),
-      updatedAt: now,
-      updatedBy,
-    })
-    .onConflictDoUpdate({
-      currentJson: JSON.stringify(body.current),
-      upcomingJson: JSON.stringify(body.upcoming),
-      updatedAt: now,
-      updatedBy,
-    });
+  await saveRarityLegendaryConfig(body.current, body.upcoming, updatedBy);
 
   return c.json(serializeRarityLegendaryConfig(await getRarityLegendaryConfigRow()));
 });
