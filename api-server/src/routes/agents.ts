@@ -2,10 +2,10 @@ import { Hono } from "hono";
 import { parseTokenId } from "../lib/validation.js";
 import {
     getCanvasInfo,
-    getCompositedImageData,
     getTransformData,
 } from "../services/canvas-data.js";
-import { getDecodedTraits, getImageData } from "../services/token-data.js";
+import { getActiveBaseImageData, getActiveImageData } from "../services/zombie-data.js";
+import { getDecodedTraits } from "../services/token-data.js";
 import { computePixelDiff } from "../lib/diff.js";
 import { renderSvg } from "../lib/svg.js";
 import {
@@ -218,11 +218,11 @@ async function buildAgentInfoBody(row: AgentRow, tokenId: number) {
     let diff: { addedCount: number; removedCount: number; netChange: number } | null = null;
     if (canvasInfo.customized) {
         try {
-            const [original, transform] = await Promise.all([
-                getImageData(tokenId),
+            const [base, transform] = await Promise.all([
+                getActiveBaseImageData(tokenId),
                 getTransformData(tokenId),
             ]);
-            diff = computePixelDiff(original, transform);
+            diff = computePixelDiff(base, transform);
         } catch {
             // diff stays null; level + actionPoints are still authoritative
         }
@@ -534,7 +534,7 @@ agents.get("/image/:tokenId", async (c) => {
     if ("error" in result) return c.json({ error: result.error }, 400);
 
     try {
-        const imageData = await getCompositedImageData(result.tokenId);
+        const imageData = await getActiveImageData(result.tokenId);
         const svg = renderSvg(imageData);
         return c.body(svg, 200, {
             "Content-Type": "image/svg+xml",

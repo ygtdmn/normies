@@ -414,18 +414,25 @@ export async function getBurnedToken(tokenId: number): Promise<BurnedTokenData[]
 //  Transforms
 // ──────────────────────────────────────────────
 
-export async function getTransformHistory(tokenId: number, limit = 50, offset = 0): Promise<TransformData[]> {
+export async function getTransformHistory(
+    tokenId: number,
+    limit = 50,
+    offset = 0,
+    includeBitmap = false,
+): Promise<TransformData[]> {
     // Only the default page (offset=0, full limit) goes through cache — paginated
     // callers are rare and benefit less from a hit-rate boost than they suffer
-    // from cache pollution.
-    if (offset === 0 && limit === 50) {
+    // from cache pollution. The bitmap variant skips the cache: heavier payload,
+    // and cached no-bitmap rows would be missing transformBitmap.
+    if (!includeBitmap && offset === 0 && limit === 50) {
         const cached = transformHistoryCache.get(tokenId) as TransformData[] | undefined;
         if (cached) return cached;
         const fresh = await ponderFetch<TransformData[]>(`/transforms/${tokenId}?limit=${limit}&offset=${offset}`);
         transformHistoryCache.set(tokenId, fresh);
         return fresh;
     }
-    return ponderFetch(`/transforms/${tokenId}?limit=${limit}&offset=${offset}`);
+    const bitmapParam = includeBitmap ? "&bitmap=true" : "";
+    return ponderFetch(`/transforms/${tokenId}?limit=${limit}&offset=${offset}${bitmapParam}`);
 }
 
 export async function getTransformLatest(tokenId: number): Promise<TransformData> {

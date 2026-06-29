@@ -15,8 +15,9 @@ import {
     type PersonaVersion,
 } from "../lib/persona.js";
 import { computePixelDiff } from "../lib/diff.js";
-import { getDecodedTraits, getImageData } from "./token-data.js";
+import { getDecodedTraits } from "./token-data.js";
 import { getCanvasInfo, getTransformData } from "./canvas-data.js";
+import { getActiveBaseImageData } from "./zombie-data.js";
 import { getTransformHistory } from "./ponder-data.js";
 
 export async function buildLivePersona(tokenId: number): Promise<Persona> {
@@ -28,11 +29,11 @@ export async function buildLivePersona(tokenId: number): Promise<Persona> {
     let diff: PersonaCanvasDiff | null = null;
     if (canvas.customized) {
         try {
-            const [original, transform] = await Promise.all([
-                getImageData(tokenId),
+            const [base, transform] = await Promise.all([
+                getActiveBaseImageData(tokenId),
                 getTransformData(tokenId),
             ]);
-            diff = computePixelDiff(original, transform);
+            diff = computePixelDiff(base, transform);
         } catch {
             // Pixel diff is an optional enrichment; persona generation
             // doesn't require it. Leave null on read failure.

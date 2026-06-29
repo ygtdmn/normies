@@ -1,6 +1,5 @@
 import { hexToBytes } from "viem";
 import { publicClient } from "./chain.js";
-import { getImageData } from "./token-data.js";
 import { transformDataCache, isTransformedCache, canvasInfoCache, type CanvasInfo } from "./cache.js";
 import { getIndexedCanvasState, type IndexedCanvasState } from "./ponder-data.js";
 import { CANVAS_ADDRESS, CANVAS_ENABLED, CANVAS_STATUS_CACHE_TTL_MS } from "../config.js";
@@ -92,17 +91,6 @@ export async function getTransformData(tokenId: number): Promise<Uint8Array> {
     return bytes;
 }
 
-export async function getCompositedImageData(tokenId: number): Promise<Uint8Array> {
-    const [original, info] = await Promise.all([
-        getImageData(tokenId),
-        getCanvasInfo(tokenId),
-    ]);
-    if (!info.customized) return original;
-
-    const transform = await getTransformData(tokenId);
-    return composite(original, transform);
-}
-
 export async function getCanvasInfo(tokenId: number): Promise<CanvasInfo> {
     if (!CANVAS_ENABLED) {
         return { actionPoints: 0, level: 1, customized: false, delegate: ZERO_ADDRESS, delegateSetBy: ZERO_ADDRESS };
@@ -149,12 +137,4 @@ export async function getCanvasStatus(): Promise<CanvasStatus> {
     };
     canvasStatusCache = { value: status, expiresAt: Date.now() + CANVAS_STATUS_CACHE_TTL_MS };
     return status;
-}
-
-function composite(original: Uint8Array, transform: Uint8Array): Uint8Array {
-    const result = new Uint8Array(200);
-    for (let i = 0; i < 200; i++) {
-        result[i] = original[i] ^ transform[i];
-    }
-    return result;
 }

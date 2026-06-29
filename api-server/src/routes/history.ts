@@ -4,7 +4,9 @@ import { parseTokenId } from "../lib/validation.js";
 import { imageDataToPixelString } from "../lib/pixels.js";
 import { renderSvg } from "../lib/svg.js";
 import { svgToPng } from "../lib/png.js";
+import { countPixels } from "../lib/traits.js";
 import { getImageData } from "../services/token-data.js";
+import { getBaseImageDataAtBlock, getZombieInfo } from "../services/zombie-data.js";
 import {
     getBurns,
     getBurnCommitment,
@@ -138,18 +140,32 @@ history.get("/normie/:id/versions", async (c) => {
     const result = parseTokenId(c.req.param("id"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const { limit, offset } = parsePagination(c);
-    const transforms = await getTransformHistory(result.tokenId, limit, offset);
-    return c.json(
-        transforms.map((t, i) => ({
+    const transforms = await getTransformHistory(result.tokenId, limit, offset, true);
+    // Warm the zombie-info cache once so the per-version base lookups below
+    // share a single fetch instead of racing cold-cache reads under Promise.all.
+    await getZombieInfo(result.tokenId).catch(() => {});
+    const versions = await Promise.all(
+        transforms.map(async (t, i) => ({
             version: offset + i,
             changeCount: t.changeCount,
-            newPixelCount: t.newPixelCount,
+            // The on-chain `newPixelCount` is counted against the original mint
+            // art even for zombies; recount against the active (zombie/era) base
+            // so the figure matches the actually-rendered image for this version.
+            newPixelCount: t.transformBitmap
+                ? countPixels(
+                    compositeBuffers(
+                        await getBaseImageDataAtBlock(result.tokenId, BigInt(t.blockNumber)),
+                        hexToBytes(t.transformBitmap as `0x${string}`),
+                    ),
+                )
+                : t.newPixelCount,
             transformer: t.transformer,
             blockNumber: t.blockNumber,
             timestamp: t.timestamp,
             txHash: t.txHash,
         })),
     );
+    return c.json(versions);
 });
 
 history.get("/normie/:id/version/:version/pixels", async (c) => {
@@ -162,9 +178,9 @@ history.get("/normie/:id/version/:version/pixels", async (c) => {
         return c.json({ error: "Transform bitmap not available for this version" }, 404);
     }
 
-    const original = await getImageData(result.tokenId);
+    const base = await getBaseImageDataAtBlock(result.tokenId, BigInt(transform.blockNumber));
     const transformBytes = hexToBytes(transform.transformBitmap as `0x${string}`);
-    const composited = compositeBuffers(original, transformBytes);
+    const composited = compositeBuffers(base, transformBytes);
     const pixels = imageDataToPixelString(composited);
     return c.text(pixels);
 });
@@ -179,9 +195,9 @@ history.get("/normie/:id/version/:version/image.svg", async (c) => {
         return c.json({ error: "Transform bitmap not available for this version" }, 404);
     }
 
-    const original = await getImageData(result.tokenId);
+    const base = await getBaseImageDataAtBlock(result.tokenId, BigInt(transform.blockNumber));
     const transformBytes = hexToBytes(transform.transformBitmap as `0x${string}`);
-    const composited = compositeBuffers(original, transformBytes);
+    const composited = compositeBuffers(base, transformBytes);
     const svg = renderSvg(composited);
     return c.body(svg, 200, { "Content-Type": "image/svg+xml" });
 });
@@ -196,9 +212,9 @@ history.get("/normie/:id/version/:version/image.png", async (c) => {
         return c.json({ error: "Transform bitmap not available for this version" }, 404);
     }
 
-    const original = await getImageData(result.tokenId);
+    const base = await getBaseImageDataAtBlock(result.tokenId, BigInt(transform.blockNumber));
     const transformBytes = hexToBytes(transform.transformBitmap as `0x${string}`);
-    const composited = compositeBuffers(original, transformBytes);
+    const composited = compositeBuffers(base, transformBytes);
     const svg = renderSvg(composited);
     const png = svgToPng(svg);
     return new Response(png, { status: 200, headers: { "Content-Type": "image/png" } });

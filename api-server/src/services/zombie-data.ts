@@ -58,6 +58,24 @@ export async function getActiveBaseImageData(tokenId: number): Promise<Uint8Arra
     return getImageData(tokenId);
 }
 
+/**
+ * Base image as it stood at a given block: the zombie bitmap if the token had
+ * already converted by `blockNumber`, otherwise the original mint art.
+ *
+ * The renderer always composites a transform layer onto the *active* base, so a
+ * transform recorded after conversion is a diff from the zombie bitmap, while
+ * one recorded before conversion is a diff from the original art. History
+ * endpoints need this per-version base to reconstruct each version faithfully —
+ * compositing every version onto the original art corrupts zombie-era edits.
+ */
+export async function getBaseImageDataAtBlock(tokenId: number, blockNumber: bigint): Promise<Uint8Array> {
+    const info = await getZombieInfo(tokenId);
+    if (info.isZombie && info.blockNumber !== null && blockNumber >= BigInt(info.blockNumber)) {
+        return getZombieBitmap(tokenId);
+    }
+    return getImageData(tokenId);
+}
+
 export async function getActiveImageData(tokenId: number): Promise<Uint8Array> {
     const [base, canvasInfo] = await Promise.all([
         getActiveBaseImageData(tokenId),
