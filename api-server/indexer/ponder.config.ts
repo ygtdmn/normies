@@ -33,6 +33,12 @@ const BurnRevealedEvent = parseAbiItem(
 const PixelsTransformedEvent = parseAbiItem(
   "event PixelsTransformed(address indexed transformer, uint256 indexed tokenId, uint256 changeCount, uint256 newPixelCount)",
 );
+// Direct writes to storage (Option B — a bot writes straight to
+// NormiesCanvasStorage, bypassing the canvas) emit NO event. We index the
+// function call via call traces to capture them; see the handler in src/index.ts.
+const SetTransformedImageDataFn = parseAbiItem(
+  "function setTransformedImageData(uint256 tokenId, bytes imageData)",
+);
 const AgentBoundEvent = parseAbiItem(
   "event AgentBound(uint256 indexed agentId, uint8 indexed standard, address indexed tokenContract, uint256 tokenId, address registeredBy)",
 );
@@ -96,6 +102,16 @@ export default createConfig({
       chain: chainName,
       address: requiredEnv("PONDER_CANVAS_ADDRESS") as `0x${string}`,
       startBlock,
+    },
+    // Storage contract — indexed for its setTransformedImageData CALLS (traces),
+    // so direct writes that skip the canvas still land in history. Default the
+    // start block to the first known direct write to keep trace backfill small.
+    NormiesCanvasStorage: {
+      abi: [SetTransformedImageDataFn],
+      chain: chainName,
+      address: requiredEnv("PONDER_CANVAS_STORAGE_ADDRESS") as `0x${string}`,
+      startBlock: Number(process.env.PONDER_CANVAS_STORAGE_START_BLOCK ?? startBlock),
+      includeCallTraces: true,
     },
     Adapter8004: {
       abi: [AgentBoundEvent],

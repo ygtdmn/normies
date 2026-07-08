@@ -20,6 +20,10 @@ import {
 import { bytesToHex, encodePacked, hexToBytes, hexToString, keccak256, parseAbi, toBytes } from "viem";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+// Canvas address — used to skip canvas-originated storage writes (they already
+// emit PixelsTransformed) when indexing direct setTransformedImageData calls.
+const CANVAS_ADDRESS = (process.env.PONDER_CANVAS_ADDRESS ?? "") as `0x${string}`;
+const CANVAS_ADDRESS_LC = CANVAS_ADDRESS.toLowerCase();
 const ZOMBIE_CONFIG_ID = "global";
 const REVEAL_PHRASE =
   "normies-ftw-lividly-pumice-consoling-equator-makeover-scone-speculate-dreamy-murky-zips-unplanted-verbalize";
@@ -39,6 +43,12 @@ const canvasStorageABI = parseAbi([
 ]);
 const getTransformedImageDataABI = parseAbi([
   "function getTransformedImageData(uint256 tokenId) view returns (bytes)",
+]);
+const normiesStorageAddressABI = parseAbi([
+  "function normiesStorage() view returns (address)",
+]);
+const getTokenRawImageDataABI = parseAbi([
+  "function getTokenRawImageData(uint256 tokenId) view returns (bytes)",
 ]);
 const zombieStorageABI = parseAbi([
   "function getPoolBitmap(uint256 poolIndex) view returns (bytes)",
@@ -529,6 +539,94 @@ ponder.on("NormiesCanvas:PixelsTransformed", async ({ event, context }) => {
     transformer,
     changeCount: Number(changeCount),
     newPixelCount: Number(newPixelCount),
+    transformBitmap: bitmap,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp,
+    txHash: event.transaction.hash,
+  });
+  await upsertCanvasState(
+    context,
+    tokenId,
+    { customized: true, latestTransformBitmap: bitmap },
+    eventMeta(event),
+  );
+});
+
+// ──────────────────────────────────────────────
+//  NormiesCanvasStorage: direct setTransformedImageData writes (call traces)
+//
+//  Option B — a writer (e.g. the beeple bot) writes the transform straight to
+//  storage, bypassing NormiesCanvas, which emits no PixelsTransformed event.
+//  We index the CALL so these edits still land in history + canvas_token_state.
+//  Canvas-originated calls are skipped (the event handler above owns those).
+// ──────────────────────────────────────────────
+
+function popcountBytes(bytes: Uint8Array): number {
+  let count = 0;
+  for (let i = 0; i < bytes.length; i++) {
+    let b = bytes[i]!;
+    while (b) {
+      b &= b - 1;
+      count++;
+    }
+  }
+  return count;
+}
+
+// Original mint image never changes — cache per token to avoid repeat reads.
+const originalImageCache = new Map<string, Uint8Array>();
+async function readOriginalImage(
+  context: IndexingContext,
+  tokenId: bigint,
+): Promise<Uint8Array> {
+  const key = tokenId.toString();
+  const cached = originalImageCache.get(key);
+  if (cached) return cached;
+  const storage = await context.client.readContract({
+    address: CANVAS_ADDRESS,
+    abi: normiesStorageAddressABI,
+    functionName: "normiesStorage",
+    args: [],
+  });
+  const hex = (await context.client.readContract({
+    address: storage,
+    abi: getTokenRawImageDataABI,
+    functionName: "getTokenRawImageData",
+    args: [tokenId],
+  })) as `0x${string}`;
+  const bytes = hexToBytes(hex);
+  originalImageCache.set(key, bytes);
+  return bytes;
+}
+
+ponder.on("NormiesCanvasStorage.setTransformedImageData()", async ({ event, context }) => {
+  if (event.trace.error) return; // reverted call — ignore
+  if (event.trace.from.toLowerCase() === CANVAS_ADDRESS_LC) return; // canvas-originated → already indexed via PixelsTransformed
+
+  const [tokenId, imageData] = event.args;
+  const bitmap = imageData as `0x${string}`;
+  const transformBytes = hexToBytes(bitmap);
+  const changeCount = popcountBytes(transformBytes);
+
+  // newPixelCount = on-pixels of (original XOR transform), matching how the
+  // canvas computes it for the PixelsTransformed event.
+  let newPixelCount = changeCount;
+  try {
+    const original = await readOriginalImage(context, tokenId);
+    const composite = new Uint8Array(original.length);
+    for (let i = 0; i < composite.length; i++) composite[i] = original[i]! ^ (transformBytes[i] ?? 0);
+    newPixelCount = popcountBytes(composite);
+  } catch {
+    // Fall back to changeCount; the history endpoints recompute newPixelCount
+    // from transformBitmap at serve time anyway.
+  }
+
+  await context.db.insert(pixelTransform).values({
+    id: `${event.transaction.hash}-${event.trace.traceIndex}`,
+    tokenId,
+    transformer: event.trace.from,
+    changeCount,
+    newPixelCount,
     transformBitmap: bitmap,
     blockNumber: event.block.number,
     timestamp: event.block.timestamp,
