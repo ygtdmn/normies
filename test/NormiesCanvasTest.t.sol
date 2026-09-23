@@ -45,7 +45,9 @@ contract NormiesCanvasTest is Test {
         normies = new Normies(INormiesRenderer(address(rendererV4)), INormiesStorage(address(normiesStorage)), owner);
 
         // Deploy lab
-        lab = new NormiesCanvas(address(normies), INormiesStorage(address(normiesStorage)), INormiesCanvasStorage(address(transformStorage)));
+        lab = new NormiesCanvas(
+            address(normies), INormiesStorage(address(normiesStorage)), INormiesCanvasStorage(address(transformStorage))
+        );
 
         // Set canvas on renderer (for level reads)
         rendererV4.setCanvasContract(INormiesCanvas(address(lab)));
@@ -62,8 +64,7 @@ contract NormiesCanvasTest is Test {
     // ──────────────────────────────────────────────
 
     function _createRealBitmap() internal pure returns (bytes memory) {
-        return
-            hex"00000000000000000000000081800000013500000042d6f0000077fffc000017ffb400003bffd8000057fff60000bfc7ea0001af5af50000fcfebf80005b8db6000177995d0000dff7ba0000dcf13f000077e72b80006fe3270000e7e02b800017e46800001e7e7800001ffff800003ffff400000ffff000000ffff000000ffff000000ffff000000ffff0000007ffe000001ffff000003ffff000008f3ce200000f00c0000007a980800213c388000001e300000001ea000008207e000008103c042004081f0020";
+        return hex"00000000000000000000000081800000013500000042d6f0000077fffc000017ffb400003bffd8000057fff60000bfc7ea0001af5af50000fcfebf80005b8db6000177995d0000dff7ba0000dcf13f000077e72b80006fe3270000e7e02b800017e46800001e7e7800001ffff800003ffff400000ffff000000ffff000000ffff000000ffff000000ffff0000007ffe000001ffff000003ffff000008f3ce200000f00c0000007a980800213c388000001e300000001ea000008207e000008103c042004081f0020";
     }
 
     /// @notice Creates a bitmap with exactly `pixelCount` pixels on (first N bits set)
@@ -137,11 +138,12 @@ contract NormiesCanvasTest is Test {
     }
 
     /// @notice Mirrors NormiesCanvas._rollPercentageFromEntropy for deterministic test assertions.
-    function _expectedPercentageFromEntropy(uint256 pixelCount, bytes32 entropy, uint256 commitId, uint256 index)
-        internal
-        pure
-        returns (uint256)
-    {
+    function _expectedPercentageFromEntropy(
+        uint256 pixelCount,
+        bytes32 entropy,
+        uint256 commitId,
+        uint256 index
+    ) internal pure returns (uint256) {
         uint256 minPercent = pixelCount < 490 ? 1 : pixelCount < 890 ? 2 : uint256(3);
         uint256 range = 4 - minPercent + 1;
         if (range == 1) return minPercent;
@@ -692,7 +694,6 @@ contract NormiesCanvasTest is Test {
         vm.expectRevert(NormiesCanvas.InsufficientTransformActions.selector);
         lab.setTransformBitmap(1, _singlePixelBitmap(0, 0));
     }
-
 
     function testTransformPreservesOriginalInStorage() public {
         _mintRealToUser(1);

@@ -18,8 +18,13 @@ import {
   legendaryCanvasTraitEvent,
 } from "ponder:schema";
 import { bytesToHex, encodePacked, hexToBytes, hexToString, keccak256, parseAbi, toBytes } from "viem";
-
-const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+import {
+  ZERO_ADDRESS,
+  eventMeta,
+  popcountBytes,
+  upsertCanvasState,
+  upsertDefaultCanvasState,
+} from "./lib/canvas-state.js";
 // Canvas address — used to skip canvas-originated storage writes (they already
 // emit PixelsTransformed) when indexing direct setTransformedImageData calls.
 const CANVAS_ADDRESS = (process.env.PONDER_CANVAS_ADDRESS ?? "") as `0x${string}`;
@@ -63,14 +68,6 @@ type EventMeta = {
   timestamp: bigint;
   txHash: `0x${string}`;
 };
-
-function eventMeta(event: { block: { number: bigint; timestamp: bigint }; transaction: { hash: `0x${string}` } }): EventMeta {
-  return {
-    blockNumber: event.block.number,
-    timestamp: event.block.timestamp,
-    txHash: event.transaction.hash,
-  };
-}
 
 async function readCanvasStorageAddress(context: IndexingContext, canvasAddress: `0x${string}`): Promise<`0x${string}`> {
   return context.client.readContract({
@@ -156,27 +153,6 @@ async function getStoredZombiePoolItem(
   return item;
 }
 
-async function upsertDefaultCanvasState(
-  context: IndexingContext,
-  tokenId: bigint,
-  meta: EventMeta,
-): Promise<void> {
-  await context.db
-    .insert(canvasTokenState)
-    .values({
-      tokenId,
-      actionPoints: 0n,
-      customized: false,
-      delegate: ZERO_ADDRESS,
-      delegateSetBy: ZERO_ADDRESS,
-      latestTransformBitmap: null,
-      blockNumber: meta.blockNumber,
-      timestamp: meta.timestamp,
-      txHash: meta.txHash,
-    })
-    .onConflictDoNothing();
-}
-
 function decryptImageData(encryptedImageData: `0x${string}`): `0x${string}` {
   const data = Uint8Array.from(hexToBytes(encryptedImageData));
   let key = new Uint8Array(32);
@@ -232,48 +208,6 @@ async function upsertTokenDataFromMint(
       blockNumber: meta.blockNumber,
       timestamp: meta.timestamp,
       txHash: meta.txHash,
-    });
-}
-
-async function upsertCanvasState(
-  context: IndexingContext,
-  tokenId: bigint,
-  values: {
-    actionPoints?: bigint;
-    customized?: boolean;
-    delegate?: `0x${string}`;
-    delegateSetBy?: `0x${string}`;
-    latestTransformBitmap?: `0x${string}` | null;
-  },
-  meta: EventMeta,
-): Promise<void> {
-  const existing = await context.db.find(canvasTokenState, { tokenId });
-  const next = {
-    tokenId,
-    actionPoints: values.actionPoints ?? existing?.actionPoints ?? 0n,
-    customized: values.customized ?? existing?.customized ?? false,
-    delegate: values.delegate ?? existing?.delegate ?? ZERO_ADDRESS,
-    delegateSetBy: values.delegateSetBy ?? existing?.delegateSetBy ?? ZERO_ADDRESS,
-    latestTransformBitmap: values.latestTransformBitmap !== undefined
-      ? values.latestTransformBitmap
-      : existing?.latestTransformBitmap ?? null,
-    blockNumber: meta.blockNumber,
-    timestamp: meta.timestamp,
-    txHash: meta.txHash,
-  };
-
-  await context.db
-    .insert(canvasTokenState)
-    .values(next)
-    .onConflictDoUpdate({
-      actionPoints: next.actionPoints,
-      customized: next.customized,
-      delegate: next.delegate,
-      delegateSetBy: next.delegateSetBy,
-      latestTransformBitmap: next.latestTransformBitmap,
-      blockNumber: next.blockNumber,
-      timestamp: next.timestamp,
-      txHash: next.txHash,
     });
 }
 
@@ -400,6 +334,9 @@ ponder.on("Normies:Transfer", async ({ event, context }) => {
         delegate: ZERO_ADDRESS,
         delegateSetBy: ZERO_ADDRESS,
         latestTransformBitmap: null,
+        gridSize: 40,
+        baseCleared: false,
+        lockedPixels: 0,
       },
       eventMeta(event),
     );
@@ -483,7 +420,9 @@ ponder.on("NormiesCanvas:BurnCommitted", async ({ event, context }) => {
   }
 
   await context.db.insert(burnCommitment).values({
+    id: `1-${commitId}`,
     commitId,
+    contractVersion: 1,
     owner,
     receiverTokenId,
     tokenCount: Number(tokenCount),
@@ -500,7 +439,7 @@ ponder.on("NormiesCanvas:BurnRevealed", async ({ event, context }) => {
   const { commitId, receiverTokenId, totalActions, expired } = event.args;
   const meta = eventMeta(event);
 
-  await context.db.update(burnCommitment, { commitId }).set({
+  await context.db.update(burnCommitment, { id: `1-${commitId}` }).set({
     revealed: true,
     totalActions,
     expired,
@@ -509,7 +448,10 @@ ponder.on("NormiesCanvas:BurnRevealed", async ({ event, context }) => {
     revealTxHash: event.transaction.hash,
   });
 
+  // Once a token is pinned in the pixel ledger its balance comes from
+  // AttachedChanged events; a stray V1 reveal after that is invisible on-chain too.
   const existing = await context.db.find(canvasTokenState, { tokenId: receiverTokenId });
+  if (existing?.migrated) return;
   await upsertCanvasState(
     context,
     receiverTokenId,
@@ -540,6 +482,8 @@ ponder.on("NormiesCanvas:PixelsTransformed", async ({ event, context }) => {
     changeCount: Number(changeCount),
     newPixelCount: Number(newPixelCount),
     transformBitmap: bitmap,
+    gridSize: 40,
+    cleared: false,
     blockNumber: event.block.number,
     timestamp: event.block.timestamp,
     txHash: event.transaction.hash,
@@ -547,7 +491,7 @@ ponder.on("NormiesCanvas:PixelsTransformed", async ({ event, context }) => {
   await upsertCanvasState(
     context,
     tokenId,
-    { customized: true, latestTransformBitmap: bitmap },
+    { customized: true, latestTransformBitmap: bitmap, lockedPixels: Number(changeCount) },
     eventMeta(event),
   );
 });
@@ -560,18 +504,6 @@ ponder.on("NormiesCanvas:PixelsTransformed", async ({ event, context }) => {
 //  We index the CALL so these edits still land in history + canvas_token_state.
 //  Canvas-originated calls are skipped (the event handler above owns those).
 // ──────────────────────────────────────────────
-
-function popcountBytes(bytes: Uint8Array): number {
-  let count = 0;
-  for (let i = 0; i < bytes.length; i++) {
-    let b = bytes[i]!;
-    while (b) {
-      b &= b - 1;
-      count++;
-    }
-  }
-  return count;
-}
 
 // Original mint image never changes — cache per token to avoid repeat reads.
 const originalImageCache = new Map<string, Uint8Array>();
@@ -628,6 +560,8 @@ ponder.on("NormiesCanvasStorage.setTransformedImageData()", async ({ event, cont
     changeCount,
     newPixelCount,
     transformBitmap: bitmap,
+    gridSize: 40,
+    cleared: false,
     blockNumber: event.block.number,
     timestamp: event.block.timestamp,
     txHash: event.transaction.hash,
@@ -635,7 +569,7 @@ ponder.on("NormiesCanvasStorage.setTransformedImageData()", async ({ event, cont
   await upsertCanvasState(
     context,
     tokenId,
-    { customized: true, latestTransformBitmap: bitmap },
+    { customized: true, latestTransformBitmap: bitmap, lockedPixels: changeCount },
     eventMeta(event),
   );
 });

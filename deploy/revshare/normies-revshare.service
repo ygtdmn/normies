@@ -1,0 +1,26 @@
+# Posts one revenue share epoch: releases the royalty splitter, unwraps the pool's WETH, builds the epoch
+# from chain state, verifies it against a second RPC, writes the epoch file where the API serves it and
+# posts the Merkle root from the pool owner key. Triggered by normies-revshare.timer; safe to start by hand.
+[Unit]
+Description=Normies revenue share epoch
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=normies
+Group=normies
+WorkingDirectory=/opt/normies/smart-contracts/api-server
+EnvironmentFile=/etc/normies/revshare.env
+ExecStart=/usr/bin/pnpm revshare run
+# A month of chain data through an archive RPC can take a while; the finality wait adds up to fifteen minutes.
+TimeoutStartSec=4h
+Nice=10
+StandardOutput=journal
+StandardError=journal
+# Hardening: the job needs the repo, the epoch directory and the network, nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/normies/smart-contracts/api-server/data

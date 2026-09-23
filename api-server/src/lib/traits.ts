@@ -1,4 +1,5 @@
 import { hexToBytes } from "viem";
+import { countPixels as countBitmapPixels } from "./bitmap.js";
 
 // Trait label arrays matching NormiesTraits.sol exactly (title case)
 const TRAIT_CATEGORIES = [
@@ -81,17 +82,9 @@ export function decodeTraits(traitsHex: `0x${string}`): TraitsResult {
 }
 
 /**
- * Count set bits in the image data (pixel count).
- * Mirrors NormiesRendererV3._countPixels — Kernighan's algorithm.
+ * Count "on" pixels in a bitmap of any supported grid size (padding bits of
+ * 50x50 and 70x70 bitmaps are ignored). Mirrors NormiesBitmap.countPixels.
  */
 export function countPixels(imageData: Uint8Array): number {
-    let count = 0;
-    for (let i = 0; i < 200; i++) {
-        let b = imageData[i];
-        while (b !== 0) {
-            b &= b - 1;
-            count++;
-        }
-    }
-    return count;
+    return countBitmapPixels(imageData);
 }

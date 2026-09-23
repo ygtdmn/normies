@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
-import {Script} from "forge-std/src/Script.sol";
-import {console2} from "forge-std/src/console2.sol";
+import { Script } from "forge-std/src/Script.sol";
+import { console2 } from "forge-std/src/console2.sol";
 
 interface IDelegateRegistryV2Write {
     function delegateAll(address to, bytes32 rights, bool enable) external payable returns (bytes32);
@@ -10,9 +10,12 @@ interface IDelegateRegistryV2Write {
 }
 
 interface IAdapter8004 {
-    function register(uint8 standard, address tokenContract, uint256 tokenId, string calldata agentURI)
-        external
-        returns (uint256 agentId);
+    function register(
+        uint8 standard,
+        address tokenContract,
+        uint256 tokenId,
+        string calldata agentURI
+    ) external returns (uint256 agentId);
 }
 
 interface IERC721Min {

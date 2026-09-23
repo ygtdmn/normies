@@ -294,8 +294,112 @@
 
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/normie/:id/canvas/info</span><span class="response-type">application/json</span>
-            <p class="desc">Canvas level, action points, customized flag, delegate, and delegate setter.</p>
+            <p class="desc">Canvas level, action points (pixels attached), customized flag, delegate, delegate setter, <code>gridSize</code>, <code>baseCleared</code>, <code>migrated</code>, <code>lockedPixels</code> and <code>freePixels</code>.</p>
             <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=60</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/canvas/token/:id/pixels</span><span class="response-type">application/json</span>
+            <p class="desc">Pixels on one Normie: <code>attached</code>, <code>locked</code> (backing the overlay), <code>free</code> (withdrawable without a reset), level, grid size, blank-canvas flag.</p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/canvas/token/:id/activity</span><span class="response-type">application/json</span>
+            <p class="desc">Ledger events that changed the pixels attached to a token, newest first.</p>
+            <p class="meta">Query: <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/canvas/sinks</span><span class="response-type">application/json</span>
+            <p class="desc">Pixels spent on canvas services: enlargements and blank canvases, with cost, source and the paying wallet.</p>
+            <p class="meta">Query: <code>tokenId</code>, <code>kind</code> (<code>enlarge</code> or <code>clearBase</code>), <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <h3>Pixels</h3>
+
+        <div class="note">
+            Burning Normies earns pixels. A pixel is either attached to a Normie (its painting ceiling) or in a wallet
+            balance. These routes read the pixel accounting in NormiesCanvasStorageV2 and return 404 until the Pixel Market stack is configured.
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/pixels/balance/:address</span><span class="response-type">application/json</span>
+            <p class="desc">Wallet balance plus the pixels on the wallet's Normies (<code>attached</code>, <code>locked</code>, <code>free</code>, per-token breakdown).</p>
+            <p class="meta">Parameters: Ethereum address. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/pixels/holders</span><span class="response-type">application/json</span>
+            <p class="desc">Wallets with a non-zero balance, largest first.</p>
+            <p class="meta">Query: <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/pixels/activity/:address</span><span class="response-type">application/json</span>
+            <p class="desc">Wallet balance moves involving the address, newest first.</p>
+            <p class="meta">Query: <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/pixels/supply</span><span class="response-type">application/json</span>
+            <p class="desc">Total pixels in wallets and attached to migrated Normies, plus the number of holding wallets.</p>
+            <p class="meta">Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <h3>Pixel Market</h3>
+
+        <div class="note">
+            Sell-side order book, ETH priced per pixel. Prices and volumes are wei strings. Listings fill partially
+            or all-or-nothing; the fee is taken out of seller proceeds. 404 until the stack is configured.
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/market/status</span><span class="response-type">application/json</span>
+            <p class="desc">Market config from the chain: paused flag, fee and revenue-share basis points, canvas service prices.</p>
+            <p class="meta">Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/market/listings</span><span class="response-type">application/json</span>
+            <p class="desc">Listings with seller, price per pixel, amount, remaining, fill mode, expiry and status.</p>
+            <p class="meta">Query: <code>status</code> (active, filled, cancelled, all), <code>seller</code>, <code>partial</code>, <code>sort</code> (price-asc, price-desc, amount-desc, newest), <code>expired</code>, <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/market/listings/:id</span><span class="response-type">application/json</span>
+            <p class="desc">One listing plus its fills.</p>
+            <p class="meta">Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/market/depth</span><span class="response-type">application/json</span>
+            <p class="desc">Active listings grouped by price level, cheapest first.</p>
+            <p class="meta">Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/market/fills</span><span class="response-type">application/json</span>
+            <p class="desc">Fill feed with buyer, seller, amount, price, gross and fee.</p>
+            <p class="meta">Query: <code>limit</code>, <code>offset</code>, <code>after_timestamp</code>, <code>sort</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/market/fills/address/:address</span><span class="response-type">application/json</span>
+            <p class="desc">Fills where the address bought or sold.</p>
+            <p class="meta">Query: <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/market/stats</span><span class="response-type">application/json</span>
+            <p class="desc">Totals, active listings, pixels listed, best ask, last price, 24h volume, fee config.</p>
+            <p class="meta">Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/market/candles</span><span class="response-type">application/json</span>
+            <p class="desc">OHLC in wei per pixel from fills, with volume and pixel counts per bucket.</p>
+            <p class="meta">Query: <code>interval</code> (1h, 4h, 1d), <code>limit</code> 1-1000. Cache: <code>public, max-age=10, s-maxage=10</code></p>
         </div>
 
         <h3>History</h3>
@@ -379,8 +483,14 @@
         </div>
 
         <div class="endpoint">
+            <span class="method">GET</span><span class="path">/history/burns/pending/legacy</span><span class="response-type">application/json</span>
+            <p class="desc">Original-canvas commitments never revealed there (that canvas is paused after the Pixel Market cutover). Anyone can replay them through <code>NormiesCanvasV2.revealLegacyBurn</code>. Burn commitments carry <code>contractVersion</code> (1 or 2); <code>/history/burns/:commitId</code> takes <code>?version=</code> because ids restart at 0 on V2.</p>
+            <p class="meta">Query: <code>owner</code>, <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
             <span class="method">GET</span><span class="path">/history/stats</span><span class="response-type">application/json</span>
-            <p class="desc">Indexer summary counts for burn commitments, burned tokens, transforms, token data, zombies, Legendary Canvas, and total action points.</p>
+            <p class="desc">Indexer summary counts for burn commitments, burned tokens, transforms, token data, zombies, Legendary Canvas, and total action points, plus pixel supply, market totals and canvas sinks.</p>
             <p class="meta">Cache: <code>public, max-age=60, s-maxage=300</code></p>
         </div>
 
@@ -389,6 +499,12 @@
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/holders/:address</span><span class="response-type">application/json</span>
             <p class="desc">Current indexed token IDs held by a wallet.</p>
+            <p class="meta">Parameters: Ethereum address. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/delegations/:address</span><span class="response-type">application/json</span>
+            <p class="desc">Canvas edit rights delegated to a wallet, filtered to the delegations NormiesCanvas still honours. Delegations set by a previous owner are dropped. Returns tokenIds plus an owners map.</p>
             <p class="meta">Parameters: Ethereum address. Cache: <code>public, max-age=10, s-maxage=10</code></p>
         </div>
 
@@ -664,8 +780,9 @@
             <tr><td><code>/rarity/admin/*</code>, <code>/rarity/listings/stream</code></td><td><code>no-store</code></td><td>The SSE route also emits event-stream headers.</td></tr>
             <tr><td><code>/canvas/status</code></td><td><code>public, max-age=300, s-maxage=300</code></td><td>Derived from <code>CANVAS_STATUS_CACHE_TTL_MS</code>.</td></tr>
             <tr><td><code>/zombies/status</code></td><td><code>public, max-age=10, s-maxage=10</code></td><td>Derived from <code>ZOMBIE_STATUS_CACHE_TTL_MS</code>.</td></tr>
+            <tr><td><code>/pixels/*</code>, <code>/market/*</code>, <code>/canvas/sinks</code>, <code>/canvas/token/*</code></td><td><code>public, max-age=10, s-maxage=10</code></td><td>Derived from <code>MARKET_CACHE_TTL_MS</code>.</td></tr>
             <tr><td><code>* /canvas/info</code></td><td><code>public, max-age=60, s-maxage=60</code></td><td>Derived from <code>CANVAS_INFO_CACHE_TTL_MS</code>.</td></tr>
-            <tr><td>Owner and holder routes</td><td><code>public, max-age=10, s-maxage=10</code></td><td><code>/normie/:id/owner</code> and <code>/holders/:address</code>.</td></tr>
+            <tr><td>Owner, holder and delegation routes</td><td><code>public, max-age=10, s-maxage=10</code></td><td><code>/normie/:id/owner</code>, <code>/holders/:address</code> and <code>/delegations/:address</code>.</td></tr>
             <tr><td>Original data and traits routes</td><td><code>public, max-age=300, s-maxage=3600</code></td><td>Immutable mint data.</td></tr>
             <tr><td><code>/history/*</code></td><td><code>public, max-age=60, s-maxage=300</code></td><td>Indexed append-only history and version rendering.</td></tr>
             <tr><td>Default rendered/indexed routes</td><td><code>public, max-age=60, s-maxage=300</code></td><td>Active images, metadata, zombie aliases, Legendary Canvas, and uncategorized cached routes.</td></tr>
@@ -694,7 +811,7 @@
 
         <table>
             <tr><th>Category</th><th>Byte Index</th><th>Possible Values</th></tr>
-            <tr><td>Type</td><td>0</td><td>Human, Cat, Alien, Agent</td></tr>
+            <tr><td>Type</td><td>0</td><td>Human, Cat, Alien, Agent, Zombie (converted tokens only; served from zombie attributes, not the trait byte)</td></tr>
             <tr><td>Gender</td><td>1</td><td>Male, Female, Non-Binary</td></tr>
             <tr><td>Age</td><td>2</td><td>Young, Middle-Aged, Old</td></tr>
             <tr><td>Hair Style</td><td>3</td><td>21 options (Short Hair, Long Hair, Curly Hair, ...)</td></tr>
@@ -706,20 +823,21 @@
 
         <h2>Pixel Data Format</h2>
 
-        <p>Each Normie is a 40x40 monochrome bitmap stored as 200 bytes on-chain: 1 bit per pixel, MSB first.</p>
+        <p>Each Normie's original art is a 40x40 monochrome bitmap stored as 200 bytes on-chain: 1 bit per pixel, MSB first. A canvas can be enlarged to 50, 60, 70 or 80 pixels per side; the original art then sits centred and the active bitmap grows to <code>ceil(n*n/8)</code> bytes. Pixel strings served by the API are <code>n*n</code> characters long.</p>
 
         <table>
             <tr><th>Property</th><th>Value</th></tr>
-            <tr><td>Grid Size</td><td>40 x 40 pixels</td></tr>
+            <tr><td>Grid Size</td><td>40 x 40 pixels by default; 50, 60, 70 or 80 after enlargement</td></tr>
             <tr><td>Bit Order</td><td>MSB first; most significant bit is the leftmost pixel</td></tr>
             <tr><td>Layout</td><td>Row-major, top-left to bottom-right</td></tr>
             <tr><td>Pixel On</td><td><code>1</code> - dark gray (#48494b)</td></tr>
             <tr><td>Pixel Off</td><td><code>0</code> - light gray (#e3e5e4)</td></tr>
-            <tr><td>Storage Size</td><td>200 bytes / 1600 bits</td></tr>
+            <tr><td>Storage Size</td><td>200 / 313 / 450 / 613 / 800 bytes for 40 / 50 / 60 / 70 / 80; the last 4 bits of a 50 or 70 bitmap are padding and always zero</td></tr>
         </table>
 
         <h3>Pixel Access Formula</h3>
-        <pre><code>flatIndex = y * 40 + x
+        <pre><code>n         = grid side (40, 50, 60, 70 or 80; 200 bytes means 40)
+flatIndex = y * n + x
 byteIndex = flatIndex >> 3        // divide by 8
 bitPos    = 7 - (flatIndex & 7)   // MSB first
 pixel     = (data[byteIndex] >> bitPos) & 1</code></pre>
@@ -776,6 +894,10 @@ pixel     = (data[byteIndex] >> bitPos) & 1</code></pre>
             <tr><td>NormiesZombieStorage</td><td><code>0xA331bD22C90D1DA096934Db8bc6b69F0e1491E26</code></td><td>SSTORE2 storage for zombie pool assets and conversion records</td></tr>
             <tr><td>NormiesLegendaryCanvas</td><td><code>0xfA55f6592522dA74224a67c7D3Fd1DF759c628e8</code></td><td>Owner-managed registry of selected Legendary Canvas artist traits</td></tr>
             <tr><td>NormiesRendererV5</td><td><code>0x7c726f02C5e840e1656b522A5C22caaf87C1C35C</code></td><td>V5 renderer: V4-compatible renderer with zombie metadata and art branches</td></tr>
+                        <tr><td>NormiesCanvasV2</td><td><em>published at deployment</em></td><td>Burns, painting, withdraw and deposit of pixels, canvas enlargement and blank canvas; the original canvas is paused</td></tr>
+            <tr><td>NormiesCanvasStorageV2</td><td><em>published at deployment</em></td><td>Overlay bitmaps of any grid size plus the pixel accounting: wallet and per-Normie balances, copied from NormiesCanvas once at cutover</td></tr>
+            <tr><td>NormiesPixelMarket</td><td><em>published at deployment</em></td><td>Sell-side order book: partial or all-or-nothing fills, fee out of seller proceeds</td></tr>
+            <tr><td>NormiesRendererV6</td><td><em>published at deployment</em></td><td>Grid-size aware renderer with Canvas Size and Blank Canvas traits</td></tr>
         </table>
 
         <div class="footer">

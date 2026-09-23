@@ -1,10 +1,19 @@
 import { db } from "ponder:api";
 import schema from "ponder:schema";
 import { Hono } from "hono";
-import { eq, desc, count, sum, asc, and, gt, lt, lte, inArray } from "ponder";
+import { eq, desc, count, asc, and, gt, lt, lte, inArray } from "ponder";
 import pg from "pg";
+import pixelMarketApi from "./pixel-market.js";
+import revshareApi from "./revshare.js";
 
 const app = new Hono();
+// Pixel Market routes (/pixels/*, /market/*, /canvas/sinks, /burns/pending/legacy)
+app.route("/", pixelMarketApi);
+// Revenue share routes (/revshare/*)
+app.route("/", revshareApi);
+// Burn commitment ids restart at 0 on the V2 canvas; `?version=` picks the
+// generation and defaults to the newest one configured.
+const DEFAULT_BURN_VERSION = process.env.PONDER_CANVAS_V2_ADDRESS ? 2 : 1;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const RARITY_LEGENDARY_CONFIG_ID = "default";
 
@@ -259,8 +268,11 @@ function buildHistoricalCanvasStates(
   transforms: Array<{
     id: string;
     tokenId: bigint;
+    changeCount: number;
     newPixelCount: number;
     transformBitmap: `0x${string}` | null;
+    gridSize: number;
+    cleared: boolean;
     blockNumber: bigint;
     timestamp: bigint;
     txHash: `0x${string}`;
@@ -273,9 +285,13 @@ function buildHistoricalCanvasStates(
     revealTimestamp: bigint | null;
     revealTxHash: `0x${string}` | null;
   }>,
+  // Post-cutover the pixel ledger is authoritative: once a token has any
+  // AttachedChanged event at or before `blockNumber`, its latest `newAttached`
+  // replaces the V1 reveal sum (which cannot see withdrawals, deposits or spends).
+  ledgerAttached: Map<bigint, { attached: bigint; blockNumber: bigint; timestamp: bigint; txHash: `0x${string}`; logIndex: number }> = new Map(),
 ) {
   const actionPoints = new Map<bigint, bigint>();
-  const actionMeta = new Map<bigint, { blockNumber: bigint; timestamp: bigint; txHash: `0x${string}` }>();
+  const actionMeta = new Map<bigint, { blockNumber: bigint; timestamp: bigint; txHash: `0x${string}`; logIndex?: number }>();
   for (const row of commitments) {
     if (!row.revealed || row.revealBlockNumber === null || row.totalActions === null) continue;
     if (row.revealBlockNumber > blockNumber) continue;
@@ -291,12 +307,17 @@ function buildHistoricalCanvasStates(
       actionMeta.set(row.receiverTokenId, nextMeta);
     }
   }
+  for (const [tokenId, entry] of ledgerAttached) {
+    actionPoints.set(tokenId, entry.attached);
+    actionMeta.set(tokenId, entry);
+  }
 
   const latestTransforms = latestByToken(transforms);
   const states = new Map<string, Record<string, unknown>>();
   const pixelCounts = new Map<string, number>();
   for (const row of tokenRows) {
     const transform = latestTransforms.get(row.tokenId);
+    const live = transform && !transform.cleared ? transform : undefined;
     const apMeta = actionMeta.get(row.tokenId);
     const meta = transform && (!apMeta || compareBlockLog(transform, apMeta) >= 0)
       ? transform
@@ -305,10 +326,12 @@ function buildHistoricalCanvasStates(
     states.set(row.tokenId.toString(), {
       tokenId: row.tokenId.toString(),
       actionPoints: (actionPoints.get(row.tokenId) ?? 0n).toString(),
-      customized: Boolean(transform),
+      customized: Boolean(live),
       delegate: ZERO_ADDRESS,
       delegateSetBy: ZERO_ADDRESS,
-      latestTransformBitmap: transform?.transformBitmap ?? null,
+      latestTransformBitmap: live?.transformBitmap ?? null,
+      gridSize: transform?.gridSize ?? 40,
+      lockedPixels: live?.changeCount ?? 0,
       blockNumber: meta.blockNumber.toString(),
       timestamp: meta.timestamp.toString(),
       txHash: meta.txHash,
@@ -515,6 +538,59 @@ app.get("/delegations/:address", async (c) => {
     .where(eq(schema.delegation.delegate, address));
 
   return c.json(rows.map((r) => r.tokenId.toString()));
+});
+
+// Same lookup, but filtered down to the delegations NormiesCanvas would still
+// honour. A delegation goes stale silently when the token is transferred:
+// `_isAuthorizedTransformer` requires `delegates[id] == you` AND
+// `delegateSetBy[id] == ownerOf(id)`, so a delegation set by a previous owner
+// survives in the `delegation` table while `setTransformBitmap` reverts with
+// NotTokenOwnerOrDelegate. Doing the check here saves every client an
+// ownerOf/delegates/delegateSetBy multicall over the whole candidate list.
+app.get("/delegations/:address/active", async (c) => {
+  const address = c.req.param("address").toLowerCase() as `0x${string}`;
+
+  const rows = await db
+    .select({ tokenId: schema.delegation.tokenId })
+    .from(schema.delegation)
+    .where(eq(schema.delegation.delegate, address));
+
+  const tokenIds = rows.map((r) => r.tokenId);
+  if (tokenIds.length === 0) return c.json([]);
+
+  const [states, owners] = await Promise.all([
+    db
+      .select({
+        tokenId: schema.canvasTokenState.tokenId,
+        delegate: schema.canvasTokenState.delegate,
+        delegateSetBy: schema.canvasTokenState.delegateSetBy,
+      })
+      .from(schema.canvasTokenState)
+      .where(inArray(schema.canvasTokenState.tokenId, tokenIds)),
+    db
+      .select({ tokenId: schema.normieOwner.tokenId, owner: schema.normieOwner.owner })
+      .from(schema.normieOwner)
+      .where(inArray(schema.normieOwner.tokenId, tokenIds)),
+  ]);
+
+  const stateById = new Map(states.map((s) => [s.tokenId, s]));
+  const ownerById = new Map(owners.map((o) => [o.tokenId, o.owner]));
+
+  const active = tokenIds
+    .filter((tokenId) => {
+      const state = stateById.get(tokenId);
+      const owner = ownerById.get(tokenId);
+      if (!state || !owner) return false;
+      return (
+        state.delegate.toLowerCase() === address &&
+        state.delegateSetBy.toLowerCase() === owner.toLowerCase()
+      );
+    })
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+  return c.json(
+    active.map((tokenId) => ({ tokenId: tokenId.toString(), owner: ownerById.get(tokenId) })),
+  );
 });
 
 // ──────────────────────────────────────────────
@@ -766,11 +842,14 @@ app.get("/burns", async (c) => {
 
 app.get("/burns/:commitId", async (c) => {
   const commitId = BigInt(c.req.param("commitId"));
+  const versionRaw = c.req.query("version");
+  const version = versionRaw === undefined ? DEFAULT_BURN_VERSION : Number(versionRaw);
+  if (version !== 1 && version !== 2) return c.json({ error: "version must be 1 or 2" }, 400);
 
   const [commitment] = await db
     .select()
     .from(schema.burnCommitment)
-    .where(eq(schema.burnCommitment.commitId, commitId))
+    .where(eq(schema.burnCommitment.id, `${version}-${commitId}`))
     .limit(1);
 
   if (!commitment) return c.json({ error: "Commitment not found" }, 404);
@@ -818,7 +897,8 @@ app.get("/burns/receiver/:tokenId", async (c) => {
   const rows = await db
     .select()
     .from(schema.burnCommitment)
-    .where(eq(schema.burnCommitment.receiverTokenId, tokenId))
+    // Wallet burns store receiverTokenId 0, so they must not show up under token #0.
+    .where(and(eq(schema.burnCommitment.receiverTokenId, tokenId), eq(schema.burnCommitment.toWallet, false)))
     .orderBy(desc(schema.burnCommitment.blockNumber))
     .limit(limit)
     .offset(offset);
@@ -938,16 +1018,22 @@ app.get("/transforms", async (c) => {
   });
 });
 
+// Versions are numbered oldest-first so `offset + i` here matches the
+// `/transforms/:tokenId/:index` lookup; pass `sort=desc` for newest-first.
 app.get("/transforms/:tokenId", async (c) => {
   const tokenId = BigInt(c.req.param("tokenId"));
   const { limit, offset } = parsePagination(c);
   const includeBitmap = c.req.query("bitmap") === "true";
+  const newestFirst = c.req.query("sort") === "desc";
 
   const rows = await db
     .select()
     .from(schema.pixelTransform)
     .where(eq(schema.pixelTransform.tokenId, tokenId))
-    .orderBy(desc(schema.pixelTransform.blockNumber))
+    .orderBy(
+      newestFirst ? desc(schema.pixelTransform.blockNumber) : asc(schema.pixelTransform.blockNumber),
+      newestFirst ? desc(schema.pixelTransform.id) : asc(schema.pixelTransform.id),
+    )
     .limit(limit)
     .offset(offset);
 
@@ -983,7 +1069,7 @@ app.get("/transforms/:tokenId/:index", async (c) => {
     .select()
     .from(schema.pixelTransform)
     .where(eq(schema.pixelTransform.tokenId, tokenId))
-    .orderBy(asc(schema.pixelTransform.blockNumber))
+    .orderBy(asc(schema.pixelTransform.blockNumber), asc(schema.pixelTransform.id))
     .limit(1)
     .offset(index);
 
@@ -1058,10 +1144,38 @@ app.get("/stats", async (c) => {
     .from(schema.legendaryCanvasTrait)
     .where(eq(schema.legendaryCanvasTrait.isLegendary, true));
 
-  const [actionPointsSum] = await db
-    .select({ total: sum(schema.burnCommitment.totalActions) })
+  // Action points only come into existence as burn rewards. The original canvas folded the points
+  // carried over from the burned Normies into its BurnRevealed total (V2 moves them at commit and
+  // reveals the reward alone), so V1 rows subtract the carry-over; otherwise every move counts twice.
+  const revealed = await db
+    .select({
+      contractVersion: schema.burnCommitment.contractVersion,
+      totalActions: schema.burnCommitment.totalActions,
+      transferred: schema.burnCommitment.transferredActionPoints,
+    })
     .from(schema.burnCommitment)
     .where(eq(schema.burnCommitment.revealed, true));
+  let rewarded = 0n;
+  let carried = 0n;
+  for (const r of revealed) {
+    const total = r.totalActions ?? 0n;
+    rewarded += r.contractVersion === 1 ? total - r.transferred : total;
+    carried += r.transferred;
+  }
+
+  const [supply] = await db
+    .select()
+    .from(schema.pixelSupply)
+    .where(eq(schema.pixelSupply.id, "global"))
+    .limit(1);
+  const [market] = await db
+    .select()
+    .from(schema.marketStats)
+    .where(eq(schema.marketStats.id, "global"))
+    .limit(1);
+  const [sinkCount] = await db
+    .select({ count: count() })
+    .from(schema.canvasSinkEvent);
 
   return c.json({
     totalBurnCommitments: burnCommitmentCount?.count ?? 0,
@@ -1070,7 +1184,25 @@ app.get("/stats", async (c) => {
     totalTokenData: tokenDataCount?.count ?? 0,
     totalZombies: zombieTokenCount?.count ?? 0,
     totalLegendaryCanvases: legendaryCanvasCount?.count ?? 0,
-    totalActionPointsDistributed: (actionPointsSum?.total ?? "0").toString(),
+    // Every action point ever created by a burn reward: the supply, since nothing else creates or
+    // destroys them (a burned Normie's points move to the receiver).
+    totalActionPointsDistributed: rewarded.toString(),
+    // Points that moved from burned Normies to receivers over all burns. Not supply.
+    totalActionPointsCarried: carried.toString(),
+    pixelSupply: {
+      totalWallet: (supply?.totalWallet ?? 0n).toString(),
+      totalAttached: (supply?.totalAttached ?? 0n).toString(),
+      totalMigrated: supply?.totalMigrated ?? 0,
+    },
+    market: {
+      volumeWei: (market?.volumeWei ?? 0n).toString(),
+      feesWei: (market?.feesWei ?? 0n).toString(),
+      pixelsTraded: (market?.pixelsTraded ?? 0n).toString(),
+      fills: market?.fills ?? 0,
+      listings: market?.listings ?? 0,
+      paused: market?.paused ?? true,
+    },
+    totalCanvasSinks: sinkCount?.count ?? 0,
   });
 });
 
@@ -1258,6 +1390,23 @@ async function buildHistoricalRaritySnapshot(
       .where(lte(schema.legendaryCanvasTraitEvent.blockNumber, blockNumber)),
   ]);
 
+  const ledgerRows = await db
+    .select()
+    .from(schema.pixelLedgerEvent)
+    .where(and(eq(schema.pixelLedgerEvent.kind, "attached"), lte(schema.pixelLedgerEvent.blockNumber, blockNumber)))
+    .orderBy(asc(schema.pixelLedgerEvent.blockNumber), asc(schema.pixelLedgerEvent.logIndex));
+  const ledgerAttached = new Map<bigint, { attached: bigint; blockNumber: bigint; timestamp: bigint; txHash: `0x${string}`; logIndex: number }>();
+  for (const row of ledgerRows) {
+    if (row.tokenId === null || row.newAttached === null) continue;
+    ledgerAttached.set(row.tokenId, {
+      attached: row.newAttached,
+      blockNumber: row.blockNumber,
+      timestamp: row.timestamp,
+      txHash: row.txHash,
+      logIndex: row.logIndex,
+    });
+  }
+
   const agentRows = tokenContract
     ? await db
         .select()
@@ -1279,6 +1428,7 @@ async function buildHistoricalRaritySnapshot(
     tokenRows,
     transformRows,
     commitmentRows,
+    ledgerAttached,
   );
   const zombieStates = buildHistoricalZombieStates(blockNumber, zombieCommitmentRows, zombiePoolRows);
   const legendaryCanvasStates = buildHistoricalLegendaryCanvasStates(legendaryCanvasEventRows);

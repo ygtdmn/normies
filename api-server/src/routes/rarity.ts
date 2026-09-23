@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { parseTokenId } from "../lib/validation.js";
 import { getRarityLegendaryConfig, putRarityLegendaryConfig } from "../services/ponder-data.js";
+import { getPixelBalance } from "../services/pixel-market-data.js";
+import { PIXEL_MARKET_ENABLED } from "../config.js";
 import {
     getHistoricalRarityHolder,
     getHistoricalRarityNormie,
@@ -116,7 +118,11 @@ rarity.get("/holder/:address", async (c) => {
     if ("error" in resolved) return c.json({ error: resolved.error }, resolved.status);
 
     const body = await getRarityHolder(resolved.address);
-    return c.json({ ...body, ens: resolved.ens });
+    // Wallet pixel balance from the Pixel Market ledger (null until the stack is live).
+    const pixels = PIXEL_MARKET_ENABLED
+        ? await getPixelBalance(resolved.address).then((b) => b.balance).catch(() => null)
+        : null;
+    return c.json({ ...body, pixelBalance: pixels, ens: resolved.ens });
 });
 
 rarity.get("/historical/:blockNumber/holder/:address", async (c) => {

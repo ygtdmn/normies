@@ -1,15 +1,24 @@
 import type { MiddlewareHandler } from "hono";
-import { CANVAS_INFO_CACHE_TTL_MS, CANVAS_STATUS_CACHE_TTL_MS, ZOMBIE_STATUS_CACHE_TTL_MS } from "../config.js";
+import {
+    CANVAS_INFO_CACHE_TTL_MS,
+    CANVAS_STATUS_CACHE_TTL_MS,
+    MARKET_CACHE_TTL_MS,
+    ZOMBIE_STATUS_CACHE_TTL_MS,
+} from "../config.js";
 
 const canvasInfoMaxAge = Math.floor(CANVAS_INFO_CACHE_TTL_MS / 1000);
 const canvasStatusMaxAge = Math.floor(CANVAS_STATUS_CACHE_TTL_MS / 1000);
 const zombieStatusMaxAge = Math.floor(ZOMBIE_STATUS_CACHE_TTL_MS / 1000);
+const marketMaxAge = Math.max(1, Math.floor(MARKET_CACHE_TTL_MS / 1000));
 
 export const cacheHeaders: MiddlewareHandler = async (c, next) => {
     await next();
     const path = c.req.path;
     if (path.startsWith("/canvas/status")) {
         c.header("Cache-Control", `public, max-age=${canvasStatusMaxAge}, s-maxage=${canvasStatusMaxAge}`);
+    } else if (path.startsWith("/market/") || path.startsWith("/revshare/") || path.startsWith("/pixels/") || path.startsWith("/canvas/sinks") || path.startsWith("/canvas/token/")) {
+        // Order book and balances: near-realtime, short shared cache
+        c.header("Cache-Control", `public, max-age=${marketMaxAge}, s-maxage=${marketMaxAge}`);
     } else if (path.startsWith("/zombies/status")) {
         c.header("Cache-Control", `public, max-age=${zombieStatusMaxAge}, s-maxage=${zombieStatusMaxAge}`);
     } else if (path.startsWith("/rarity/admin/") || path.startsWith("/rarity/listings/stream")) {
@@ -18,7 +27,7 @@ export const cacheHeaders: MiddlewareHandler = async (c, next) => {
         c.header("Cache-Control", "public, max-age=15, s-maxage=30, stale-while-revalidate=120");
     } else if (path.includes("/canvas/info")) {
         c.header("Cache-Control", `public, max-age=${canvasInfoMaxAge}, s-maxage=${canvasInfoMaxAge}`);
-    } else if (path.includes("/owner") || path.startsWith("/holders/")) {
+    } else if (path.includes("/owner") || path.startsWith("/holders/") || path.startsWith("/delegations/")) {
         // Near-realtime mutable data (ownership, action points, level, delegate, paused state)
         c.header("Cache-Control", "public, max-age=10, s-maxage=10");
     } else if (path.includes("/original/") || path.includes("/traits")) {

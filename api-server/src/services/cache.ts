@@ -42,6 +42,11 @@ export interface CanvasInfo {
     customized: boolean;
     delegate: string;
     delegateSetBy: string;
+    gridSize: number;
+    baseCleared: boolean;
+    migrated: boolean;
+    lockedPixels: number;
+    freePixels: number;
 }
 
 export const canvasInfoCache = new LRUCache<number, CanvasInfo>({

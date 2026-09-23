@@ -11,7 +11,7 @@ function ponderHeaders(init: Record<string, string>): Record<string, string> {
         : { ...init };
 }
 
-async function ponderFetch<T>(path: string): Promise<T> {
+export async function ponderFetch<T>(path: string): Promise<T> {
     let res: Response;
     try {
         res = await fetch(`${PONDER_API_URL}${path}`, {
@@ -29,7 +29,7 @@ async function ponderFetch<T>(path: string): Promise<T> {
     return res.json() as Promise<T>;
 }
 
-async function ponderPost<T>(path: string, body: unknown): Promise<T> {
+export async function ponderPost<T>(path: string, body: unknown): Promise<T> {
     let res: Response;
     try {
         res = await fetch(`${PONDER_API_URL}${path}`, {
@@ -74,9 +74,15 @@ async function ponderPut<T>(path: string, body: unknown): Promise<T> {
 // ──────────────────────────────────────────────
 
 export interface BurnCommitmentData {
+    id: string;
     commitId: string;
+    /** 1 = original NormiesCanvas, 2 = NormiesCanvasV2 (Pixel Market). */
+    contractVersion: number;
     owner: string;
+    /** "0" and meaningless when toWallet is true. */
     receiverTokenId: string;
+    /** V2 wallet burn: reward and carried pixels went to the owner's wallet, not a Normie. */
+    toWallet: boolean;
     tokenCount: number;
     transferredActionPoints: string;
     blockNumber: string;
@@ -109,7 +115,10 @@ export interface TransformData {
     transformer: string;
     changeCount: number;
     newPixelCount: number;
-    transformBitmap?: string;
+    transformBitmap?: string | null;
+    gridSize: number;
+    /** True for a version that reset the overlay (no bitmap). */
+    cleared: boolean;
     blockNumber: string;
     timestamp: string;
     txHash: string;
@@ -123,7 +132,13 @@ export interface StatsData {
     totalTokenData: number;
     totalZombies: number;
     totalLegendaryCanvases: number;
+    /** Sum of burn rewards: the action point supply, since only rewards create points. */
     totalActionPointsDistributed: string;
+    /** Points moved from burned Normies to receivers. Not supply. */
+    totalActionPointsCarried: string;
+    pixelSupply: { totalWallet: string; totalAttached: string; totalMigrated: number };
+    market: { volumeWei: string; feesWei: string; pixelsTraded: string; fills: number; listings: number; paused: boolean };
+    totalCanvasSinks: number;
 }
 
 export interface RaritySnapshotToken extends IndexedTokenData {
@@ -192,6 +207,10 @@ export interface IndexedCanvasState {
     delegate: `0x${string}`;
     delegateSetBy: `0x${string}`;
     latestTransformBitmap: `0x${string}` | null;
+    gridSize: number;
+    baseCleared: boolean;
+    migrated: boolean;
+    lockedPixels: number;
     blockNumber: string;
     timestamp: string;
     txHash: `0x${string}`;
@@ -269,6 +288,20 @@ export async function getTokenOwner(tokenId: number): Promise<TokenOwnerData> {
 
 export async function getTokensByHolder(address: string): Promise<string[]> {
     return ponderFetch(`/tokens/${address.toLowerCase()}`);
+}
+
+export interface ActiveDelegation {
+    tokenId: string;
+    owner: `0x${string}`;
+}
+
+/**
+ * Tokens delegated to `address` that NormiesCanvas would still accept an edit
+ * from. The indexer drops delegations whose `delegateSetBy` no longer matches
+ * the current owner, which is how a delegation silently dies on transfer.
+ */
+export async function getActiveDelegations(address: string): Promise<ActiveDelegation[]> {
+    return ponderFetch(`/delegations/${address.toLowerCase()}/active`);
 }
 
 // ──────────────────────────────────────────────
@@ -390,8 +423,17 @@ export async function getBurns(limit = 50, offset = 0): Promise<BurnCommitmentDa
     return ponderFetch(`/burns?limit=${limit}&offset=${offset}`);
 }
 
-export async function getBurnCommitment(commitId: string): Promise<BurnCommitmentDetail> {
-    return ponderFetch(`/burns/${commitId}`);
+export async function getBurnCommitment(commitId: string, version?: 1 | 2): Promise<BurnCommitmentDetail> {
+    return ponderFetch(version ? `/burns/${commitId}?version=${version}` : `/burns/${commitId}`);
+}
+
+export async function getPendingLegacyBurns(owner?: string, limit = 50, offset = 0): Promise<{
+    commitments: BurnCommitmentData[];
+    hasMore: boolean;
+}> {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (owner) params.set("owner", owner.toLowerCase());
+    return ponderFetch(`/burns/pending/legacy?${params.toString()}`);
 }
 
 export async function getBurnsForAddress(address: string, limit = 50, offset = 0): Promise<BurnCommitmentData[]> {

@@ -10,12 +10,16 @@ import { normie } from "./routes/normie.js";
 import { canvas } from "./routes/canvas.js";
 import { history } from "./routes/history.js";
 import { holders } from "./routes/holders.js";
+import { delegations } from "./routes/delegations.js";
 import { docs } from "./routes/docs.js";
 import { llms } from "./routes/llms.js";
 import { agents } from "./routes/agents.js";
 import { zombies } from "./routes/zombies.js";
 import { legendaryCanvas } from "./routes/legendary-canvas.js";
 import { rarity } from "./routes/rarity.js";
+import { pixels } from "./routes/pixels.js";
+import { market } from "./routes/market.js";
+import { revshare } from "./routes/revshare.js";
 
 const app = new Hono();
 
@@ -24,8 +28,12 @@ app.use("*", cors());
 app.use("*", rateLimiter);
 app.use("/normie/*", cacheHeaders);
 app.use("/canvas/*", cacheHeaders);
+app.use("/pixels/*", cacheHeaders);
+app.use("/market/*", cacheHeaders);
+app.use("/revshare/*", cacheHeaders);
 app.use("/history/*", cacheHeaders);
 app.use("/holders/*", cacheHeaders);
+app.use("/delegations/*", cacheHeaders);
 app.use("/zombies/*", cacheHeaders);
 app.use("/legendary-canvas/*", cacheHeaders);
 app.use("/rarity/*", cacheHeaders);
@@ -38,10 +46,14 @@ app.route("/normie", normie);
 app.route("/canvas", canvas);
 app.route("/history", history);
 app.route("/holders", holders);
+app.route("/delegations", delegations);
 app.route("/agents", agents);
 app.route("/zombies", zombies);
 app.route("/legendary-canvas", legendaryCanvas);
 app.route("/rarity", rarity);
+app.route("/pixels", pixels);
+app.route("/market", market);
+app.route("/revshare", revshare);
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 

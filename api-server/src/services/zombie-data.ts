@@ -1,5 +1,6 @@
 import { hexToBytes } from "viem";
 import { countPixels } from "../lib/traits.js";
+import { composite, emptyBitmap, fitToGrid } from "../lib/bitmap.js";
 import type { MetadataAttribute } from "../lib/metadata.js";
 import { ZOMBIE_ENABLED } from "../config.js";
 import { getCanvasInfo, getTransformData } from "./canvas-data.js";
@@ -76,11 +77,19 @@ export async function getBaseImageDataAtBlock(tokenId: number, blockNumber: bigi
     return getImageData(tokenId);
 }
 
+/**
+ * The image as rendered on-chain: the base art (zombie or original, 40x40)
+ * embedded centred into the token's grid, dropped entirely for a blank canvas,
+ * with the overlay XOR'd on top when customized.
+ */
 export async function getActiveImageData(tokenId: number): Promise<Uint8Array> {
-    const [base, canvasInfo] = await Promise.all([
+    const [rawBase, canvasInfo] = await Promise.all([
         getActiveBaseImageData(tokenId),
         getCanvasInfo(tokenId),
     ]);
+    const base = canvasInfo.baseCleared
+        ? emptyBitmap(canvasInfo.gridSize)
+        : fitToGrid(rawBase, canvasInfo.gridSize);
     if (!canvasInfo.customized) return base;
 
     const transform = await getTransformData(tokenId);
@@ -167,8 +176,3 @@ function emptyZombieInfo(tokenId: number): ZombieInfo {
     };
 }
 
-function composite(base: Uint8Array, overlay: Uint8Array): Uint8Array {
-    const result = new Uint8Array(200);
-    for (let i = 0; i < 200; i++) result[i] = base[i]! ^ overlay[i]!;
-    return result;
-}

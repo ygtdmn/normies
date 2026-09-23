@@ -5,9 +5,13 @@ pragma solidity 0.8.33;
 /// @dev Full registry at 0x00000000000076A84feF008CDAbe6409d2FE638B
 interface IDelegateRegistryV1 {
     function checkDelegateForAll(address delegate, address vault) external view returns (bool);
-    function checkDelegateForContract(
+    function checkDelegateForContract(address delegate, address vault, address contract_) external view returns (bool);
+
+    /// @notice True for a token, contract or wallet level delegation from `vault` to `delegate`.
+    function checkDelegateForToken(
         address delegate,
         address vault,
-        address contract_
+        address contract_,
+        uint256 tokenId
     ) external view returns (bool);
 }

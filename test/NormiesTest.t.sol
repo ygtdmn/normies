@@ -666,8 +666,7 @@ contract NormiesTest is Test {
         imageDataArray[2] = _xorEncryptImageData(_createEmptyBitmap(), TEST_REVEAL_HASH);
         traitsArray[2] = DEFAULT_TRAITS ^ bytes8(TEST_REVEAL_HASH);
 
-        bytes memory sig =
-            _signBatchMint(imageDataArray, traitsArray, user, maxMints, block.timestamp + 900);
+        bytes memory sig = _signBatchMint(imageDataArray, traitsArray, user, maxMints, block.timestamp + 900);
 
         vm.prank(user);
         minter.batchMint{ value: MINT_PRICE * count }(
@@ -698,8 +697,7 @@ contract NormiesTest is Test {
             traitsArray[i] = DEFAULT_TRAITS ^ bytes8(TEST_REVEAL_HASH);
         }
 
-        bytes memory sig =
-            _signBatchMint(imageDataArray, traitsArray, user, maxMints, block.timestamp + 900);
+        bytes memory sig = _signBatchMint(imageDataArray, traitsArray, user, maxMints, block.timestamp + 900);
 
         vm.prank(user);
         vm.expectRevert(NormiesMinter.InsufficientPayment.selector);
@@ -723,8 +721,7 @@ contract NormiesTest is Test {
             traitsArray[i] = DEFAULT_TRAITS ^ bytes8(TEST_REVEAL_HASH);
         }
 
-        bytes memory sig =
-            _signBatchMint(imageDataArray, traitsArray, user, maxMints, block.timestamp + 900);
+        bytes memory sig = _signBatchMint(imageDataArray, traitsArray, user, maxMints, block.timestamp + 900);
 
         vm.prank(user);
         vm.expectRevert(NormiesMinter.MintLimitReached.selector);
@@ -764,8 +761,7 @@ contract NormiesTest is Test {
         traitsArray[1] = REAL_TRAITS ^ bytes8(TEST_REVEAL_HASH);
 
         // Sign with wrong private key
-        bytes32 messageHash =
-            keccak256(abi.encode(imageDataArray, traitsArray, user, maxMints, block.timestamp + 900));
+        bytes32 messageHash = keccak256(abi.encode(imageDataArray, traitsArray, user, maxMints, block.timestamp + 900));
         bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(0xDEAD, ethSignedHash);
         bytes memory badSig = abi.encodePacked(r, s, v);
@@ -792,8 +788,7 @@ contract NormiesTest is Test {
         imageDataArray[1] = _xorEncryptImageData(_createRealBitmap(), TEST_REVEAL_HASH);
         traitsArray[1] = REAL_TRAITS ^ bytes8(TEST_REVEAL_HASH);
 
-        bytes memory sig =
-            _signBatchMint(imageDataArray, traitsArray, coldWallet, maxMints, block.timestamp + 900);
+        bytes memory sig = _signBatchMint(imageDataArray, traitsArray, coldWallet, maxMints, block.timestamp + 900);
 
         // Mock delegate.xyz registry
         vm.mockCall(
@@ -824,13 +819,10 @@ contract NormiesTest is Test {
         imageDataArray[0] = _xorEncryptImageData(_createTestBitmap(), TEST_REVEAL_HASH);
         traitsArray[0] = DEFAULT_TRAITS ^ bytes8(TEST_REVEAL_HASH);
 
-        bytes memory sig =
-            _signBatchMint(imageDataArray, traitsArray, user, maxMints, block.timestamp + 900);
+        bytes memory sig = _signBatchMint(imageDataArray, traitsArray, user, maxMints, block.timestamp + 900);
 
         vm.prank(user);
-        minter.batchMint{ value: MINT_PRICE }(
-            user, imageDataArray, traitsArray, maxMints, block.timestamp + 900, sig
-        );
+        minter.batchMint{ value: MINT_PRICE }(user, imageDataArray, traitsArray, maxMints, block.timestamp + 900, sig);
 
         assertEq(normies.totalSupply(), 1);
         assertEq(normies.ownerOf(0), user);
@@ -943,8 +935,7 @@ contract NormiesTest is Test {
             traitsArray[i] = DEFAULT_TRAITS ^ bytes8(TEST_REVEAL_HASH);
         }
 
-        bytes memory sig =
-            _signBatchMint(imageDataArray, traitsArray, user, maxMints, block.timestamp + 900);
+        bytes memory sig = _signBatchMint(imageDataArray, traitsArray, user, maxMints, block.timestamp + 900);
 
         vm.prank(user);
         vm.expectRevert(NormiesMinter.MintingPaused.selector);
@@ -1005,8 +996,7 @@ contract NormiesTest is Test {
             traitsArray[i] = DEFAULT_TRAITS ^ bytes8(TEST_REVEAL_HASH);
         }
 
-        bytes memory batchSig =
-            _signBatchMint(imageDataArray, traitsArray, user, maxMints, block.timestamp + 900);
+        bytes memory batchSig = _signBatchMint(imageDataArray, traitsArray, user, maxMints, block.timestamp + 900);
 
         vm.prank(user);
         minter.batchMint{ value: MINT_PRICE * 2 }(

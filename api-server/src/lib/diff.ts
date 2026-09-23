@@ -1,4 +1,4 @@
-import { GRID_SIZE } from "../config.js";
+import { fitToGrid, gridSizeFromLength } from "./bitmap.js";
 
 export interface PixelCoord {
     x: number;
@@ -6,6 +6,7 @@ export interface PixelCoord {
 }
 
 export interface PixelDiff {
+    gridSize: number;
     added: PixelCoord[];
     removed: PixelCoord[];
     addedCount: number;
@@ -14,24 +15,28 @@ export interface PixelDiff {
 }
 
 /**
- * Compute pixel diff between original and transform bitmaps.
- * - Added: original OFF (0) AND transform ON (1) → pixel turned on by edit
- * - Removed: original ON (1) AND transform ON (1) → pixel turned off by edit
+ * Compute pixel diff between the base art and a transform bitmap.
+ * - Added: base OFF (0) AND transform ON (1) → pixel turned on by edit
+ * - Removed: base ON (1) AND transform ON (1) → pixel turned off by edit
+ * The base is embedded into the transform's grid when it is smaller (a 40x40
+ * original on an enlarged canvas).
  */
 export function computePixelDiff(original: Uint8Array, transform: Uint8Array): PixelDiff {
+    const gridSize = gridSizeFromLength(transform.length);
+    const base = fitToGrid(original, gridSize);
     const added: PixelCoord[] = [];
     const removed: PixelCoord[] = [];
 
-    const totalPixels = GRID_SIZE * GRID_SIZE;
+    const totalPixels = gridSize * gridSize;
     for (let i = 0; i < totalPixels; i++) {
         const byteIndex = i >> 3;
         const bitPos = 7 - (i & 7);
         const transBit = (transform[byteIndex] >> bitPos) & 1;
 
         if (transBit === 1) {
-            const origBit = (original[byteIndex] >> bitPos) & 1;
-            const x = i % GRID_SIZE;
-            const y = Math.floor(i / GRID_SIZE);
+            const origBit = (base[byteIndex] >> bitPos) & 1;
+            const x = i % gridSize;
+            const y = Math.floor(i / gridSize);
             if (origBit === 0) {
                 added.push({ x, y });
             } else {
@@ -41,6 +46,7 @@ export function computePixelDiff(original: Uint8Array, transform: Uint8Array): P
     }
 
     return {
+        gridSize,
         added,
         removed,
         addedCount: added.length,

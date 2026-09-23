@@ -1,40 +1,38 @@
-import { GRID_SIZE, SVG_OUTPUT_SIZE, BG_COLOR, PIXEL_COLOR } from "../config.js";
-import { isPixelOn } from "./pixels.js";
+import { SVG_OUTPUT_SIZE, BG_COLOR, PIXEL_COLOR } from "../config.js";
+import { gridSizeFromLength, isPixelOn } from "./bitmap.js";
 
 /**
- * Generate SVG from 200-byte monochrome bitmap.
- * Mirrors NormiesRendererV3._renderSvg exactly:
- * - viewBox="0 0 40 40", width/height="1000"
+ * Generate SVG from a monochrome bitmap of any supported grid size.
+ * Mirrors NormiesRendererV6._renderSvg:
+ * - viewBox="0 0 n n", width/height fixed to SVG_OUTPUT_SIZE
  * - shape-rendering="crispEdges"
- * - Background rect #e3e5e4, pixel rects #48494b
- * - Row-scan RLE: consecutive "on" pixels merged into wider rects
+ * - Background rect #e3e5e4, one path of horizontal runs in #48494b
  */
 export function renderSvg(imageData: Uint8Array): string {
+    const n = gridSizeFromLength(imageData.length);
     const parts: string[] = [];
 
     parts.push(
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${SVG_OUTPUT_SIZE}" height="${SVG_OUTPUT_SIZE}" viewBox="0 0 ${GRID_SIZE} ${GRID_SIZE}" shape-rendering="crispEdges">`
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${SVG_OUTPUT_SIZE}" height="${SVG_OUTPUT_SIZE}" viewBox="0 0 ${n} ${n}" shape-rendering="crispEdges">`
     );
-    parts.push(`<rect width="${GRID_SIZE}" height="${GRID_SIZE}" fill="${BG_COLOR}"/>`);
+    parts.push(`<rect width="${n}" height="${n}" fill="${BG_COLOR}"/>`);
 
-    for (let y = 0; y < GRID_SIZE; y++) {
+    const runs: string[] = [];
+    for (let y = 0; y < n; y++) {
         let x = 0;
-        while (x < GRID_SIZE) {
-            if (isPixelOn(imageData, x, y)) {
-                const runStart = x;
+        while (x < n) {
+            if (!isPixelOn(imageData, x, y, n)) {
                 x++;
-                while (x < GRID_SIZE && isPixelOn(imageData, x, y)) {
-                    x++;
-                }
-                const width = x - runStart;
-                parts.push(
-                    `<rect x="${runStart}" y="${y}" width="${width}" height="1" fill="${PIXEL_COLOR}"/>`
-                );
-            } else {
-                x++;
+                continue;
             }
+            const runStart = x;
+            x++;
+            while (x < n && isPixelOn(imageData, x, y, n)) x++;
+            const w = x - runStart;
+            runs.push(`M${runStart} ${y}h${w}v1h-${w}z`);
         }
     }
+    if (runs.length > 0) parts.push(`<path fill="${PIXEL_COLOR}" d="${runs.join("")}"/>`);
 
     parts.push("</svg>");
     return parts.join("");

@@ -1,0 +1,54 @@
+{
+  "epochId": "1",
+  "root": "0x156ee36596a8faaf7ebafdbad352169a2b22d78012de03d005a13422e469befc",
+  "total": "1257500042000000001",
+  "leaves": [
+    {
+      "index": 0,
+      "account": "0x00000000000000000000000000000000000000a1",
+      "amount": "1000000000000000000",
+      "proof": [
+        "0xa1650da57142f580a2c8defc42d8790f98a7dfcacae3f3934c3e07d2b6436280",
+        "0x15955ea7676b7f9d67d399be2324b90874af7bf09e73e9ef811ed9a4f7d35d74"
+      ]
+    },
+    {
+      "index": 1,
+      "account": "0x00000000000000000000000000000000000000b2",
+      "amount": "250000000000000000",
+      "proof": [
+        "0x5237277a6835905d604e8a171db0d286c6bb7febbfd5ff43183776b194dc4057",
+        "0x99a59540f57e9f6923d969993f19bbca6461a469cb3c54d7dd292bb26fef4309"
+      ]
+    },
+    {
+      "index": 2,
+      "account": "0x00000000000000000000000000000000000000c3",
+      "amount": "1",
+      "proof": [
+        "0xa236a50bfe87466e1909964afaf6f511310af8caf8beb85491ce67df3fb371e1",
+        "0x99a59540f57e9f6923d969993f19bbca6461a469cb3c54d7dd292bb26fef4309"
+      ]
+    },
+    {
+      "index": 3,
+      "account": "0x00000000000000000000000000000000000000d4",
+      "amount": "42000000000",
+      "proof": [
+        "0x15b925dcdd126efa5ca18364dac25530b99b7d0679150b744a2748b72a21a2e8",
+        "0xde08e4cdc2996228af1be9345e7403edcb667d0d28792a4be70fece5abc9768c",
+        "0x15955ea7676b7f9d67d399be2324b90874af7bf09e73e9ef811ed9a4f7d35d74"
+      ]
+    },
+    {
+      "index": 4,
+      "account": "0x00000000000000000000000000000000000000e5",
+      "amount": "7500000000000000",
+      "proof": [
+        "0x41c90a4f43224fe0f5300a13f7bcd118f3daf617049440dc6f01a80d7bba774b",
+        "0xde08e4cdc2996228af1be9345e7403edcb667d0d28792a4be70fece5abc9768c",
+        "0x15955ea7676b7f9d67d399be2324b90874af7bf09e73e9ef811ed9a4f7d35d74"
+      ]
+    }
+  ]
+}

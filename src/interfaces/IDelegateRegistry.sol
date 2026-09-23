@@ -11,4 +11,13 @@ interface IDelegateRegistry {
         address contract_,
         bytes32 rights
     ) external view returns (bool);
+
+    /// @notice True for a token, contract or wallet level delegation from `from` to `to`.
+    function checkDelegateForERC721(
+        address to,
+        address from,
+        address contract_,
+        uint256 tokenId,
+        bytes32 rights
+    ) external view returns (bool);
 }

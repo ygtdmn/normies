@@ -436,6 +436,9 @@ function buildRarityToken(token: RaritySnapshotToken, agents: ReturnType<typeof 
     attributes.push({ display_type: "number", trait_type: "Pixel Count", value: displayPixelCount(token) });
     attributes.push({ display_type: "number", trait_type: "Action Points", value: canvasInfo.actionPoints });
     attributes.push({ trait_type: "Customized", value: canvasInfo.customized ? "Yes" : "No" });
+    const gridSize = token.canvas?.gridSize ?? 40;
+    attributes.push({ trait_type: "Canvas Size", value: `${gridSize}x${gridSize}` });
+    attributes.push({ trait_type: "Blank Canvas", value: token.canvas?.baseCleared ? "Yes" : "No" });
 
     const agent = agents.byId.get(tokenId);
     const rarityToken: RarityToken = {

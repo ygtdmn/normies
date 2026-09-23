@@ -1,0 +1,12 @@
+# First day of every month at 03:00 UTC. Persistent=true runs a missed epoch at the next boot.
+[Unit]
+Description=Monthly Normies revenue share epoch
+
+[Timer]
+OnCalendar=*-*-01 03:00:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+Unit=normies-revshare.service
+
+[Install]
+WantedBy=timers.target

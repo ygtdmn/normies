@@ -25,6 +25,23 @@ export const ZOMBIE_ENABLED = !!(ZOMBIE_ADDRESS && ZOMBIE_STORAGE_ADDRESS);
 export const LEGENDARY_CANVAS_ADDRESS = process.env.LEGENDARY_CANVAS_ADDRESS as `0x${string}` | undefined;
 export const LEGENDARY_CANVAS_ENABLED = !!LEGENDARY_CANVAS_ADDRESS;
 
+// Pixel Market stack (set all three to enable /pixels, /market and grid-aware canvas status).
+// Pixel balances live in NormiesCanvasStorageV2 next to the overlays.
+export const CANVAS_V2_ADDRESS = process.env.CANVAS_V2_ADDRESS as `0x${string}` | undefined;
+export const CANVAS_STORAGE_V2_ADDRESS = process.env.CANVAS_STORAGE_V2_ADDRESS as `0x${string}` | undefined;
+export const MARKET_ADDRESS = process.env.MARKET_ADDRESS as `0x${string}` | undefined;
+export const PIXEL_MARKET_ENABLED = !!(CANVAS_V2_ADDRESS && CANVAS_STORAGE_V2_ADDRESS && MARKET_ADDRESS);
+
+// Revenue share (NormiesRevenuePool + NormiesRoyaltySplitter). Off when the pool address is unset.
+export const REVENUE_POOL_ADDRESS = process.env.REVENUE_POOL_ADDRESS as `0x${string}` | undefined;
+export const ROYALTY_SPLITTER_ADDRESS = process.env.ROYALTY_SPLITTER_ADDRESS as `0x${string}` | undefined;
+export const REVSHARE_ENABLED = !!(PIXEL_MARKET_ENABLED && REVENUE_POOL_ADDRESS);
+/** Where built epochs (payout tables and proofs) are written and served from. */
+export const REVSHARE_DIR = process.env.REVSHARE_DIR ?? "data/revshare";
+/** First block to scan for ledger BalanceMoved logs (the ledger's deploy block). */
+export const REVSHARE_LEDGER_START_BLOCK = BigInt(process.env.REVSHARE_LEDGER_START_BLOCK ?? process.env.PIXEL_MARKET_START_BLOCK ?? 0);
+export const MARKET_CACHE_TTL_MS = Number(process.env.MARKET_CACHE_TTL_MS ?? 10_000); // 10 seconds
+
 // Cache settings
 export const CACHE_MAX_ENTRIES = Number(process.env.CACHE_MAX_ENTRIES ?? 10_000);
 export const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS ?? 3_600_000); // 1 hour default
@@ -46,7 +63,7 @@ export const OPENSEA_COLLECTION_SLUG = process.env.OPENSEA_COLLECTION_SLUG || "n
 
 // Rate limiting
 export const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
-export const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX ?? 300);
+export const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX ?? 60);
 
 // Internal bypass secret (unset = bypass disabled)
 export const INTERNAL_SECRET = process.env.INTERNAL_SECRET || undefined;
@@ -62,7 +79,8 @@ export const PONDER_API_SECRET = process.env.PONDER_API_SECRET || undefined;
 // NORMIES_ADDRESS/STORAGE_ADDRESS above.
 export const CHAIN_ID = Number(process.env.CHAIN_ID ?? 1);
 
-// SVG constants (matching on-chain renderer exactly)
+// SVG constants (matching on-chain renderer exactly). GRID_SIZE is the base art
+// grid; enlarged canvases (50..80) are inferred from bitmap length, see lib/bitmap.ts.
 export const GRID_SIZE = 40;
 export const SVG_OUTPUT_SIZE = 1000;
 export const PNG_OUTPUT_SIZE = 1000;

@@ -4,7 +4,14 @@ Base URL: `https://api.normies.art`
 
 Normies is a 10,000-token on-chain NFT collection on Ethereum. Token IDs are `0` through `9999`.
 The API serves token rendering, original mint data, Canvas state, burn/customization history,
-zombie state, Legendary Canvas state, ERC-8004 agent metadata, and rarity data.
+zombie state, Legendary Canvas state, ERC-8004 agent metadata, rarity data, and the Pixel Market
+(pixel ledger balances, sell-side listings, fills, and canvas services).
+
+Pixels: burning Normies earns pixels. Pixels sit either attached to a Normie (its painting ceiling,
+reported as `actionPoints`) or in a wallet balance. Attached pixels backing the current overlay are
+`lockedPixels`; the rest are `freePixels` and can be withdrawn to the wallet without a reset.
+Canvases are 40x40 by default and can be enlarged to 50, 60, 70 or 80 pixels per side; a blank
+canvas drops the base art. Bitmaps are `ceil(n*n/8)` bytes (200, 313, 450, 613, 800).
 
 Most mutable data is read from the Ponder indexer rather than from per-request RPC calls.
 
@@ -19,6 +26,7 @@ Route-family defaults:
 - `/rarity/listings/stream`: `no-store`
 - `/canvas/status`: `public, max-age=300, s-maxage=300`
 - `/zombies/status`: `public, max-age=10, s-maxage=10`
+- `/pixels/*`, `/market/*`, `/canvas/sinks`, `/canvas/token/*`: `public, max-age=10, s-maxage=10`
 - Any path containing `/canvas/info`: `public, max-age=60, s-maxage=60`
 - Owner and holder paths: `public, max-age=10, s-maxage=10`
 - Paths containing `/original/` or `/traits`: `public, max-age=300, s-maxage=3600`
@@ -34,6 +42,7 @@ Server-side cache defaults:
 - `CANVAS_STATUS_CACHE_TTL_MS`: 300000 ms / 300 s. Canvas status cache.
 - `ZOMBIE_CACHE_TTL_MS`: 60000 ms / 60 s. Zombie token info and bitmap caches.
 - `ZOMBIE_STATUS_CACHE_TTL_MS`: 10000 ms / 10 s. Zombie status response cache.
+- `MARKET_CACHE_TTL_MS`: 10000 ms / 10 s. Public cache header for Pixel Market listings, balances and sinks.
 - `LEGENDARY_CANVAS_CACHE_TTL_MS`: 60000 ms / 60 s. Legendary Canvas token info cache.
 - `RARITY_CACHE_TTL_MS`: 60000 ms / 60 s. Live and historical rarity collection snapshots; historical cache keeps up to 32 block snapshots.
 - `RARITY_LISTINGS_REFRESH_MS`: 60000 ms / 60 s. OpenSea listing poll interval for rarity listings.
@@ -163,14 +172,113 @@ Active endpoints apply zombie and Canvas state. Original endpoints ignore zombie
   - Cache: `public, max-age=60, s-maxage=300`
 
 - `GET /normie/{id}/canvas/info`
-  - Canvas level, action points, customized flag, delegate, and delegate setter.
+  - Canvas level, action points (pixels attached), customized flag, delegate, delegate setter, `gridSize`, `baseCleared`, `migrated`, `lockedPixels`, and `freePixels`.
   - Cache: `public, max-age=60, s-maxage=60`
 
 ## Canvas
 
 - `GET /canvas/status`
-  - Global Canvas contract status: paused state, max burn percent, tier thresholds, and tier minimum percents.
+  - Global Canvas contract status: paused state, max burn percent, tier thresholds, and tier minimum percents. Once the Pixel Market stack is configured a `pixelMarket` object is added with the V2 canvas and market addresses, cumulative `enlargePrices` for 50/60/70/80, `blankCanvasPrice`, the pixel `treasury`, and the market's `paused`, `feeBps` and `revenueShareBps`.
   - Cache: `public, max-age=300, s-maxage=300`
+
+- `GET /canvas/token/{id}/pixels`
+  - Pixels on one Normie: `attached`, `locked` (backing the overlay), `free` (withdrawable without a reset), `level`, `gridSize`, `baseCleared`, `migrated`, `customized`.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /canvas/token/{id}/activity`
+  - Ledger events that changed the pixels attached to a token (migration, burn rewards, deposits, withdrawals, spends), newest first.
+  - Query: `limit`, `offset`.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /canvas/sinks`
+  - Pixels spent on canvas services: enlargements (`kind=enlarge`, with `fromSize`/`toSize`) and blank canvases (`kind=clearBase`), with `cost`, `source` (`wallet` or `attached`) and the paying wallet.
+  - Query: `tokenId`, `kind`, `limit`, `offset`.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+## Pixels
+
+Wallet-level pixel balances from NormiesCanvasStorageV2. 404 until the Pixel Market stack is configured.
+
+- `GET /pixels/balance/{address}`
+  - Wallet `balance` plus the pixels sitting on the wallet's Normies (`attached`, `locked`, `free`, and a per-token breakdown with `gridSize`, `baseCleared`, `customized`).
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /pixels/holders`
+  - Wallets with a non-zero balance, largest first.
+  - Query: `limit`, `offset`.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /pixels/activity/{address}`
+  - Wallet balance moves involving the address (mints in, moves to and from the market, deposits onto Normies, withdrawals), newest first.
+  - Query: `limit`, `offset`.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /pixels/supply`
+  - `totalWallet`, `totalAttached` (migrated tokens only), `totalMigrated`, and the number of wallets holding pixels.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+## Market
+
+Sell-side order book of the NormiesPixelMarket, ETH priced per pixel. Prices and volumes are wei strings. 404 until the stack is configured.
+
+- `GET /market/status`
+  - Market config from the chain: `paused`, `feeBps`, `revenueShareBps`, plus the canvas service prices.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /market/listings`
+  - Listings with `seller`, `pricePerPixel`, `amount`, `remaining`, `partialFill`, `expiry` (0 = none) and `status`.
+  - Query: `status=active|filled|cancelled|all` (default `active`, expired active listings hidden unless `expired=true`), `seller`, `partial=true|false`, `sort=price-asc|price-desc|amount-desc|newest`, `limit`, `offset`.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /market/listings/{id}`
+  - One listing plus its fills.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /market/depth`
+  - Active listings grouped by price: `remaining`, `listings`, and `partialRemaining` per level, cheapest first.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /market/fills`
+  - Fill feed with `buyer`, `seller`, `amount`, `pricePerPixel`, `grossWei`, `feeWei`.
+  - Query: `limit`, `offset`, `after_timestamp`, `sort=asc|desc`.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /market/fills/address/{address}`
+  - Fills where the address bought or sold.
+  - Query: `limit`, `offset`.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /market/stats`
+  - Totals (`volumeWei`, `feesWei`, `pixelsTraded`, `fills`, `listings`), `activeListings`, `pixelsListed`, `bestAskWei`, `lastPriceWei`, `volume24hWei`, `pixels24h`, fee config and paused flag.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /market/candles`
+  - OHLC in wei per pixel from fills, plus `volumeWei`, `pixels` and `fills` per bucket. Empty buckets are omitted.
+  - Query: `interval=1h|4h|1d` (default `1h`), `limit` 1-1000 (default 168).
+  - Cache: `public, max-age=10, s-maxage=10`
+
+## Revenue share
+
+Half of Pixel Market fees and half of collection royalties go to `NormiesRevenuePool` and are paid to holders in epochs. Payouts are computed off chain from RPC state (wallet score = (Normies held x bracket + weighted #PIXEL) x boost, sampled four times a day and averaged over the epoch) and claimed on chain with Merkle proofs as soon as the owner posts the epoch. 404 while the pool is not configured.
+
+- `GET /revshare/config`
+  - The scoring rules (`brackets`, `ladder`, `boost`, `looseWeight100`, factors, sampling) and their `configHash`, which every posted epoch records on chain.
+
+- `GET /revshare/status`
+  - Pool `balanceWei`, `outstandingWei` (promised to posted epochs), `unallocatedWei` (waiting for the next epoch), windows, `nextEpochId`, totals.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /revshare/epochs`, `GET /revshare/epochs/{id}`
+  - Posted epochs: `root`, `amount`, `claimed`, `claims`, block range, `claimableAt`, fixed `sweepableAt` (earliest sweep time; claims remain open until swept), `status` (`posted`, `cancelled`, `swept`), and whether the payout file is published.
+
+- `GET /revshare/epochs/{id}/proof/{address}`
+  - `index`, `amount` and `proof` for `NormiesRevenuePool.claim(epochId, index, account, amount, proof)`. 404 if the address has no payout.
+
+- `GET /revshare/wallet/{address}`
+  - Live `score`, `sharePpm` and score `breakdown` (a projection of the next epoch, not a payout), `claimable` epochs with proofs, `claimableWei`, and past `claims`.
+
+- `GET /revshare/tiers`
+  - How many scoring wallets sit in each cell of the tier grid (Normie bracket x #PIXEL boost).
 
 ## History
 
@@ -180,7 +288,13 @@ Active endpoints apply zombie and Canvas state. Original endpoints ignore zombie
   - Cache: `public, max-age=60, s-maxage=300`
 
 - `GET /history/burns/{commitId}`
-  - One burn commitment plus burned token details.
+  - One burn commitment plus burned token details. Commit ids restart at 0 on the V2 canvas; every commitment carries `contractVersion` (1 or 2).
+  - Query: `version=1|2` (defaults to the newest configured canvas).
+  - Cache: `public, max-age=60, s-maxage=300`
+
+- `GET /history/burns/pending/legacy`
+  - Original-canvas commitments not yet revealed there. Anyone can reveal them on that canvas; all of them are revealed before it is paused for the Pixel Market cutover.
+  - Query: `owner`, `limit`, `offset`.
   - Cache: `public, max-age=60, s-maxage=300`
 
 - `GET /history/burns/address/{address}`
@@ -216,7 +330,7 @@ Active endpoints apply zombie and Canvas state. Original endpoints ignore zombie
   - Cache: `public, max-age=60, s-maxage=300`
 
 - `GET /history/normie/{id}/versions`
-  - Transform versions for a token with change count, new pixel count, transformer, block, timestamp, and tx hash.
+  - Transform versions for a token, oldest first, with change count, new pixel count, `gridSize`, `cleared` (an overlay reset), transformer, block, timestamp, and tx hash. `version` numbers match `/history/normie/{id}/version/{version}/*`.
   - Query: `limit`, `offset`.
   - Cache: `public, max-age=60, s-maxage=300`
 
@@ -233,13 +347,18 @@ Active endpoints apply zombie and Canvas state. Original endpoints ignore zombie
   - Cache: `public, max-age=60, s-maxage=300`
 
 - `GET /history/stats`
-  - Indexer summary counts for burn commitments, burned tokens, transforms, token data, zombies, Legendary Canvas, and total action points.
+  - Indexer summary counts for burn commitments, burned tokens, transforms, token data, zombies, Legendary Canvas, and total action points, plus `pixelSupply`, `market` totals and `totalCanvasSinks`.
   - Cache: `public, max-age=60, s-maxage=300`
+  - `totalActionPointsDistributed` is the sum of every burn reward, which is the action point supply (points are only created by rewards; a burned Normie's points move to the receiver). `totalActionPointsCarried` is how many points moved that way and is not supply.
 
 ## Holders
 
 - `GET /holders/{address}`
   - Current indexed token IDs held by a wallet.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /delegations/{address}`
+  - Canvas edit rights delegated to a wallet, filtered to the delegations NormiesCanvas still honours. Delegations set by a previous owner are dropped. Returns tokenIds plus an owners map.
   - Cache: `public, max-age=10, s-maxage=10`
 
 ## Zombies
@@ -457,6 +576,16 @@ Historical routes omit OpenSea listings and floor price because those are curren
   - Owner-managed registry of selected Legendary Canvas artist traits.
 - NormiesRendererV5: `0x7c726f02C5e840e1656b522A5C22caaf87C1C35C`
   - V5 renderer: V4-compatible renderer with zombie metadata and art branches.
+
+Pixel Market stack (addresses published at deployment; until then the `/pixels` and `/market` routes return 404):
+- NormiesCanvasV2
+  - Burns, painting, withdraw/deposit of pixels, canvas enlargement and blank canvas. The original NormiesCanvas is paused.
+- NormiesCanvasStorageV2
+  - Overlay bitmaps of any grid size, emitting on every write, falling back to NormiesCanvasStorage for older overlays; and the pixel accounting (wallet and per-Normie balances, copied from NormiesCanvas once at cutover).
+- NormiesPixelMarket
+  - Sell-side order book with partial or all-or-nothing fills and a fee taken out of seller proceeds.
+- NormiesRendererV6
+  - Grid-size aware renderer with Canvas Size and Blank Canvas traits.
 
 ## Status Codes
 

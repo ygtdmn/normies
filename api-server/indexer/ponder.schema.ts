@@ -53,6 +53,10 @@ export const tokenData = onchainTable(
   }),
 );
 
+// Per-token canvas state. `actionPoints` is the pixels attached to the token
+// (V1 reveals accumulate it, V2 ledger events set it outright). `lockedPixels`
+// is the popcount of the latest overlay; `actionPoints - lockedPixels` is what
+// the owner can withdraw without a forced overlay reset.
 export const canvasTokenState = onchainTable(
   "canvas_token_state",
   (t) => ({
@@ -62,18 +66,29 @@ export const canvasTokenState = onchainTable(
     delegate: t.hex().notNull(),
     delegateSetBy: t.hex().notNull(),
     latestTransformBitmap: t.hex(),
+    gridSize: t.integer().notNull().default(40),
+    baseCleared: t.boolean().notNull().default(false),
+    migrated: t.boolean().notNull().default(false),
+    lockedPixels: t.integer().notNull().default(0),
     blockNumber: t.bigint().notNull(),
     timestamp: t.bigint().notNull(),
     txHash: t.hex().notNull(),
   }),
 );
 
+// Burn commitments from both canvas generations. V1 and V2 commit ids both
+// start at 0, so the primary key is `${contractVersion}-${commitId}`.
 export const burnCommitment = onchainTable(
   "burn_commitment",
   (t) => ({
-    commitId: t.bigint().primaryKey(),
+    id: t.text().primaryKey(),
+    commitId: t.bigint().notNull(),
+    contractVersion: t.integer().notNull().default(1),
     owner: t.hex().notNull(),
+    // 0 and meaningless when toWallet is true.
     receiverTokenId: t.bigint().notNull(),
+    // V2 wallet burn: the reward and carried pixels went to the owner's wallet, not a Normie.
+    toWallet: t.boolean().notNull().default(false),
     tokenCount: t.integer().notNull(),
     transferredActionPoints: t.bigint().notNull(),
     pixelCounts: t.text(), // JSON array from commitPixelCounts()
@@ -88,9 +103,11 @@ export const burnCommitment = onchainTable(
     revealTxHash: t.hex(),
   }),
   (table) => ({
+    commitIdx: index().on(table.contractVersion, table.commitId),
     ownerIdx: index().on(table.owner),
     receiverIdx: index().on(table.receiverTokenId),
     txHashIdx: index().on(table.txHash),
+    revealedIdx: index().on(table.revealed),
   }),
 );
 
@@ -107,6 +124,8 @@ export const burnedToken = onchainTable(
   }),
 );
 
+// One row per overlay version. V2 rows are keyed `${txHash}-${tokenId}`
+// (`-clear` suffix for resets); `gridSize` says how to read `transformBitmap`.
 export const pixelTransform = onchainTable(
   "pixel_transform",
   (t) => ({
@@ -116,6 +135,8 @@ export const pixelTransform = onchainTable(
     changeCount: t.integer().notNull(),
     newPixelCount: t.integer().notNull(),
     transformBitmap: t.hex(),
+    gridSize: t.integer().notNull().default(40),
+    cleared: t.boolean().notNull().default(false),
     blockNumber: t.bigint().notNull(),
     timestamp: t.bigint().notNull(),
     txHash: t.hex().notNull(),
@@ -124,6 +145,219 @@ export const pixelTransform = onchainTable(
     tokenIdx: index().on(table.tokenId),
     transformerIdx: index().on(table.transformer),
     timestampIdx: index().on(table.timestamp),
+  }),
+);
+
+// ──────────────────────────────────────────────
+//  Pixel ledger
+// ──────────────────────────────────────────────
+
+export const pixelBalance = onchainTable(
+  "pixel_balance",
+  (t) => ({
+    address: t.hex().primaryKey(),
+    balance: t.bigint().notNull().default(0n),
+    updatedBlock: t.bigint().notNull(),
+  }),
+  (table) => ({
+    balanceIdx: index().on(table.balance),
+  }),
+);
+
+export const pixelLedgerEvent = onchainTable(
+  "pixel_ledger_event",
+  (t) => ({
+    id: t.text().primaryKey(),
+    kind: t.text().notNull(), // "move" | "attached"
+    from: t.hex(),
+    to: t.hex(),
+    tokenId: t.bigint(),
+    amount: t.bigint().notNull(),
+    newAttached: t.bigint(),
+    reason: t.text(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+    txHash: t.hex().notNull(),
+    logIndex: t.integer().notNull(),
+  }),
+  (table) => ({
+    fromIdx: index().on(table.from),
+    toIdx: index().on(table.to),
+    tokenIdx: index().on(table.tokenId),
+    blockIdx: index().on(table.blockNumber),
+  }),
+);
+
+export const pixelSupply = onchainTable(
+  "pixel_supply",
+  (t) => ({
+    id: t.text().primaryKey(),
+    totalWallet: t.bigint().notNull().default(0n),
+    totalAttached: t.bigint().notNull().default(0n),
+    totalMigrated: t.integer().notNull().default(0),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+  }),
+);
+
+// ──────────────────────────────────────────────
+//  Revenue share
+// ──────────────────────────────────────────────
+
+export const revshareEpoch = onchainTable(
+  "revshare_epoch",
+  (t) => ({
+    epochId: t.bigint().primaryKey(),
+    root: t.hex().notNull(),
+    amount: t.bigint().notNull(),
+    claimed: t.bigint().notNull().default(0n),
+    claims: t.integer().notNull().default(0),
+    fromBlock: t.bigint().notNull(),
+    toBlock: t.bigint().notNull(),
+    claimableAt: t.bigint().notNull(),
+    sweepableAt: t.bigint().notNull(),
+    configHash: t.hex().notNull(),
+    dataURI: t.text().notNull(),
+    status: t.text().notNull(), // "posted" | "cancelled" | "swept"
+    sweptAmount: t.bigint(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+    txHash: t.hex().notNull(),
+  }),
+  (table) => ({
+    statusIdx: index().on(table.status),
+  }),
+);
+
+export const revshareClaim = onchainTable(
+  "revshare_claim",
+  (t) => ({
+    id: t.text().primaryKey(), // `${epochId}-${index}`
+    epochId: t.bigint().notNull(),
+    index: t.bigint().notNull(),
+    account: t.hex().notNull(),
+    amount: t.bigint().notNull(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+    txHash: t.hex().notNull(),
+  }),
+  (table) => ({
+    accountIdx: index().on(table.account),
+    epochIdx: index().on(table.epochId),
+  }),
+);
+
+export const revshareRelease = onchainTable("revshare_release", (t) => ({
+  id: t.text().primaryKey(), // `${block}-${logIndex}`
+  toPool: t.bigint().notNull(),
+  toTeam: t.bigint().notNull(),
+  blockNumber: t.bigint().notNull(),
+  timestamp: t.bigint().notNull(),
+  txHash: t.hex().notNull(),
+}));
+
+export const revshareStats = onchainTable("revshare_stats", (t) => ({
+  id: t.text().primaryKey(),
+  epochs: t.integer().notNull().default(0),
+  allocatedWei: t.bigint().notNull().default(0n),
+  claimedWei: t.bigint().notNull().default(0n),
+  sweptWei: t.bigint().notNull().default(0n),
+  royaltiesToPoolWei: t.bigint().notNull().default(0n),
+  blockNumber: t.bigint().notNull(),
+  timestamp: t.bigint().notNull(),
+}));
+
+// ──────────────────────────────────────────────
+//  Pixel market
+// ──────────────────────────────────────────────
+
+export const marketListing = onchainTable(
+  "market_listing",
+  (t) => ({
+    listingId: t.bigint().primaryKey(),
+    seller: t.hex().notNull(),
+    pricePerPixel: t.bigint().notNull(),
+    amount: t.integer().notNull(),
+    remaining: t.integer().notNull(),
+    partialFill: t.boolean().notNull(),
+    expiry: t.bigint().notNull(),
+    status: t.text().notNull(), // "active" | "filled" | "cancelled"
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+    txHash: t.hex().notNull(),
+    updatedBlockNumber: t.bigint().notNull(),
+    updatedTimestamp: t.bigint().notNull(),
+    updatedTxHash: t.hex().notNull(),
+  }),
+  (table) => ({
+    sellerIdx: index().on(table.seller),
+    statusIdx: index().on(table.status),
+    priceIdx: index().on(table.pricePerPixel),
+  }),
+);
+
+export const marketFill = onchainTable(
+  "market_fill",
+  (t) => ({
+    id: t.text().primaryKey(),
+    listingId: t.bigint().notNull(),
+    buyer: t.hex().notNull(),
+    seller: t.hex().notNull(),
+    amount: t.integer().notNull(),
+    pricePerPixel: t.bigint().notNull(),
+    grossWei: t.bigint().notNull(),
+    feeWei: t.bigint().notNull(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+    txHash: t.hex().notNull(),
+    logIndex: t.integer().notNull(),
+  }),
+  (table) => ({
+    listingIdx: index().on(table.listingId),
+    buyerIdx: index().on(table.buyer),
+    sellerIdx: index().on(table.seller),
+    timestampIdx: index().on(table.timestamp),
+  }),
+);
+
+export const marketStats = onchainTable(
+  "market_stats",
+  (t) => ({
+    id: t.text().primaryKey(),
+    volumeWei: t.bigint().notNull().default(0n),
+    feesWei: t.bigint().notNull().default(0n),
+    feesCollectedWei: t.bigint().notNull().default(0n),
+    pixelsTraded: t.bigint().notNull().default(0n),
+    fills: t.integer().notNull().default(0),
+    listings: t.integer().notNull().default(0),
+    feeBps: t.integer().notNull().default(1000),
+    revenueShareBps: t.integer().notNull().default(5000),
+    paused: t.boolean().notNull().default(true),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+  }),
+);
+
+// Pixels spent on canvas services (enlargement, blank canvas).
+export const canvasSinkEvent = onchainTable(
+  "canvas_sink_event",
+  (t) => ({
+    id: t.text().primaryKey(),
+    tokenId: t.bigint().notNull(),
+    kind: t.text().notNull(), // "enlarge" | "clearBase"
+    fromSize: t.integer(),
+    toSize: t.integer(),
+    cost: t.bigint().notNull(),
+    source: t.text().notNull(), // "wallet" | "attached"
+    by: t.hex().notNull(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+    txHash: t.hex().notNull(),
+  }),
+  (table) => ({
+    tokenIdx: index().on(table.tokenId),
+    kindIdx: index().on(table.kind),
+    blockIdx: index().on(table.blockNumber),
   }),
 );
 
@@ -250,17 +484,6 @@ export const legendaryCanvasTraitEvent = onchainTable(
     tokenBlockIdx: index().on(table.tokenId, table.blockNumber),
     blockIdx: index().on(table.blockNumber),
     activeIdx: index().on(table.isLegendary),
-  }),
-);
-
-export const rarityLegendaryConfig = onchainTable(
-  "rarity_legendary_config",
-  (t) => ({
-    id: t.text().primaryKey(),
-    currentJson: t.text().notNull(),
-    upcomingJson: t.text().notNull(),
-    updatedAt: t.bigint().notNull(),
-    updatedBy: t.text(),
   }),
 );
 

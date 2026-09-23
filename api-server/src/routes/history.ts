@@ -5,8 +5,10 @@ import { imageDataToPixelString } from "../lib/pixels.js";
 import { renderSvg } from "../lib/svg.js";
 import { svgToPng } from "../lib/png.js";
 import { countPixels } from "../lib/traits.js";
+import { composite, emptyBitmap, fitToGrid } from "../lib/bitmap.js";
 import { getImageData } from "../services/token-data.js";
 import { getBaseImageDataAtBlock, getZombieInfo } from "../services/zombie-data.js";
+import { getBaseClearedBlock } from "../services/canvas-data.js";
 import {
     getBurns,
     getBurnCommitment,
@@ -14,10 +16,12 @@ import {
     getBurnsForReceiver,
     getBurnedTokens,
     getBurnedToken,
+    getPendingLegacyBurns,
     getTransformHistory,
     getTransformVersion,
     getCustomizedEvents,
     getStats,
+    type TransformData,
 } from "../services/ponder-data.js";
 
 const history = new Hono();
@@ -40,12 +44,30 @@ function parseTimestampQuery(c: { req: { query: (key: string) => string | undefi
     }
 }
 
-function compositeBuffers(original: Uint8Array, transform: Uint8Array): Uint8Array {
-    const result = new Uint8Array(200);
-    for (let i = 0; i < 200; i++) {
-        result[i] = original[i] ^ transform[i];
-    }
-    return result;
+/**
+ * Rebuilds the image of one overlay version: the base art as it stood at that
+ * block (zombie or original), embedded into the version's grid, dropped when
+ * the base had already been cleared, with the version's overlay on top. A
+ * cleared version has no overlay and shows the base alone.
+ */
+async function compositeVersion(tokenId: number, transform: TransformData): Promise<Uint8Array> {
+    const gridSize = transform.gridSize ?? 40;
+    const block = BigInt(transform.blockNumber);
+    const [rawBase, clearedAt] = await Promise.all([
+        getBaseImageDataAtBlock(tokenId, block),
+        getBaseClearedBlock(tokenId),
+    ]);
+    const base = clearedAt !== null && block >= clearedAt ? emptyBitmap(gridSize) : fitToGrid(rawBase, gridSize);
+    if (transform.cleared || !transform.transformBitmap) return base;
+    return composite(base, fitToGrid(hexToBytes(transform.transformBitmap as `0x${string}`), gridSize));
+}
+
+function parseVersionQuery(c: { req: { query: (key: string) => string | undefined } }): 1 | 2 | undefined | { error: string } {
+    const raw = c.req.query("version");
+    if (raw === undefined) return undefined;
+    if (raw === "1") return 1;
+    if (raw === "2") return 2;
+    return { error: "version must be 1 or 2" };
 }
 
 // ──────────────────────────────────────────────
@@ -58,8 +80,23 @@ history.get("/burns", async (c) => {
     return c.json(burns);
 });
 
+// Original-canvas commitments not yet revealed there. They must all be revealed (anyone can)
+// before that canvas is paused for the cutover.
+history.get("/burns/pending/legacy", async (c) => {
+    const { limit, offset } = parsePagination(c);
+    const owner = c.req.query("owner");
+    if (owner !== undefined && !/^0x[0-9a-fA-F]{40}$/.test(owner)) {
+        return c.json({ error: "Invalid owner address" }, 400);
+    }
+    return c.json(await getPendingLegacyBurns(owner, limit, offset));
+});
+
+// Commit ids restart at 0 on the V2 canvas; `?version=1|2` picks the generation
+// (defaults to the newest one the indexer is configured with).
 history.get("/burns/:commitId", async (c) => {
-    const commitment = await getBurnCommitment(c.req.param("commitId"));
+    const version = parseVersionQuery(c);
+    if (version && typeof version === "object") return c.json(version, 400);
+    const commitment = await getBurnCommitment(c.req.param("commitId"), version);
     return c.json(commitment);
 });
 
@@ -140,6 +177,8 @@ history.get("/normie/:id/versions", async (c) => {
     const result = parseTokenId(c.req.param("id"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const { limit, offset } = parsePagination(c);
+    // Versions are numbered oldest-first (0 = first overlay ever written), so
+    // `version` here is exactly what /version/:version/* accepts.
     const transforms = await getTransformHistory(result.tokenId, limit, offset, true);
     // Warm the zombie-info cache once so the per-version base lookups below
     // share a single fetch instead of racing cold-cache reads under Promise.all.
@@ -151,14 +190,11 @@ history.get("/normie/:id/versions", async (c) => {
             // The on-chain `newPixelCount` is counted against the original mint
             // art even for zombies; recount against the active (zombie/era) base
             // so the figure matches the actually-rendered image for this version.
-            newPixelCount: t.transformBitmap
-                ? countPixels(
-                    compositeBuffers(
-                        await getBaseImageDataAtBlock(result.tokenId, BigInt(t.blockNumber)),
-                        hexToBytes(t.transformBitmap as `0x${string}`),
-                    ),
-                )
+            newPixelCount: t.transformBitmap || t.cleared
+                ? countPixels(await compositeVersion(result.tokenId, t))
                 : t.newPixelCount,
+            gridSize: t.gridSize ?? 40,
+            cleared: t.cleared ?? false,
             transformer: t.transformer,
             blockNumber: t.blockNumber,
             timestamp: t.timestamp,
@@ -174,14 +210,11 @@ history.get("/normie/:id/version/:version/pixels", async (c) => {
     const version = Number(c.req.param("version"));
 
     const transform = await getTransformVersion(result.tokenId, version);
-    if (!transform.transformBitmap) {
+    if (!transform.transformBitmap && !transform.cleared) {
         return c.json({ error: "Transform bitmap not available for this version" }, 404);
     }
 
-    const base = await getBaseImageDataAtBlock(result.tokenId, BigInt(transform.blockNumber));
-    const transformBytes = hexToBytes(transform.transformBitmap as `0x${string}`);
-    const composited = compositeBuffers(base, transformBytes);
-    const pixels = imageDataToPixelString(composited);
+    const pixels = imageDataToPixelString(await compositeVersion(result.tokenId, transform));
     return c.text(pixels);
 });
 
@@ -191,14 +224,11 @@ history.get("/normie/:id/version/:version/image.svg", async (c) => {
     const version = Number(c.req.param("version"));
 
     const transform = await getTransformVersion(result.tokenId, version);
-    if (!transform.transformBitmap) {
+    if (!transform.transformBitmap && !transform.cleared) {
         return c.json({ error: "Transform bitmap not available for this version" }, 404);
     }
 
-    const base = await getBaseImageDataAtBlock(result.tokenId, BigInt(transform.blockNumber));
-    const transformBytes = hexToBytes(transform.transformBitmap as `0x${string}`);
-    const composited = compositeBuffers(base, transformBytes);
-    const svg = renderSvg(composited);
+    const svg = renderSvg(await compositeVersion(result.tokenId, transform));
     return c.body(svg, 200, { "Content-Type": "image/svg+xml" });
 });
 
@@ -208,14 +238,11 @@ history.get("/normie/:id/version/:version/image.png", async (c) => {
     const version = Number(c.req.param("version"));
 
     const transform = await getTransformVersion(result.tokenId, version);
-    if (!transform.transformBitmap) {
+    if (!transform.transformBitmap && !transform.cleared) {
         return c.json({ error: "Transform bitmap not available for this version" }, 404);
     }
 
-    const base = await getBaseImageDataAtBlock(result.tokenId, BigInt(transform.blockNumber));
-    const transformBytes = hexToBytes(transform.transformBitmap as `0x${string}`);
-    const composited = compositeBuffers(base, transformBytes);
-    const svg = renderSvg(composited);
+    const svg = renderSvg(await compositeVersion(result.tokenId, transform));
     const png = svgToPng(svg);
     return new Response(png, { status: 200, headers: { "Content-Type": "image/png" } });
 });

@@ -10,8 +10,7 @@ import { INormiesRenderer } from "../src/interfaces/INormiesRenderer.sol";
 contract WireLegendaryCanvas is Script {
     function run() public {
         NormiesRendererV5 renderer = NormiesRendererV5(vm.envAddress("RENDERER_V5_ADDRESS"));
-        INormiesLegendaryCanvas legendaryCanvas =
-            INormiesLegendaryCanvas(vm.envAddress("LEGENDARY_CANVAS_ADDRESS"));
+        INormiesLegendaryCanvas legendaryCanvas = INormiesLegendaryCanvas(vm.envAddress("LEGENDARY_CANVAS_ADDRESS"));
 
         vm.startBroadcast();
 
