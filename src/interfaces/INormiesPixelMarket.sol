@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
+import { INormiesCanvasStorageV2 } from "./INormiesCanvasStorageV2.sol";
+
 interface INormiesPixelMarket {
     enum Status {
         None,
@@ -37,4 +39,21 @@ interface INormiesPixelMarket {
     function cancel(uint256 listingId) external;
     function reclaimExpired(uint256 listingId) external;
     function getListing(uint256 listingId) external view returns (Listing memory);
+
+    // State
+    function MAX_FEE_BPS() external view returns (uint256);
+    function pixels() external view returns (INormiesCanvasStorageV2);
+    function nextListingId() external view returns (uint256);
+    function feeBps() external view returns (uint16);
+    function revenueShareBps() external view returns (uint16);
+    function minPricePerPixel() external view returns (uint96);
+    function treasuryRecipient() external view returns (address);
+    function revenueShareRecipient() external view returns (address);
+    function paused() external view returns (bool);
+
+    // Admin: config (floor, fees), owner (recipients), guardian (pause)
+    function setMinPricePerPixel(uint96 _minPricePerPixel) external;
+    function setFeeConfig(uint16 _feeBps, uint16 _revenueShareBps) external;
+    function setFeeRecipients(address _treasury, address _revenueShare) external;
+    function setPaused(bool _paused) external;
 }

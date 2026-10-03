@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import { INormiesCanvasStorage } from "./INormiesCanvasStorage.sol";
+import { INormiesCanvasV1 } from "./INormiesCanvasV1.sol";
 
 interface INormiesCanvasStorageV2 is INormiesCanvasStorage {
     /// @notice Why an attached balance changed. Emitted with every AttachedChanged event.
@@ -14,8 +15,22 @@ interface INormiesCanvasStorageV2 is INormiesCanvasStorage {
         Spend
     }
 
+    // Mover roles (bits for setMoverRoles) and the wallet cooldown bounds
+    function ROLE_CANVAS() external view returns (uint8);
+    function ROLE_MARKET() external view returns (uint8);
+    function ROLE_WRAPPER() external view returns (uint8);
+    function DEFAULT_COOLDOWN() external view returns (uint64);
+    function MAX_COOLDOWN() external view returns (uint64);
+
+    // The original canvas and its storage, read once by the migration
+    function legacyStorage() external view returns (INormiesCanvasStorage);
+    function legacyCanvas() external view returns (INormiesCanvasV1);
+
     // Overlays
+    function authorizedWriters(address writer) external view returns (bool);
+    function setAuthorizedWriter(address writer, bool allowed) external;
     function clearTransformedImageData(uint256 tokenId) external;
+    function isOwnedHere(uint256 tokenId) external view returns (bool);
 
     // Per-token canvas state (grid size, blank base, delegate); written by the canvas, read by the renderer
     function gridSize(uint256 tokenId) external view returns (uint256);
@@ -52,6 +67,13 @@ interface INormiesCanvasStorageV2 is INormiesCanvasStorage {
     function totalWallet() external view returns (uint256);
     function totalAttached() external view returns (uint256);
     function moverRoles(address mover) external view returns (uint8);
+    function setMoverRoles(address mover, uint8 roles) external;
+
+    // Cooldown on pixels arriving in a wallet
+    function lockedBalance(address account) external view returns (uint256);
+    function unlockAt(address account) external view returns (uint64);
+    function cooldownOf(address account) external view returns (uint64);
+    function setCooldown(address account, uint64 cooldown) external;
 
     function migrateBatch(uint256[] calldata tokenIds) external;
     function finalizeMigration(uint256 expectedTotalAttached) external;

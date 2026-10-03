@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
-import { INormiesRenderer } from "./interfaces/INormiesRenderer.sol";
+import { INormiesRendererV6 } from "./interfaces/INormiesRendererV6.sol";
 import { INormiesStorage } from "./interfaces/INormiesStorage.sol";
 import { INormiesCanvasStorageV2 } from "./interfaces/INormiesCanvasStorageV2.sol";
 import { INormiesZombie } from "./interfaces/INormiesZombie.sol";
@@ -21,7 +21,7 @@ import { Lifebuoy } from "solady/utils/Lifebuoy.sol";
  * @dev V5 renderer made grid-size aware: the base art (original or zombie) is embedded centred into the token's
  *      canvas, a blank canvas drops the base art, and the SVG is a single path of row runs.
  */
-contract NormiesRendererV6 is INormiesRenderer, Ownable, Lifebuoy {
+contract NormiesRendererV6 is INormiesRendererV6, Ownable, Lifebuoy {
     using LibString for uint256;
     using DynamicBufferLib for DynamicBufferLib.DynamicBuffer;
 

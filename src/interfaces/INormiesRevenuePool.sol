@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
+import { IWETH } from "./IWETH.sol";
+
 interface INormiesRevenuePool {
     enum Status {
         None,
@@ -49,4 +51,18 @@ interface INormiesRevenuePool {
     function unallocated() external view returns (uint256);
     function outstanding() external view returns (uint256);
     function nextEpochId() external view returns (uint256);
+    function cursorToBlock() external view returns (uint64);
+    function weth() external view returns (IWETH);
+
+    // Timing: claims open POST_DELAY after a post; each epoch keeps the claim window it was posted with
+    function POST_DELAY() external view returns (uint64);
+    function MIN_CLAIM_WINDOW() external view returns (uint64);
+    function claimWindow() external view returns (uint64);
+    function paused() external view returns (bool);
+
+    // Admin: config (claim window), guardian (pause posting), owner (unreserved ETH, stray tokens)
+    function setClaimWindow(uint64 _claimWindow) external;
+    function setPaused(bool _paused) external;
+    function withdrawUnallocated(address to, uint256 amount) external;
+    function rescueToken(address token, address to) external;
 }
