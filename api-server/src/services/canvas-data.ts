@@ -68,16 +68,16 @@ const CanvasABI = [
         outputs: [{ name: "", type: "uint256" }],
         stateMutability: "view",
     },
+] as const;
+
+const MarketABI = [
     {
         type: "function",
-        name: "treasury",
+        name: "treasuryRecipient",
         inputs: [],
         outputs: [{ name: "", type: "address" }],
         stateMutability: "view",
     },
-] as const;
-
-const MarketABI = [
     {
         type: "function",
         name: "paused",
@@ -263,7 +263,8 @@ export async function getCanvasStatus(): Promise<CanvasStatus> {
                 { address: CANVAS_V2_ADDRESS!, abi: CanvasABI, functionName: "enlargePrice", args: [70n] },
                 { address: CANVAS_V2_ADDRESS!, abi: CanvasABI, functionName: "enlargePrice", args: [80n] },
                 { address: CANVAS_V2_ADDRESS!, abi: CanvasABI, functionName: "blankCanvasPrice" },
-                { address: CANVAS_V2_ADDRESS!, abi: CanvasABI, functionName: "treasury" },
+                // The fee treasury lives on the market; the canvas has none.
+                { address: MARKET_ADDRESS!, abi: MarketABI, functionName: "treasuryRecipient" },
                 { address: MARKET_ADDRESS!, abi: MarketABI, functionName: "paused" },
                 { address: MARKET_ADDRESS!, abi: MarketABI, functionName: "feeBps" },
                 { address: MARKET_ADDRESS!, abi: MarketABI, functionName: "revenueShareBps" },
