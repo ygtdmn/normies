@@ -54,7 +54,7 @@ interface INormiesCanvasStorageV2 is INormiesCanvasStorage {
     function moverRoles(address mover) external view returns (uint8);
 
     function migrateBatch(uint256[] calldata tokenIds) external;
-    function finalizeMigration() external;
+    function finalizeMigration(uint256 expectedTotalAttached) external;
     function mintTo(address to, uint256 amount) external;
     function burnFrom(address from, uint256 amount) external;
     function moveBalance(address from, address to, uint256 amount) external;

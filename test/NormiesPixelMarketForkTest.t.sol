@@ -66,7 +66,7 @@ contract NormiesPixelMarketForkTest is Test {
             ids[i] = i;
         }
         storageV2.migrateBatch(ids);
-        storageV2.finalizeMigration();
+        storageV2.finalizeMigration(storageV2.totalAttached());
         storageV2.seedAndFinalizeDelegations(
             new uint256[](0), new address[](0), new address[](0), block.number, block.timestamp
         );

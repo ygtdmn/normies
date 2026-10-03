@@ -28,7 +28,7 @@ contract AuditSecurityTest is PixelMarketBase {
         ids[0] = 1;
         ds[0] = d;
         owners[0] = setBy;
-        if (!storageV2.migrationFinalized()) storageV2.finalizeMigration();
+        if (!storageV2.migrationFinalized()) storageV2.finalizeMigration(storageV2.totalAttached());
         // Read the flag above first, so an expectRevert set by the caller lands on the copy itself.
         storageV2.seedAndFinalizeDelegations(ids, ds, owners, block.number, block.timestamp);
     }

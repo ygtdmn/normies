@@ -210,19 +210,24 @@ contract NormiesPixelAccountingTest is PixelMarketBase {
     function testFinalizeClosesMigration() public {
         vm.prank(unauthorized);
         vm.expectRevert(Ownable.Unauthorized.selector);
-        storageV2.finalizeMigration();
+        storageV2.finalizeMigration(0);
 
         uint256 got = _earnOnV1(user, 1, 48);
+        uint256 more = _earnOnV1(user, 2, 48);
         storageV2.migrateBatch(_ids(1));
+        // A partial copy cannot be sealed: token 2 is still on the original canvas (audit C-M4).
+        vm.expectRevert(abi.encodeWithSelector(NormiesCanvasStorageV2.MigrationTotalMismatch.selector, got + more, got));
+        storageV2.finalizeMigration(got + more);
+        storageV2.migrateBatch(_ids(2));
         vm.expectEmit(false, false, false, true);
-        emit NormiesCanvasStorageV2.MigrationFinalized(got);
-        storageV2.finalizeMigration();
+        emit NormiesCanvasStorageV2.MigrationFinalized(got + more);
+        storageV2.finalizeMigration(got + more);
         assertTrue(storageV2.migrationFinalized());
 
         vm.expectRevert(NormiesCanvasStorageV2.MigrationClosed.selector);
-        storageV2.migrateBatch(_ids(2));
+        storageV2.migrateBatch(_ids(3));
         vm.expectRevert(NormiesCanvasStorageV2.MigrationClosed.selector);
-        storageV2.finalizeMigration();
+        storageV2.finalizeMigration(got + more);
     }
 
     // ──────────────────────────────────────────────
@@ -245,7 +250,7 @@ contract NormiesPixelAccountingTest is PixelMarketBase {
         vm.expectRevert(NormiesPixelMarket.MigrationNotFinalized.selector);
         market.setPaused(false);
 
-        storageV2.finalizeMigration();
+        storageV2.finalizeMigration(storageV2.totalAttached());
         market.setPaused(false); // the market only needs the balances
         vm.expectRevert(NormiesCanvasV2.MigrationNotFinalized.selector);
         canvas.setPaused(false); // the canvas also needs the delegations
@@ -281,7 +286,7 @@ contract NormiesPixelAccountingTest is PixelMarketBase {
         (ids[0], ds[0], sbs[0]) = (1, delegate_, user); // live: set by the current owner
         (ids[1], ds[1], sbs[1]) = (2, delegate_, user); // stale: set by someone who no longer owns #2
 
-        storageV2.finalizeMigration();
+        storageV2.finalizeMigration(storageV2.totalAttached());
         vm.prank(unauthorized);
         vm.expectRevert(Ownable.Unauthorized.selector);
         storageV2.seedAndFinalizeDelegations(ids, ds, sbs, block.number, block.timestamp);
@@ -311,7 +316,7 @@ contract NormiesPixelAccountingTest is PixelMarketBase {
 
     function testDelegationCopyIsOneShot() public {
         (uint256[] memory ids, address[] memory ds, address[] memory sbs) = _one(1, delegate_, user);
-        storageV2.finalizeMigration();
+        storageV2.finalizeMigration(storageV2.totalAttached());
         vm.expectRevert(NormiesCanvasStorageV2.LengthMismatch.selector);
         storageV2.seedAndFinalizeDelegations(ids, ds, new address[](0), block.number, block.timestamp);
         assertFalse(storageV2.delegationsSeeded());

@@ -58,7 +58,7 @@ contract CurrentDefaultsForkReviewTest is Test {
             ids[i] = i;
         }
         pixels.migrateBatch(ids);
-        pixels.finalizeMigration();
+        pixels.finalizeMigration(pixels.totalAttached());
         pixels.seedAndFinalizeDelegations(
             new uint256[](0), new address[](0), new address[](0), block.number, block.timestamp
         );

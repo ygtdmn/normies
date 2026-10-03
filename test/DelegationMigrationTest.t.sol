@@ -66,7 +66,7 @@ contract DelegationMigrationTest is PixelMarketBase {
     }
 
     function _snapshot() internal returns (DelegationSnapshot.Snapshot memory) {
-        storageV2.finalizeMigration();
+        storageV2.finalizeMigration(storageV2.totalAttached());
         return script.snapshot(storageV2);
     }
 
@@ -149,7 +149,7 @@ contract DelegationMigrationTest is PixelMarketBase {
     function testSnapshotRequiresPausedLegacyAndFinalizedBalances() public {
         vm.expectRevert("finalize the balance migration first");
         script.snapshot(storageV2);
-        storageV2.finalizeMigration();
+        storageV2.finalizeMigration(storageV2.totalAttached());
         canvasV1.setPaused(false);
         vm.expectRevert("pause the original canvas before migration");
         script.snapshot(storageV2);
@@ -163,7 +163,7 @@ contract DelegationMigrationTest is PixelMarketBase {
         storageV2.seedAndFinalizeDelegations(ids, ds, ds, 100, block.timestamp);
         vm.expectRevert(NormiesCanvasStorageV2.MigrationNotFinalized.selector);
         storageV2.seedAndFinalizeDelegations(ids, ds, ds, 100, block.timestamp);
-        storageV2.finalizeMigration();
+        storageV2.finalizeMigration(storageV2.totalAttached());
         canvasV1.setPaused(false);
         vm.expectRevert(NormiesCanvasStorageV2.LegacyCanvasNotPaused.selector);
         storageV2.seedAndFinalizeDelegations(ids, ds, ds, 100, block.timestamp);
@@ -176,7 +176,7 @@ contract DelegationMigrationTest is PixelMarketBase {
     }
 
     function testOutOfGasRollsBackEverySeedAndLeavesMigrationOpen() public {
-        storageV2.finalizeMigration();
+        storageV2.finalizeMigration(storageV2.totalAttached());
         uint256[] memory ids = new uint256[](4);
         address[] memory ds = new address[](4);
         address[] memory owners = new address[](4);
@@ -202,7 +202,7 @@ contract DelegationMigrationTest is PixelMarketBase {
     function testMalformedSnapshotDoesNotWriteOrSeal() public {
         uint256[] memory ids = new uint256[](1);
         address[] memory ds = new address[](0);
-        storageV2.finalizeMigration();
+        storageV2.finalizeMigration(storageV2.totalAttached());
         vm.expectRevert(NormiesCanvasStorageV2.LengthMismatch.selector);
         storageV2.seedAndFinalizeDelegations(ids, ds, ds, block.number, block.timestamp);
         assertFalse(storageV2.delegationsSeeded());
@@ -224,7 +224,7 @@ contract DelegationMigrationForkTest is Test {
         vm.prank(v1.owner());
         v1.setPaused(true);
         // This fixture tests delegation migration after the independent balance stage.
-        v2.finalizeMigration();
+        v2.finalizeMigration(v2.totalAttached());
         DelegationSnapshot script = new DelegationSnapshot();
         DelegationSnapshot.Snapshot memory s = script.snapshot(v2);
         uint256 beforeGas = gasleft();

@@ -174,9 +174,12 @@ Order matters. Do not deploy before pausing V1.
    the deployer,
    `forge script script/MigrateLegacy.s.sol --rpc-url mainnet --broadcast` with
    `CANVAS_STORAGE_V2_ADDRESS`: it refuses while any V1 commitment is unrevealed, pauses V1 itself if
-   needed (then stops; rerun), scans all 10,000 ids (or the `TOKEN_IDS` you pass), copies every nonzero V1
-   balance into storage V2 in batches of `BATCH` (storage V2 reads V1 itself) and finalizes. Check `storageV2.totalAttached()`
-   equals the sum of V1 `actionPoints` (37,805 at block 25,999,628) and `migrationFinalized() == true`.
+   needed (then stops; rerun), scans all 10,000 ids, copies every nonzero V1
+   balance into storage V2 in batches of `BATCH` (storage V2 reads V1 itself) and finalizes. Finalizing is a hard
+   gate (audit C-M4): the script sums V1 `actionPoints` over every id and `finalizeMigration(expected)` refuses
+   unless `storageV2.totalAttached()` equals exactly that sum (37,805 at block 25,999,628; 40,315 at block
+   26,107,972). On mainnet the script refuses `TOKEN_IDS` and any `MAX_TOKEN_ID` below 9999, so the sum always
+   covers every id. Check the printed total and `migrationFinalized() == true`.
    Then, in `api-server`, `pnpm cutover:delegations --dry-run` and, when the list looks right,
    `pnpm cutover:delegations` with `RPC_URL`, `CHAIN_ID=1`, `CANVAS_STORAGE_V2_ADDRESS` and `PRIVATE_KEY`
    (the storage owner, still the deployer at this point; run it on the same workstation and do not leave the key

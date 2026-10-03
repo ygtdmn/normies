@@ -14,10 +14,14 @@ import { NormiesCanvas } from "../src/NormiesCanvas.sol";
  *         Run once, right after the original canvas is paused, from the storage owner. Idempotent: tokens already
  *         copied are skipped, and FINALIZE=false leaves the migration open for another pass.
  *
+ *         Finalizing is a hard gate (audit C-M4): the script sums the original action points over the whole scan,
+ *         copied or not, and storage V2 refuses to seal unless it holds exactly that. On mainnet the scan cannot be
+ *         shortened: TOKEN_IDS and a MAX_TOKEN_ID below 9999 are refused, so the total always covers every id.
+ *
  * Env: CANVAS_STORAGE_V2_ADDRESS; optional MAX_TOKEN_ID (9999), BATCH (150), FINALIZE (true), and TOKEN_IDS, a
  *      comma-separated candidate list (for example every receiver of a V1 BurnRevealed event) that replaces the
- *      full scan; each candidate is still read from V1 on chain, so a wrong list can only miss tokens, never
- *      invent balances.
+ *      full scan on a local fork; each candidate is still read from V1 on chain, so a wrong list can only miss
+ *      tokens, never invent balances.
  */
 contract MigrateLegacy is Script {
     function run() public {
@@ -42,6 +46,10 @@ contract MigrateLegacy is Script {
         }
 
         uint256[] memory candidates = vm.envOr("TOKEN_IDS", ",", new uint256[](0));
+        if (block.chainid == 1) {
+            require(candidates.length == 0, "TOKEN_IDS is for local forks only: mainnet scans every id (audit C-M4)");
+            require(maxId >= 9999, "MAX_TOKEN_ID must cover every id (9999) on mainnet (audit C-M4)");
+        }
         if (candidates.length == 0) {
             candidates = new uint256[](maxId + 1);
             for (uint256 id; id <= maxId; id++) {
@@ -51,15 +59,18 @@ contract MigrateLegacy is Script {
         uint256[] memory pending = new uint256[](candidates.length);
         uint256 n;
         uint256 total;
+        // What storage V2 must hold once the copy is complete: every original balance in the scan, copied or not.
+        uint256 expected;
         for (uint256 c; c < candidates.length; c++) {
             uint256 id = candidates[c];
-            if (pixels.migrated(id)) continue;
             uint256 legacy = pixels.legacyCanvas().actionPoints(id);
-            if (legacy == 0) continue;
+            expected += legacy;
+            if (pixels.migrated(id) || legacy == 0) continue;
             pending[n++] = id;
             total += legacy;
         }
         console.log("tokens to migrate:", n, "pixels:", total);
+        console.log("original total (the finalize gate):", expected);
 
         vm.startBroadcast();
         for (uint256 start; start < n; start += batch) {
@@ -70,7 +81,7 @@ contract MigrateLegacy is Script {
             }
             pixels.migrateBatch(ids);
         }
-        if (finalize) pixels.finalizeMigration();
+        if (finalize) pixels.finalizeMigration(expected);
         vm.stopBroadcast();
 
         console.log("storage totalAttached:", pixels.totalAttached(), "finalized:", pixels.migrationFinalized());

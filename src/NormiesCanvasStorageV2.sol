@@ -47,6 +47,7 @@ contract NormiesCanvasStorageV2 is INormiesCanvasStorageV2, NormiesAccess, Lifeb
     error InvalidSnapshot();
     error LengthMismatch();
     error AllowancesPaused();
+    error MigrationTotalMismatch(uint256 expected, uint256 actual);
     error PixelsCoolingDown(address account, uint256 available, uint256 needed, uint64 unlockAt);
     error CooldownTooLong(uint64 cooldown, uint64 max);
 
@@ -343,9 +344,14 @@ contract NormiesCanvasStorageV2 is INormiesCanvasStorageV2, NormiesAccess, Lifeb
         }
     }
 
-    /// @notice Ends the copy. Irreversible.
-    function finalizeMigration() external onlyOwner {
+    /**
+     * @notice Ends the copy. Irreversible, so it is a hard gate (audit C-M4): it only goes through when storage V2
+     *         holds exactly `expectedTotalAttached`, the sum of the original canvas's action points over every id,
+     *         read from it after it was paused. A partial copy cannot be sealed by mistake.
+     */
+    function finalizeMigration(uint256 expectedTotalAttached) external onlyOwner {
         require(!migrationFinalized, MigrationClosed());
+        require(totalAttached == expectedTotalAttached, MigrationTotalMismatch(expectedTotalAttached, totalAttached));
         migrationFinalized = true;
         emit MigrationFinalized(totalAttached);
     }

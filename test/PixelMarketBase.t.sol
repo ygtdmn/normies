@@ -112,7 +112,7 @@ abstract contract PixelMarketBase is Test {
 
     /// @notice The only delegation copy: finalize balances if needed, then copy and seal in one call.
     function _sealDelegations(uint256[] memory ids, address[] memory ds, address[] memory sbs) internal {
-        if (!storageV2.migrationFinalized()) storageV2.finalizeMigration();
+        if (!storageV2.migrationFinalized()) storageV2.finalizeMigration(storageV2.totalAttached());
         storageV2.seedAndFinalizeDelegations(ids, ds, sbs, block.number, block.timestamp);
     }
 
