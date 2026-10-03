@@ -1,8 +1,9 @@
 import type { EpochFile } from "./build.js";
 
 /**
- * The checks that stand between a built epoch and postEpoch. A posted root pays out at once and can never be taken
- * back (audit C-M2), so every rule here fails closed: a run that cannot prove its epoch stops before posting.
+ * The checks that stand between a built epoch and postEpoch. A posted root pays out for good once its claims open
+ * (POST_DELAY after posting, until when only a guardian can cancel it), so every rule here fails closed: a run that
+ * cannot prove its epoch stops before posting.
  *
  * Kept free of RPC calls so each rule is unit-tested; cli.ts reads the chain and hands the values in.
  */

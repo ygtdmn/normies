@@ -5,7 +5,7 @@ import { PixelMarketBase } from "./PixelMarketBase.t.sol";
 import { MigrateLegacy } from "../script/MigrateLegacy.s.sol";
 import { NormiesCanvasStorageV2 } from "../src/NormiesCanvasStorageV2.sol";
 
-/// @notice Runs the real cutover script against the test stack (audit C-M4): the finalize gate and the full scan.
+/// @notice Runs the real cutover script against the test stack: the finalize gate and the full scan.
 contract MigrateLegacyScriptTest is PixelMarketBase {
     function setUp() public override {
         cutoverInSetUp = false;

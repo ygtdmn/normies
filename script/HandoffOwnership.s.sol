@@ -13,7 +13,7 @@ import { Ownable } from "solady/auth/Ownable.sol";
 import { Lifebuoy } from "solady/utils/Lifebuoy.sol";
 
 /**
- * @notice Moves the V2 stack off the deployer key (audit D-H1, sections 7.4.2 and 7.4.4). After it:
+ * @notice Moves the V2 stack off the deployer key. After it:
  *
  *           Admin Safe         owns storage V2, canvas V2, market, renderer V6
  *           Treasury Safe      owns revenue pool, royalty splitter

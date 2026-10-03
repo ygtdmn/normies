@@ -37,9 +37,9 @@ replaced later without moving anything.
 | --- | --- |
 | `NormiesCanvasStorageV2` | All per-token canvas data: overlays of any grid size (emits on every write, falls back to V1 storage), grid size, blank-base flag, Canvas delegate (a V1 snapshot copied and sealed atomically by `seedAndFinalizeDelegations`), and the pixel accounting: wallet and per-Normie balances, every pixel the same. Mover roles: CanvasV2 (`ROLE_CANVAS`, the only one that changes supply), Market (`ROLE_MARKET`) and a future wrapper (`ROLE_WRAPPER`) can only move wallet balances. Overlay writers (`authorizedWriters`, incl. the everyday bot) cannot touch pixels. V1 balances are copied in once by `migrateBatch` and closed with `finalizeMigration`. |
 | `NormiesCanvasV2` | Burns (onto a Normie, or straight to the wallet with `commitBurnToWallet`), painting, withdraw/deposit between a Normie and its owner's wallet (vault delegates also need a pixel allowance for deposits), enlargement and blank canvas, whose pixels are burned out of circulation. |
-| `NormiesPixelMarket` | Sell-side listings (`list`, or `listFrom` with an allowance), ETH per pixel above `minPricePerPixel`, `buy` or `batchBuy` for several listings in one transaction. The fee comes out of seller proceeds and is paid in the fill's transaction (`FeesPaid`), half to the treasury and half to the revenue pool; nothing accrues in the market. |
+| `NormiesPixelMarket` | Sell-side listings (`list`, or `listFrom` with an allowance), ETH per pixel above `minPricePerPixel`, `buy` or `batchBuy` for several listings in one transaction. Once a listing with an expiry has expired, anyone can `reclaimExpired` it: the unsold pixels go back to the seller only, without a cooldown. The fee comes out of seller proceeds and is paid in the fill's transaction (`FeesPaid`), half to the treasury and half to the revenue pool; nothing accrues in the market. |
 | `NormiesRendererV6` | Grid-aware renderer with `Canvas Size` and `Blank Canvas` traits. |
-| `NormiesRevenuePool` | Holds the holders' share of market fees and royalties. Owner-posted epoch Merkle roots, claims with proofs from the moment of posting, an immutable per-epoch sweep deadline, unclaimed rolls back into the pool; the owner can withdraw only what no epoch has reserved. |
+| `NormiesRevenuePool` | Holds the holders' share of market fees and royalties. Epoch Merkle roots posted by the POSTER role, claims with proofs from `POST_DELAY` (24 hours) after posting, until when a guardian can `cancelEpoch`; an immutable per-epoch sweep deadline (the claim window, at least 30 days, a year by default), unclaimed rolls back into the pool; the owner can withdraw only what no epoch has reserved. |
 | `NormiesRoyaltySplitter` | Royalty receiver. Permissionless `release()` unwraps WETH and splits ETH between the pool (`poolBps`, launch 5000) and the team. |
 
 Invariants worth knowing before touching anything:
@@ -50,7 +50,7 @@ Invariants worth knowing before touching anything:
   consume that allowance when the caller is not the holder. An allowance is custody of that amount: an
   approved wallet can list the pixels at any price and fill the listing itself, so approve exact amounts
   and revoke afterwards. No delegation of any kind reaches a balance.
-- Allowance kill switch: `storageV2.setAllowancesPaused(true)` (owner) stops every third-party allowance use
+- Allowance kill switch: `storageV2.setAllowancesPaused(true)` (owner or GUARDIAN) stops every third-party allowance use
   at once (delegate deposits and paid services, `listFrom`). Holders acting for themselves are unaffected and
   can still change or revoke allowances while paused; lift it with `setAllowancesPaused(false)`.
 - Wallet pixels cool down. Pixels withdrawn from a Normie, bought on the market or handed back by a cancel
@@ -61,7 +61,7 @@ Invariants worth knowing before touching anything:
   arrival. Today only the wallet itself causes arrivals that cool (its own withdrawals, purchases and cancels), so
   nobody else can extend it; any future mover (a wrapper) must keep it that way. Burn rewards minted to a wallet
   and the balances of movers (the market) never cool.
-- `setCooldown` is for wrapper contracts only, never a person's wallet (audit D-I3). It raises one address's
+- `setCooldown` is for wrapper contracts only, never a person's wallet. It raises one address's
   cooldown between the default and `MAX_COOLDOWN` (seven days). On an address that keeps receiving pixels more
   often than its cooldown, everything it received stays locked until a full cooldown passes with nothing new
   arriving, which for an active buyer on seven days can be never. The contract accepts any address, so this rule
@@ -183,7 +183,7 @@ Order matters. Do not deploy before pausing V1.
    `CANVAS_STORAGE_V2_ADDRESS`: it refuses while any V1 commitment is unrevealed, pauses V1 itself if
    needed (then stops; rerun), scans all 10,000 ids, copies every nonzero V1
    balance into storage V2 in batches of `BATCH` (storage V2 reads V1 itself) and finalizes. Finalizing is a hard
-   gate (audit C-M4): the script sums V1 `actionPoints` over every id and `finalizeMigration(expected)` refuses
+   gate: the script sums V1 `actionPoints` over every id and `finalizeMigration(expected)` refuses
    unless `storageV2.totalAttached()` equals exactly that sum (37,805 at block 25,999,628; 40,315 at block
    26,107,972). On mainnet the script refuses `TOKEN_IDS` and any `MAX_TOKEN_ID` below 9999, so the sum always
    covers every id. Check the printed total and `migrationFinalized() == true`.
@@ -205,7 +205,7 @@ Order matters. Do not deploy before pausing V1.
    every `owner()` is still the deployer at this point;
    `splitter.pool()`, `splitter.team()`, `splitter.poolBps() == 5000`;
    `rendererV6.transformStorageContract()`, `zombieContract()`, `legendaryCanvasContract()`.
-5. **Hand off ownership (audit D-H1).** Before anything is unpaused, the deployer stops owning anything. Create
+5. **Hand off ownership.** Before anything is unpaused, the deployer stops owning anything. Create
    the three Safes first (see "Ownership" below), record their addresses and thresholds here, and run one
    harmless transaction from each. Pick the revshare job's gas-only key (`REVSHARE_POSTER`). Then, from the
    deployer: `forge script script/HandoffOwnership.s.sol --rpc-url mainnet --broadcast --ledger` with the six
@@ -243,7 +243,7 @@ Order matters. Do not deploy before pausing V1.
 ## Ownership
 
 No key or Safe reaches both the pixel ledger and the ETH, no single key holds an owner power, and no owner key lives
-on an internet-facing machine (audit D-H1, sections 7.4.2 and 7.4.4). Storage V2, canvas V2, the market and the pool
+on an internet-facing machine. Storage V2, canvas V2, the market and the pool
 use Solady `OwnableRoles` through `NormiesAccess`; the splitter and renderer V6 use Solady `Ownable`. Later
 ownership moves use the two-step handover (`requestOwnershipHandover` / `completeOwnershipHandover`).
 
@@ -282,7 +282,7 @@ The pool pays in epochs. Scores need what every wallet held over time, which no 
 
 A posted root opens for claims `POST_DELAY` (24 hours) later; until then the Operations Safe can `cancelEpoch`,
 which returns its reservation and, for the latest epoch, its block range. Once open it pays out and cannot be
-taken back (audit C-M2). So posting always follows the same order and stops at the first thing that is not
+taken back. So posting always follows the same order and stops at the first thing that is not
 right: **release, unwrap, wait for finality, build, verify on a second RPC, re-check the pool, post, read back.**
 The tooling enforces the order; the rules are in `api-server/src/revshare/guards.ts`.
 
@@ -338,7 +338,7 @@ a revised pool deployment and does not modify any previously deployed pool.
 
 ## Rollback
 
-Before step 5 nothing user-facing changed: unpause V1 (`RESUME_V1_CANVAS=true`) and leave the V2
-contracts idle. After step 5, `setRendererContract(rendererV5)` restores the old art, but any
+Before step 6 nothing user-facing changed: unpause V1 (`RESUME_V1_CANVAS=true`) and leave the V2
+contracts idle. After step 6, `setRendererContract(rendererV5)` restores the old art, but any
 V2 burns or trades already made live in storage V2; do not unpause V1 once the migration is
 finalized.

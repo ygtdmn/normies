@@ -1,6 +1,6 @@
 # Posts one revenue share epoch: releases the royalty splitter, unwraps the pool's WETH, builds the epoch
 # from chain state, verifies it against a second RPC, writes the epoch file where the API serves it and
-# posts the Merkle root from the pool owner key. Triggered by normies-revshare.timer; safe to start by hand.
+# posts the Merkle root from the POSTER key (claims open 24 hours later). Triggered by normies-revshare.timer; safe to start by hand.
 [Unit]
 Description=Normies revenue share epoch
 After=network-online.target

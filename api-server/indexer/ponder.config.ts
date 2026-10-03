@@ -134,7 +134,7 @@ const RevenueClaimedEvent = parseAbiItem(
 const EpochSweptEvent = parseAbiItem(
   "event Swept(uint256 indexed epochId, uint256 returnedToPool)",
 );
-// A guardian withdrew an epoch before its claims opened (audit D-H1): its reservation went back to the pool.
+// A guardian withdrew an epoch before its claims opened: its reservation went back to the pool.
 const EpochCancelledEvent = parseAbiItem(
   "event EpochCancelled(uint256 indexed epochId, uint256 returnedToPool, uint64 cursorToBlock)",
 );

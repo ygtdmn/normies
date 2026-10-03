@@ -1,5 +1,5 @@
 /**
- * Query-string parsing that never turns into a 500 (audit D-I1). A whole-number parameter that is missing, empty,
+ * Query-string parsing that never turns into a 500. A whole-number parameter that is missing, empty,
  * non-numeric or not finite falls back to its default; anything else is floored and clamped. Lookups keyed by a
  * query value only hit the table's own keys, never Object.prototype members like "constructor" or "__proto__".
  */

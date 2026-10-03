@@ -22,15 +22,15 @@ import {
  *   pnpm revshare verify <epoch.json>
  *   pnpm revshare run [--dry-run]
  *
- * A posted root pays out at once and cannot be cancelled (audit C-M2), so posting follows one fixed order and
- * stops at the first thing that is not right: release the splitter, unwrap the pool, wait until those transfers
+ * A posted root opens for claims POST_DELAY (24 hours) later and pays out for good from then on; only a guardian can
+ * cancel it before that. So posting follows one fixed order and stops at the first thing that is not right: release the splitter, unwrap the pool, wait until those transfers
  * are finalized, build, rebuild on a second independent RPC and compare everything, re-read the pool, post, and
  * read the posted epoch back. The rules live in guards.ts.
  *
  * `run` is that whole sequence, for the systemd timer in deploy/revshare. It refuses to post an epoch shorter
  * than MIN_EPOCH_BLOCKS, so a double run is harmless, and it never posts without RPC_URL_VERIFY.
  *
- * No owner key on the server (audit D-H1): the job's PRIVATE_KEY holds the pool's POSTER role and nothing else.
+ * No owner key on the server: the job's PRIVATE_KEY holds the pool's POSTER role and nothing else.
  * It posts directly; claims open POST_DELAY (24 h) later, and until then the Operations Safe can cancel a bad
  * epoch with cancelEpoch. A key without the role (or the owner, on a local fork, which may post too) falls back to
  * writing <REVSHARE_DIR>/proposals/<id>.safe.json, a Safe Transaction Builder batch for the pool owner, and stops;
@@ -45,8 +45,8 @@ import {
 /**
  * Env: RPC_URL (an archive node), CHAIN_ID (1, 11155111 or 31337), NORMIES_ADDRESS (mainnet Normies by default),
  * CANVAS_STORAGE_V2_ADDRESS, MARKET_ADDRESS, CANVAS_V2_ADDRESS, REVENUE_POOL_ADDRESS, optional ROYALTY_SPLITTER_ADDRESS
- * and REVSHARE_DIR (data/revshare by default). `run` also needs PRIVATE_KEY (the pool owner; or FROM, an unlocked
- * account on anvil) and takes RPC_URL_VERIFY, EPOCH_FINALITY_BLOCKS (64), MIN_EPOCH_BLOCKS (7000, about a day),
+ * and REVSHARE_DIR (data/revshare by default). `run` also needs PRIVATE_KEY (a key holding the pool's POSTER role, or
+ * any key, which then writes a Safe proposal instead; or FROM, an unlocked account on anvil) and takes RPC_URL_VERIFY, EPOCH_FINALITY_BLOCKS (64), MIN_EPOCH_BLOCKS (7000, about a day),
  * REVSHARE_GENESIS_BLOCK (the first epoch's start; PIXEL_MARKET_START_BLOCK is also accepted) and
  * REVSHARE_PUBLIC_URL (https://api.normies.art/revshare/epochs), which becomes the on-chain dataURI.
  */
@@ -323,7 +323,7 @@ async function main() {
         const to = flag(args, "to");
         const id = flag(args, "epoch");
         if (!from || !to) throw new Error("build needs --from and --to");
-        // Read from the pool by default, the id could change before the post and orphan every leaf (audit D-I2).
+        // Read from the pool by default, the id could change before the post and orphan every leaf.
         if (!id) throw new Error("build needs --epoch <id>: the pool's next epoch id, as you intend to post it");
         const epoch = await buildEpoch(publicClient, addresses(), {
             fromBlock: BigInt(from),

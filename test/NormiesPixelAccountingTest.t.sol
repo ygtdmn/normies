@@ -215,7 +215,7 @@ contract NormiesPixelAccountingTest is PixelMarketBase {
         uint256 got = _earnOnV1(user, 1, 48);
         uint256 more = _earnOnV1(user, 2, 48);
         storageV2.migrateBatch(_ids(1));
-        // A partial copy cannot be sealed: token 2 is still on the original canvas (audit C-M4).
+        // A partial copy cannot be sealed: token 2 is still on the original canvas.
         vm.expectRevert(abi.encodeWithSelector(NormiesCanvasStorageV2.MigrationTotalMismatch.selector, got + more, got));
         storageV2.finalizeMigration(got + more);
         storageV2.migrateBatch(_ids(2));

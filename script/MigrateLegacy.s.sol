@@ -14,7 +14,7 @@ import { NormiesCanvas } from "../src/NormiesCanvas.sol";
  *         Run once, right after the original canvas is paused, from the storage owner. Idempotent: tokens already
  *         copied are skipped, and FINALIZE=false leaves the migration open for another pass.
  *
- *         Finalizing is a hard gate (audit C-M4): the script sums the original action points over the whole scan,
+ *         Finalizing is a hard gate: the script sums the original action points over the whole scan,
  *         copied or not, and storage V2 refuses to seal unless it holds exactly that. On mainnet the scan cannot be
  *         shortened: TOKEN_IDS and a MAX_TOKEN_ID below 9999 are refused, so the total always covers every id.
  *

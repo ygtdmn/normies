@@ -3,8 +3,8 @@
 `pnpm revshare run` is the whole monthly job; the timer here runs it on the first of each month at 03:00 UTC on
 the server that hosts the API (the epoch file has to land in the directory the API serves).
 
-A posted root pays out at once and can never be cancelled, so a run always goes in this order and stops at the
-first problem (the rules are in `api-server/src/revshare/guards.ts`):
+A posted root opens for claims 24 hours later (`POST_DELAY`) and pays out for good from then on; until then only the
+Operations Safe can cancel it. So a run always goes in this order and stops at the first problem (the rules are in `api-server/src/revshare/guards.ts`):
 
 1. Reads the pool: the next epoch starts where the last one ended (`REVSHARE_GENESIS_BLOCK` the first time).
    Refuses to start at all without `RPC_URL_VERIFY`, or if it is the same endpoint as `RPC_URL`.
@@ -16,7 +16,7 @@ first problem (the rules are in `api-server/src/revshare/guards.ts`):
 5. Rebuilds it from scratch against `RPC_URL_VERIFY`, after checking both providers agree on the end block's
    hash. Any difference (amount, samples, total, root, ...) means it does not post.
 6. Re-reads the pool: not paused, same next epoch id, contiguous range, enough unreserved ETH.
-7. Posts the root and reads the posted epoch back. There is no owner key on this machine (audit D-H1): the job's
+7. Posts the root and reads the posted epoch back. There is no owner key on this machine: the job's
    `PRIVATE_KEY` holds the pool's POSTER role and nothing else. Claims open 24 hours later (`POST_DELAY`); until
    then the Operations Safe can `cancelEpoch` a bad root, and the next run posts the range again under a new id.
    A key without the role writes `REVSHARE_DIR/proposals/<id>.safe.json` (a Safe Transaction Builder batch for the
