@@ -1,14 +1,14 @@
 import { Hono } from "hono";
 import { getCanvasInfo, getCanvasStatus } from "../services/canvas-data.js";
 import { getCanvasSinks, getTokenPixelActivity } from "../services/pixel-market-data.js";
-import { parseTokenId } from "../lib/validation.js";
+import { parseTokenId, queryInt } from "../lib/validation.js";
 import { CANVAS_ENABLED, PIXEL_MARKET_ENABLED } from "../config.js";
 
 const canvas = new Hono();
 
 function parsePagination(c: { req: { query: (key: string) => string | undefined } }) {
-    const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50), 1), 100);
-    const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
+    const limit = queryInt(c.req.query("limit"), 50, 1, 100);
+    const offset = queryInt(c.req.query("offset"), 0, 0);
     return { limit, offset };
 }
 

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { parseTokenId } from "../lib/validation.js";
+import { parseTokenId, queryInt } from "../lib/validation.js";
 import { getLegendaryCanvasInfo, getLegendaryCanvases } from "../services/legendary-canvas-data.js";
 
 const legendaryCanvas = new Hono();
@@ -17,8 +17,8 @@ legendaryCanvas.get("/token/:id", async (c) => {
 });
 
 function parsePagination(c: { req: { query: (key: string) => string | undefined } }) {
-    const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50), 1), 100);
-    const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
+    const limit = queryInt(c.req.query("limit"), 50, 1, 100);
+    const offset = queryInt(c.req.query("offset"), 0, 0);
     return { limit, offset };
 }
 

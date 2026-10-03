@@ -1,6 +1,7 @@
 import { db } from "ponder:api";
 import schema from "ponder:schema";
 import { Hono } from "hono";
+import { queryInt } from "./query.js";
 import { eq, desc, count, asc, and, gt, lt, lte, inArray } from "ponder";
 import pg from "pg";
 import pixelMarketApi from "./pixel-market.js";
@@ -77,14 +78,14 @@ const RARITY_LEGENDARY_DEFAULT = {
 // ──────────────────────────────────────────────
 
 function parsePagination(c: { req: { query: (key: string) => string | undefined } }) {
-  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50), 1), 100);
-  const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
+  const limit = queryInt(c.req.query("limit"), 50, 1, 100);
+  const offset = queryInt(c.req.query("offset"), 0, 0);
   return { limit, offset };
 }
 
 function parseBulkPagination(c: { req: { query: (key: string) => string | undefined } }) {
-  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 10_000), 1), 10_000);
-  const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
+  const limit = queryInt(c.req.query("limit"), 10_000, 1, 10_000);
+  const offset = queryInt(c.req.query("offset"), 0, 0);
   return { limit, offset };
 }
 

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { queryInt } from "../lib/validation.js";
 import { PIXEL_MARKET_ENABLED } from "../config.js";
 import {
     getPixelActivity,
@@ -14,8 +15,8 @@ const pixels = new Hono();
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
 function parsePagination(c: { req: { query: (key: string) => string | undefined } }) {
-    const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50), 1), 100);
-    const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
+    const limit = queryInt(c.req.query("limit"), 50, 1, 100);
+    const offset = queryInt(c.req.query("offset"), 0, 0);
     return { limit, offset };
 }
 

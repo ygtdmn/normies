@@ -1,6 +1,7 @@
 import { db } from "ponder:api";
 import schema from "ponder:schema";
 import { Hono } from "hono";
+import { ownKey, queryInt } from "./query.js";
 import { eq, desc, asc, and, or, gt, lt, lte, count, inArray } from "ponder";
 
 // ──────────────────────────────────────────────
@@ -10,11 +11,11 @@ import { eq, desc, asc, and, or, gt, lt, lte, count, inArray } from "ponder";
 
 const app = new Hono();
 const GLOBAL_ID = "global";
-const INTERVALS: Record<string, number> = { "1h": 3600, "4h": 14_400, "1d": 86_400 };
+const INTERVALS = { "1h": 3600, "4h": 14_400, "1d": 86_400 } as const;
 
 function parsePagination(c: { req: { query: (key: string) => string | undefined } }) {
-  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50), 1), 100);
-  const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
+  const limit = queryInt(c.req.query("limit"), 50, 1, 100);
+  const offset = queryInt(c.req.query("offset"), 0, 0);
   return { limit, offset };
 }
 
@@ -212,8 +213,11 @@ app.get("/market/listings", async (c) => {
   const sellerRaw = c.req.query("seller")?.toLowerCase();
   if (sellerRaw !== undefined && !isAddress(sellerRaw)) return c.json({ error: "Invalid seller" }, 400);
   const partialRaw = c.req.query("partial");
-  const sortKey = (c.req.query("sort") ?? "price-asc") as keyof typeof LISTING_SORTS;
-  const order = LISTING_SORTS[sortKey] ?? LISTING_SORTS["price-asc"];
+  const sortRaw = c.req.query("sort") ?? "price-asc";
+  if (!ownKey(LISTING_SORTS, sortRaw)) {
+    return c.json({ error: `sort must be one of ${Object.keys(LISTING_SORTS).join(", ")}` }, 400);
+  }
+  const order = LISTING_SORTS[sortRaw];
   const now = BigInt(Math.floor(Date.now() / 1000));
   const includeExpired = c.req.query("expired") === "true";
 
@@ -398,9 +402,9 @@ app.get("/market/stats", async (c) => {
 // continuous line.
 app.get("/market/candles", async (c) => {
   const intervalKey = c.req.query("interval") ?? "1h";
+  if (!ownKey(INTERVALS, intervalKey)) return c.json({ error: "interval must be 1h, 4h or 1d" }, 400);
   const interval = INTERVALS[intervalKey];
-  if (!interval) return c.json({ error: "interval must be 1h, 4h or 1d" }, 400);
-  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 168), 1), 1000);
+  const limit = queryInt(c.req.query("limit"), 168, 1, 1000);
   const now = Math.floor(Date.now() / 1000);
   const since = BigInt(now - interval * limit);
 

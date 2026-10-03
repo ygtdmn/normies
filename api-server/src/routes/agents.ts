@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { parseTokenId } from "../lib/validation.js";
+import { parseTokenId, queryInt } from "../lib/validation.js";
 import {
     getCanvasInfo,
     getTransformData,
@@ -323,7 +323,7 @@ agents.get("/by-agent-id/:agentId/info", async (c) => {
 //   GET /agents/list?sort=newest|oldest&limit=N&cursor=<agentId>
 // ──────────────────────────────────────────────────────────────────────
 agents.get("/list", async (c) => {
-    const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 24), 1), 100);
+    const limit = queryInt(c.req.query("limit"), 24, 1, 100);
     const sortParam = c.req.query("sort");
     const sort = sortParam === "oldest" ? "asc" : "desc";
     const cursorRaw = c.req.query("cursor");
@@ -390,7 +390,7 @@ agents.get("/list", async (c) => {
 agents.get("/search", async (c) => {
     const qRaw = c.req.query("q") ?? "";
     const q = qRaw.trim();
-    const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 24), 1), 50);
+    const limit = queryInt(c.req.query("limit"), 24, 1, 50);
     if (!q) return c.json({ items: [], hasMore: false });
 
     c.header("Access-Control-Allow-Origin", "*");

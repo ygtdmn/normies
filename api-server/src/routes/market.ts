@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { queryInt } from "../lib/validation.js";
 import { PIXEL_MARKET_ENABLED } from "../config.js";
 import { getCanvasStatus } from "../services/canvas-data.js";
 import {
@@ -20,8 +21,8 @@ const SORTS: ListingSort[] = ["price-asc", "price-desc", "amount-desc", "newest"
 const STATUSES: Array<ListingStatus | "all"> = ["active", "filled", "cancelled", "all"];
 
 function parsePagination(c: { req: { query: (key: string) => string | undefined } }) {
-    const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50), 1), 100);
-    const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
+    const limit = queryInt(c.req.query("limit"), 50, 1, 100);
+    const offset = queryInt(c.req.query("offset"), 0, 0);
     return { limit, offset };
 }
 
@@ -98,7 +99,7 @@ market.get("/candles", async (c) => {
     if (interval !== "1h" && interval !== "4h" && interval !== "1d") {
         return c.json({ error: "interval must be 1h, 4h or 1d" }, 400);
     }
-    const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 168), 1), 1000);
+    const limit = queryInt(c.req.query("limit"), 168, 1, 1000);
     return c.json(await getMarketCandles(interval, limit));
 });
 
