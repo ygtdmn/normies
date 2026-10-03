@@ -422,7 +422,7 @@ contract NormiesRevenuePoolTest is Test {
 
     function testClaimWindowMinimumAndOwnership() public {
         uint64 minimum = pool.MIN_CLAIM_WINDOW();
-        assertEq(minimum, 1 days);
+        assertEq(minimum, 30 days);
         vm.expectRevert(abi.encodeWithSelector(NormiesRevenuePool.ClaimWindowTooShort.selector, 0, minimum));
         pool.setClaimWindow(0);
         vm.expectRevert(abi.encodeWithSelector(NormiesRevenuePool.ClaimWindowTooShort.selector, minimum - 1, minimum));

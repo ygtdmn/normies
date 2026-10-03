@@ -74,7 +74,7 @@ contract NormiesRevenuePool is INormiesRevenuePool, NormiesAccess, ReentrancyGua
     /// @notice How long a posted epoch waits before claims open. A guardian can cancel it until then.
     uint64 public constant POST_DELAY = 24 hours;
     /// @notice Minimum guaranteed claim window for newly posted epochs.
-    uint64 public constant MIN_CLAIM_WINDOW = 1 days;
+    uint64 public constant MIN_CLAIM_WINDOW = 30 days;
     /// @notice Default window for future epochs only; each posted epoch retains its own sweepableAt.
     uint64 public claimWindow = 365 days;
     /// @notice Blocks posting only. Claims on a posted epoch can never be paused.

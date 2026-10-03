@@ -201,7 +201,7 @@ Order matters. Do not deploy before pausing V1.
    `canvasV2.canvasStorage()`, `zombieContract()`, `paused() == true`;
    `market.pixels()`, `treasuryRecipient()`, `revenueShareRecipient() == revenuePool`, `feeBps() == 1000`,
    `revenueShareBps() == 5000`, `minPricePerPixel() == 1800000000000000`, `paused() == true`;
-   `pool.claimWindow() == 31536000`, `MIN_CLAIM_WINDOW() == 86400`, `POST_DELAY() == 86400`;
+   `pool.claimWindow() == 31536000`, `MIN_CLAIM_WINDOW() == 2592000`, `POST_DELAY() == 86400`;
    every `owner()` is still the deployer at this point;
    `splitter.pool()`, `splitter.team()`, `splitter.poolBps() == 5000`;
    `rendererV6.transformStorageContract()`, `zombieContract()`, `legendaryCanvasContract()`.
@@ -251,7 +251,7 @@ ownership moves use the two-step handover (`requestOwnershipHandover` / `complet
 | --- | --- | --- | --- |
 | Admin Safe | 3-of-5, hardware wallets, at least 3 people | owner of storage V2, canvas V2, market, renderer V6 | Mover roles, overlay writers, cooldowns, role grants, fee recipients, contract pointers, ownership |
 | Treasury Safe | 2-of-3 or 3-of-5, other signers | owner of revenue pool, royalty splitter | Withdraw unreserved pool ETH, royalty split and team, role grants, ownership. Cannot touch #PIXEL |
-| Operations Safe | 2-of-3, different people | GUARDIAN on storage V2, canvas, market, pool; CONFIG on canvas, market, pool | Pause and unpause anything at once, the allowance kill switch (both ways), cancel an epoch before it opens. Config: prices, burn tiers, fee (at most 10%), listing floor, claim window (at least 1 day). Can never grant roles or move value |
+| Operations Safe | 2-of-3, different people | GUARDIAN on storage V2, canvas, market, pool; CONFIG on canvas, market, pool | Pause and unpause anything at once, the allowance kill switch (both ways), cancel an epoch before it opens. Config: prices, burn tiers, fee (at most 10%), listing floor, claim window (at least 30 days). Can never grant roles or move value |
 | Revshare job key | EOA on the API host, gas only | POSTER on the pool | `postEpoch` only. Claims open 24 h later, so a bad root can be cancelled by the Operations Safe |
 | Overlay bot key | EOA | an `authorizedWriters` slot | Overlays only; it cannot move pixels |
 | Deployer | hardware wallet | nothing after step 5 | Retired; no roles, Lifebuoy rescue locked |
@@ -324,7 +324,7 @@ By hand (for example when the post goes through a Safe), the same order:
 
 At that epoch's fixed `getEpoch(id).sweepableAt` anyone can `sweep(id)`: unclaimed ETH returns to the pool for later
 epochs. Each epoch snapshots the default window when posted (365 days at launch), counted from its opening.
-`setClaimWindow` (CONFIG) affects future epochs only and requires at least `MIN_CLAIM_WINDOW = 1 days`; it cannot
+`setClaimWindow` (CONFIG) affects future epochs only and requires at least `MIN_CLAIM_WINDOW = 30 days`; it cannot
 shorten or extend existing deadlines. Claims remain open until the epoch is actually swept. Only the Treasury
 Safe can take ETH no epoch has reserved (`withdrawUnallocated`); what a posted root owes cannot be touched.
 
