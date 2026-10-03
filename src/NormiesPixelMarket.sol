@@ -14,7 +14,8 @@ import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
  * @author Smart Contract by Yigit Duman (https://x.com/yigitduman)
  * @notice Sell-side order book for pixels, priced in ETH per pixel. Listing escrows the pixels in this contract's
  *         wallet balance; a fill moves them to the buyer and pays the seller minus the fee. Listings are either
- *         partial-fill or all-or-nothing and can be cancelled at any time.
+ *         partial-fill or all-or-nothing and can be cancelled at any time. Once a listing has expired anyone can
+ *         return its unsold pixels to the seller (reclaimExpired), so escrow never depends on the seller alone.
  */
 contract NormiesPixelMarket is INormiesPixelMarket, Ownable, Lifebuoy, ReentrancyGuardTransient {
     error Paused();
@@ -29,6 +30,7 @@ contract NormiesPixelMarket is INormiesPixelMarket, Ownable, Lifebuoy, Reentranc
     error FullFillRequired(uint256 remaining);
     error IncorrectPayment(uint256 expected, uint256 sent);
     error NotSeller();
+    error ListingNotExpired(uint256 listingId);
     error LengthMismatch();
     error FeeTooHigh();
     error InvalidBps();
@@ -51,7 +53,10 @@ contract NormiesPixelMarket is INormiesPixelMarket, Ownable, Lifebuoy, Reentranc
         uint256 grossWei,
         uint256 feeWei
     );
+    /// @dev Emitted by cancel and by reclaimExpired, so a closed listing always looks the same to an indexer.
     event ListingCancelled(uint256 indexed listingId, address indexed seller, uint32 refunded);
+    /// @notice An expired listing was returned to its seller by `reclaimedBy` (anyone). Follows ListingCancelled.
+    event ListingReclaimed(uint256 indexed listingId, address indexed reclaimedBy);
     /// @notice Fees of one buy or batchBuy, paid to the recipients in that same transaction.
     event FeesPaid(uint256 treasuryWei, uint256 revenueShareWei);
     event FeeConfigSet(uint16 feeBps, uint16 revenueShareBps);
@@ -250,6 +255,28 @@ contract NormiesPixelMarket is INormiesPixelMarket, Ownable, Lifebuoy, Reentranc
         if (refund > 0) pixels.moveBalance(address(this), msg.sender, refund);
 
         emit ListingCancelled(listingId, msg.sender, refund);
+    }
+
+    /**
+     * @notice Return an expired listing's unsold pixels to its seller. Anyone may call it, so pixels never stay in
+     *         escrow because a seller lost their key or listed from a contract that cannot cancel. The pixels only
+     *         ever go to the seller, and arrive without a cooldown (they were past it when listed). Works while
+     *         paused. A listing without an expiry never expires; only its seller can close it.
+     */
+    function reclaimExpired(uint256 listingId) external nonReentrant {
+        Listing storage listing = _listings[listingId];
+        require(listing.status == Status.Active, ListingNotActive(listingId));
+        uint64 expiry = listing.expiry;
+        require(expiry != 0 && block.timestamp >= expiry, ListingNotExpired(listingId));
+
+        address seller = listing.seller;
+        uint32 refund = listing.remaining;
+        listing.remaining = 0;
+        listing.status = Status.Cancelled;
+        if (refund > 0) pixels.releaseEscrow(seller, refund);
+
+        emit ListingCancelled(listingId, seller, refund);
+        emit ListingReclaimed(listingId, msg.sender);
     }
 
     // ──────────────────────────────────────────────

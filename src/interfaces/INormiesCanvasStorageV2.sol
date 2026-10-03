@@ -58,6 +58,7 @@ interface INormiesCanvasStorageV2 is INormiesCanvasStorage {
     function mintTo(address to, uint256 amount) external;
     function burnFrom(address from, uint256 amount) external;
     function moveBalance(address from, address to, uint256 amount) external;
+    function releaseEscrow(address to, uint256 amount) external;
     function creditAttached(uint256 tokenId, uint256 amount, Reason reason) external;
     function debitAttached(uint256 tokenId, uint256 amount, Reason reason) external;
     function moveAttached(uint256 fromTokenId, uint256 toTokenId, uint256 amount, Reason reason) external;

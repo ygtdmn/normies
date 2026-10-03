@@ -472,6 +472,19 @@ contract NormiesCanvasStorageV2 is INormiesCanvasStorageV2, Ownable, Lifebuoy {
     //  Pixels: any role
     // ──────────────────────────────────────────────
 
+    /**
+     * @notice Returns pixels the market holds in escrow to `to`, without a cooldown. Only the market, and only
+     *         out of its own balance. Escrowed pixels were already past their cooldown when they were listed, so
+     *         handing them back cools nothing; and since anyone may return an expired listing, a cooldown here would
+     *         let a stranger restart the seller's.
+     */
+    function releaseEscrow(address to, uint256 amount) external onlyRole(ROLE_MARKET) {
+        require(to != address(0), ZeroAddress());
+        _debitWallet(msg.sender, amount);
+        _creditWallet(to, amount, false);
+        emit BalanceMoved(msg.sender, to, amount);
+    }
+
     /// @notice A plain move between wallet balances. Supply does not change.
     function moveBalance(
         address from,

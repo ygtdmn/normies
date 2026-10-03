@@ -447,6 +447,107 @@ contract NormiesPixelMarketTest is PixelMarketBase {
     //  End to end with the canvas
     // ──────────────────────────────────────────────
 
+    // ──────────────────────────────────────────────
+    //  Reclaiming expired listings
+    // ──────────────────────────────────────────────
+
+    function testAnyoneReturnsAnExpiredListingToTheSeller() public {
+        uint64 expiry = uint64(block.timestamp + 100);
+        uint256 id = _list(seller, 100, 1 gwei, true, expiry);
+        vm.prank(buyer);
+        market.buy{ value: 30 gwei }(id, 30);
+
+        // Not before expiry, by anyone, the seller included.
+        vm.warp(expiry - 1);
+        vm.prank(unauthorized);
+        vm.expectRevert(abi.encodeWithSelector(NormiesPixelMarket.ListingNotExpired.selector, id));
+        market.reclaimExpired(id);
+        vm.prank(seller);
+        vm.expectRevert(abi.encodeWithSelector(NormiesPixelMarket.ListingNotExpired.selector, id));
+        market.reclaimExpired(id);
+
+        // From the expiry second on (the same second buying stops), a stranger returns the rest to the seller.
+        vm.warp(expiry);
+        vm.expectEmit(true, true, false, true);
+        emit NormiesPixelMarket.ListingCancelled(id, seller, 70);
+        vm.expectEmit(true, true, false, true);
+        emit NormiesPixelMarket.ListingReclaimed(id, unauthorized);
+        vm.prank(unauthorized);
+        market.reclaimExpired(id);
+
+        assertEq(storageV2.balanceOf(seller), 70);
+        assertEq(storageV2.balanceOf(unauthorized), 0);
+        assertEq(storageV2.balanceOf(address(market)), 0);
+        INormiesPixelMarket.Listing memory l = market.getListing(id);
+        assertEq(l.remaining, 0);
+        assertEq(uint8(l.status), uint8(INormiesPixelMarket.Status.Cancelled));
+
+        // Once closed it stays closed, for a reclaim and for the seller's cancel.
+        vm.expectRevert(abi.encodeWithSelector(NormiesPixelMarket.ListingNotActive.selector, id));
+        market.reclaimExpired(id);
+        vm.prank(seller);
+        vm.expectRevert(abi.encodeWithSelector(NormiesPixelMarket.ListingNotActive.selector, id));
+        market.cancel(id);
+    }
+
+    function testListingsWithoutExpiryOrAlreadyClosedCannotBeReclaimed() public {
+        uint256 open = _list(seller, 10, 1 gwei, true, 0);
+        vm.warp(block.timestamp + 3650 days);
+        vm.expectRevert(abi.encodeWithSelector(NormiesPixelMarket.ListingNotExpired.selector, open));
+        market.reclaimExpired(open);
+
+        uint64 expiry = uint64(block.timestamp + 10);
+        uint256 filled = _list(seller, 10, 1 gwei, false, expiry);
+        vm.prank(buyer);
+        market.buy{ value: 10 gwei }(filled, 10);
+        vm.warp(expiry);
+        vm.expectRevert(abi.encodeWithSelector(NormiesPixelMarket.ListingNotActive.selector, filled));
+        market.reclaimExpired(filled);
+
+        vm.expectRevert(abi.encodeWithSelector(NormiesPixelMarket.ListingNotActive.selector, 999));
+        market.reclaimExpired(999);
+    }
+
+    function testReclaimWorksWhilePausedAndForAContractSeller() public {
+        // A seller contract with no way to call cancel: its pixels still come home.
+        RevertingSeller stuck = new RevertingSeller();
+        uint64 expiry = uint64(block.timestamp + 10);
+        uint256 id = _list(address(stuck), 25, 1 gwei, true, expiry);
+        market.setPaused(true);
+        vm.warp(expiry);
+        vm.prank(unauthorized);
+        market.reclaimExpired(id);
+        assertEq(storageV2.balanceOf(address(stuck)), 25);
+        assertEq(storageV2.balanceOf(address(market)), 0);
+    }
+
+    function testReclaimDoesNotRestartTheSellersCooldown() public {
+        // The seller has pixels still cooling from a purchase.
+        address other = address(0x5E12);
+        uint256 source = _list(other, 40, 1 gwei, true, 0);
+        vm.deal(seller, 1 ether);
+        vm.prank(seller);
+        market.buy{ value: 40 gwei }(source, 40);
+        uint64 unlock = storageV2.unlockAt(seller);
+        uint256 locked = storageV2.lockedBalance(seller);
+        assertEq(locked, 40);
+
+        // An expired listing of theirs is returned by a stranger in the same window.
+        uint64 expiry = uint64(block.timestamp + 10);
+        uint256 id = _list(seller, 15, 1 gwei, true, expiry);
+        vm.warp(expiry);
+        assertLt(block.timestamp, unlock); // the purchase is still cooling
+        vm.prank(unauthorized);
+        market.reclaimExpired(id);
+
+        // The returned pixels are spendable at once, and the purchase unlocks exactly when it would have.
+        assertEq(storageV2.unlockAt(seller), unlock);
+        assertEq(storageV2.lockedBalance(seller), locked);
+        assertEq(storageV2.availableBalance(seller), 15);
+        vm.prank(seller);
+        market.list(15, 1 gwei, true, 0);
+    }
+
     function testWithdrawListBuyDeposit() public {
         _mintRealTo(user, 1);
         _mintRealTo(buyer, 2);

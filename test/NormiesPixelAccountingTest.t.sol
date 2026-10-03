@@ -126,6 +126,14 @@ contract NormiesPixelAccountingTest is PixelMarketBase {
         storageV2.attach(user, 1, 1, INormiesCanvasStorageV2.Reason.Deposit);
         vm.stopPrank();
 
+        // Only the market may hand escrow back without a cooldown, and only out of its own balance.
+        vm.prank(wrapper);
+        vm.expectRevert(NormiesCanvasStorageV2.NotAuthorized.selector);
+        storageV2.releaseEscrow(user, 1);
+        vm.prank(marketOnly);
+        vm.expectRevert(abi.encodeWithSelector(NormiesCanvasStorageV2.InsufficientBalance.selector, marketOnly, 0, 1));
+        storageV2.releaseEscrow(user, 1);
+
         // The market can move balances but cannot create pixels.
         vm.startPrank(marketOnly);
         storageV2.moveBalance(user, marketOnly, 2);

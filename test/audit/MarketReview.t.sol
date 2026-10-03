@@ -13,6 +13,7 @@ contract MarketReviewHandler is Test {
     NormiesCanvasStorageV2 public immutable pixels;
     address[3] public actors = [address(0xA001), address(0xA002), address(0xA003)];
     uint256[] public listings;
+    uint256 public reclaims;
 
     constructor(NormiesPixelMarket market_, NormiesCanvasStorageV2 pixels_) {
         market = market_;
@@ -40,11 +41,24 @@ contract MarketReviewHandler is Test {
         listings.push(id);
     }
 
+    /// @dev Listings that expire within five minutes, so the fuzzer sees buys, cancels and reclaims race expiry.
+    function listExpiring(uint256 actor, uint32 rawAmount, uint96 rawPrice, bool partialFill, uint32 rawTtl) external {
+        address seller = actors[actor % 3];
+        uint256 available = pixels.availableBalance(seller);
+        if (available == 0) return;
+        uint32 amount = uint32(bound(rawAmount, 1, available > 10_000 ? 10_000 : available));
+        uint96 price = uint96(bound(rawPrice, 1 gwei, 10 gwei));
+        uint64 expiry = uint64(block.timestamp + bound(rawTtl, 1, 300));
+        vm.prank(seller);
+        listings.push(market.list(amount, price, partialFill, expiry));
+    }
+
     function buy(uint256 listing, uint256 actor, uint32 rawAmount) external {
         if (listings.length == 0) return;
         uint256 id = listings[listing % listings.length];
         INormiesPixelMarket.Listing memory item = market.getListing(id);
         if (item.status != INormiesPixelMarket.Status.Active) return;
+        if (item.expiry != 0 && block.timestamp >= item.expiry) return;
         uint32 amount = item.partialFill ? uint32(bound(rawAmount, 1, item.remaining)) : item.remaining;
         vm.prank(actors[actor % 3]);
         market.buy{ value: uint256(amount) * item.pricePerPixel }(id, amount);
@@ -57,6 +71,20 @@ contract MarketReviewHandler is Test {
         if (item.status != INormiesPixelMarket.Status.Active) return;
         vm.prank(item.seller);
         market.cancel(id);
+    }
+
+    /// @dev Any actor (seller or not) returns an expired listing; the pixels must land with the seller only.
+    function reclaim(uint256 listing, uint256 actor) external {
+        if (listings.length == 0) return;
+        uint256 id = listings[listing % listings.length];
+        INormiesPixelMarket.Listing memory item = market.getListing(id);
+        if (item.status != INormiesPixelMarket.Status.Active) return;
+        if (item.expiry == 0 || block.timestamp < item.expiry) return;
+        uint256 before = pixels.balanceOf(item.seller);
+        vm.prank(actors[actor % 3]);
+        market.reclaimExpired(id);
+        assertEq(pixels.balanceOf(item.seller), before + item.remaining);
+        reclaims++;
     }
 
     function warp(uint32 seconds_) external {

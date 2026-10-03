@@ -35,5 +35,6 @@ interface INormiesPixelMarket {
     function buy(uint256 listingId, uint32 amount) external payable;
     function batchBuy(uint256[] calldata listingIds, uint32[] calldata amounts) external payable;
     function cancel(uint256 listingId) external;
+    function reclaimExpired(uint256 listingId) external;
     function getListing(uint256 listingId) external view returns (Listing memory);
 }
