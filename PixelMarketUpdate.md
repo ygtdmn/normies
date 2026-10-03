@@ -56,10 +56,17 @@ Invariants worth knowing before touching anything:
 - Wallet pixels cool down. Pixels withdrawn from a Normie, bought on the market or handed back by a cancel
   wait `DEFAULT_COOLDOWN` (one minute) before they can be deposited, listed or spent
   (`storageV2.availableBalance`, `lockedBalance`, `unlockAt`; a blocked spend reverts `PixelsCoolingDown`).
-  Pixels already past their cooldown stay spendable while new arrivals wait. Burn rewards minted to a wallet
-  and the balances of movers (the market) never cool. The owner can raise one address's cooldown between the
-  default and `MAX_COOLDOWN` (seven days) with `setCooldown`, meant for wrapper contracts; it never freezes
-  anything, the pixels free up after.
+  Pixels already past their cooldown stay spendable while new arrivals wait. Each arrival restarts the clock for
+  everything still cooling in that wallet, so the whole cooling amount unlocks one cooldown after the latest
+  arrival. Today only the wallet itself causes arrivals that cool (its own withdrawals, purchases and cancels), so
+  nobody else can extend it; any future mover (a wrapper) must keep it that way. Burn rewards minted to a wallet
+  and the balances of movers (the market) never cool.
+- `setCooldown` is for wrapper contracts only, never a person's wallet (audit D-I3). It raises one address's
+  cooldown between the default and `MAX_COOLDOWN` (seven days). On an address that keeps receiving pixels more
+  often than its cooldown, everything it received stays locked until a full cooldown passes with nothing new
+  arriving, which for an active buyer on seven days can be never. The contract accepts any address, so this rule
+  is the guard: it is an owner action that only the Admin Safe can send, and `CooldownSet` is on the alert list.
+  Undo a mistake with `setCooldown(account, 0)`, which restores the default.
 - Listings have a floor: `market.minPricePerPixel` (0.0018 ETH at deployment, about five dollars; replace
   it with `setMinPricePerPixel` as ETH moves). It exists so a 1 wei listing cannot be a fee-free transfer.
 - Two kinds of delegate, both paint-only. A Canvas delegate (`setDelegate`, or one copied from V1 at cutover)

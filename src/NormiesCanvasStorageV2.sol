@@ -113,12 +113,18 @@ contract NormiesCanvasStorageV2 is INormiesCanvasStorageV2, NormiesAccess, Lifeb
      *         pixels out of a Normie and re-home them in the same block through a helper contract. One minute is
      *         nothing for a holder and everything for a contract that needs atomicity.
      *
+     *         Each arrival restarts the clock for everything still cooling in that wallet: the whole cooling amount
+     *         unlocks one cooldown after the latest arrival. Pixels already past their cooldown are never locked
+     *         again. Today only the wallet itself causes arrivals that cool (its own withdrawals, purchases and
+     *         cancels), so nobody else can extend it; any future mover (a wrapper) must keep it that way.
+     *
      *         The owner can raise one address's cooldown up to MAX_COOLDOWN (seven days). That is meant for wrapper
      *         contracts: a contract that accumulates pixels to hand out an ERC20 would have to sit on every incoming
      *         pixel for a week before it could move it, which makes such a wrapper impractical without shutting
-     *         anyone out. Holders are never affected by that lever: after the cooldown, however long, the pixels
-     *         are free to deposit or sell, exactly as before. Burn rewards minted straight to a wallet, and balances
-     *         held by the market or another mover, never cool down.
+     *         anyone out. It is never meant for a person's wallet (audit D-I3): with a long cooldown, a wallet that
+     *         keeps receiving pixels more often than the cooldown keeps everything it received locked until it
+     *         stops for a full cooldown. Burn rewards minted straight to a wallet, and balances held by the market or
+     *         another mover, never cool down.
      */
     uint64 public constant DEFAULT_COOLDOWN = 1 minutes;
     uint64 public constant MAX_COOLDOWN = 7 days;
@@ -411,8 +417,9 @@ contract NormiesCanvasStorageV2 is INormiesCanvasStorageV2, NormiesAccess, Lifeb
 
     /**
      * @notice Sets one address's cooldown, between the default and MAX_COOLDOWN. 0 restores the default.
-     *         This exists for wrapper contracts (see the cooldown notice above); it can never shorten the default
-     *         and never freezes anything: pixels always free up once the cooldown has run.
+     *         Wrapper contracts only, never a person's wallet (see the cooldown notice above, audit D-I3). It can
+     *         never shorten the default, and pixels free up once a full cooldown passes with nothing new arriving;
+     *         on an address that keeps receiving pixels, that can be never.
      */
     function setCooldown(address account, uint64 cooldown) external onlyOwner {
         require(account != address(0), ZeroAddress());
