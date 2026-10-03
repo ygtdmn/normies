@@ -121,10 +121,10 @@ contract NormiesCanvasStorageV2 is INormiesCanvasStorageV2, NormiesAccess, Lifeb
      *         The owner can raise one address's cooldown up to MAX_COOLDOWN (seven days). That is meant for wrapper
      *         contracts: a contract that accumulates pixels to hand out an ERC20 would have to sit on every incoming
      *         pixel for a week before it could move it, which makes such a wrapper impractical without shutting
-     *         anyone out. It is never meant for a person's wallet (audit D-I3): with a long cooldown, a wallet that
-     *         keeps receiving pixels more often than the cooldown keeps everything it received locked until it
-     *         stops for a full cooldown. Burn rewards minted straight to a wallet, and balances held by the market or
-     *         another mover, never cool down.
+     *         anyone out. It is never meant for a person's wallet: with a long cooldown, a wallet that keeps receiving
+     *         pixels more often than the cooldown keeps everything it received locked until it stops for a full
+     *         cooldown. Burn rewards minted straight to a wallet, and balances held by the market or another mover,
+     *         never cool down.
      */
     uint64 public constant DEFAULT_COOLDOWN = 1 minutes;
     uint64 public constant MAX_COOLDOWN = 7 days;
@@ -351,9 +351,9 @@ contract NormiesCanvasStorageV2 is INormiesCanvasStorageV2, NormiesAccess, Lifeb
     }
 
     /**
-     * @notice Ends the copy. Irreversible, so it is a hard gate (audit C-M4): it only goes through when storage V2
-     *         holds exactly `expectedTotalAttached`, the sum of the original canvas's action points over every id,
-     *         read from it after it was paused. A partial copy cannot be sealed by mistake.
+     * @notice Ends the copy. Irreversible, so it is a hard gate: it only goes through when storage V2 holds exactly
+     *         `expectedTotalAttached`, the sum of the original canvas's action points over every id, read from it after
+     *         it was paused. A partial copy cannot be sealed by mistake.
      */
     function finalizeMigration(uint256 expectedTotalAttached) external onlyOwner {
         require(!migrationFinalized, MigrationClosed());
@@ -417,9 +417,9 @@ contract NormiesCanvasStorageV2 is INormiesCanvasStorageV2, NormiesAccess, Lifeb
 
     /**
      * @notice Sets one address's cooldown, between the default and MAX_COOLDOWN. 0 restores the default.
-     *         Wrapper contracts only, never a person's wallet (see the cooldown notice above, audit D-I3). It can
-     *         never shorten the default, and pixels free up once a full cooldown passes with nothing new arriving;
-     *         on an address that keeps receiving pixels, that can be never.
+     *         Wrapper contracts only, never a person's wallet (see the cooldown notice above). It can never shorten the
+     *         default, and pixels free up once a full cooldown passes with nothing new arriving; on an address that
+     *         keeps receiving pixels, that can be never.
      */
     function setCooldown(address account, uint64 cooldown) external onlyOwner {
         require(account != address(0), ZeroAddress());
