@@ -140,7 +140,7 @@ contract DelegationMigrationTest is PixelMarketBase {
         _apply(s);
         assertTrue(storageV2.delegationsSeeded());
         vm.expectRevert(NormiesCanvasStorageV2.DelegationsSealed.selector);
-        storageV2.seedDelegations(s.tokenIds, s.delegates, s.setBy);
+        _apply(s);
         vm.expectRevert("delegations already finalized");
         script.snapshot(storageV2);
     }
@@ -172,15 +172,6 @@ contract DelegationMigrationTest is PixelMarketBase {
         vm.expectRevert(NormiesCanvasStorageV2.InvalidSnapshot.selector);
         storageV2.seedAndFinalizeDelegations(ids, ds, ds, 100, block.timestamp + 1);
         assertFalse(storageV2.delegationsSeeded());
-    }
-
-    function testRejectsPriorPartialSeedingInsteadOfRetainingStaleRecords() public {
-        vm.prank(user);
-        canvasV1.setDelegate(1, delegate_);
-        DelegationSnapshot.Snapshot memory s = _snapshot();
-        storageV2.seedDelegations(s.tokenIds, s.delegates, s.setBy);
-        vm.expectRevert(NormiesCanvasStorageV2.DelegationMigrationAlreadyStarted.selector);
-        _apply(s);
     }
 
     function testOutOfGasRollsBackEverySeedAndLeavesMigrationOpen() public {

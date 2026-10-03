@@ -67,7 +67,9 @@ contract NormiesPixelMarketForkTest is Test {
         }
         storageV2.migrateBatch(ids);
         storageV2.finalizeMigration();
-        storageV2.finalizeDelegations();
+        storageV2.seedAndFinalizeDelegations(
+            new uint256[](0), new address[](0), new address[](0), block.number, block.timestamp
+        );
         canvas.setPaused(false);
         market.setPaused(false);
         vm.prank(normies.owner());

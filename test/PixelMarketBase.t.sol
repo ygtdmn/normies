@@ -105,10 +105,15 @@ abstract contract PixelMarketBase is Test {
 
     /// @notice What the cutover scripts do after V1 is paused: close both copies, then open V2 and the market.
     function _cutover() internal {
-        if (!storageV2.migrationFinalized()) storageV2.finalizeMigration();
-        if (!storageV2.delegationsSeeded()) storageV2.finalizeDelegations();
+        if (!storageV2.delegationsSeeded()) _sealDelegations(new uint256[](0), new address[](0), new address[](0));
         canvas.setPaused(false);
         market.setPaused(false);
+    }
+
+    /// @notice The only delegation copy: finalize balances if needed, then copy and seal in one call.
+    function _sealDelegations(uint256[] memory ids, address[] memory ds, address[] memory sbs) internal {
+        if (!storageV2.migrationFinalized()) storageV2.finalizeMigration();
+        storageV2.seedAndFinalizeDelegations(ids, ds, sbs, block.number, block.timestamp);
     }
 
     // ──────────────────────────────────────────────

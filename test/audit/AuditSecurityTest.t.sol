@@ -27,7 +27,9 @@ contract AuditSecurityTest is PixelMarketBase {
         ids[0] = 1;
         ds[0] = d;
         owners[0] = setBy;
-        storageV2.seedDelegations(ids, ds, owners);
+        if (!storageV2.migrationFinalized()) storageV2.finalizeMigration();
+        // Read the flag above first, so an expectRevert set by the caller lands on the copy itself.
+        storageV2.seedAndFinalizeDelegations(ids, ds, owners, block.number, block.timestamp);
     }
 
     /// @notice Regression: V2 changes only begin after the delegation snapshot is sealed.
@@ -41,8 +43,12 @@ contract AuditSecurityTest is PixelMarketBase {
         _cutover();
         vm.prank(user);
         canvas.revokeDelegate(1);
+        uint256[] memory ids = new uint256[](1);
+        address[] memory ds = new address[](1);
+        address[] memory owners = new address[](1);
+        (ids[0], ds[0], owners[0]) = (1, delegate_, user);
         vm.expectRevert(NormiesCanvasStorageV2.DelegationsSealed.selector);
-        _seed(delegate_, user);
+        storageV2.seedAndFinalizeDelegations(ids, ds, owners, block.number, block.timestamp);
         assertEq(storageV2.delegates(1), address(0));
     }
 

@@ -240,7 +240,7 @@ contract NormiesPixelAccountingTest is PixelMarketBase {
         market.setPaused(false); // the market only needs the balances
         vm.expectRevert(NormiesCanvasV2.MigrationNotFinalized.selector);
         canvas.setPaused(false); // the canvas also needs the delegations
-        storageV2.finalizeDelegations();
+        _sealDelegations(new uint256[](0), new address[](0), new address[](0));
         canvas.setPaused(false);
         assertFalse(canvas.paused());
         canvas.setPaused(true); // pausing again is always allowed
@@ -272,13 +272,14 @@ contract NormiesPixelAccountingTest is PixelMarketBase {
         (ids[0], ds[0], sbs[0]) = (1, delegate_, user); // live: set by the current owner
         (ids[1], ds[1], sbs[1]) = (2, delegate_, user); // stale: set by someone who no longer owns #2
 
+        storageV2.finalizeMigration();
         vm.prank(unauthorized);
         vm.expectRevert("Ownable: caller is not the owner");
-        storageV2.seedDelegations(ids, ds, sbs);
+        storageV2.seedAndFinalizeDelegations(ids, ds, sbs, block.number, block.timestamp);
 
         vm.expectEmit(true, true, false, true);
         emit NormiesCanvasStorageV2.DelegateSet(1, delegate_, user);
-        storageV2.seedDelegations(ids, ds, sbs);
+        _sealDelegations(ids, ds, sbs);
         _cutover();
         uint256 got = _giveTokenPixels(user, 1, 48);
         (address d, address setBy) = canvas.effectiveDelegate(1);
@@ -299,18 +300,26 @@ contract NormiesPixelAccountingTest is PixelMarketBase {
         assertEq(d, address(0));
     }
 
-    function testFinalizeDelegationsClosesSeeding() public {
+    function testDelegationCopyIsOneShot() public {
         (uint256[] memory ids, address[] memory ds, address[] memory sbs) = _one(1, delegate_, user);
-        storageV2.finalizeDelegations();
+        storageV2.finalizeMigration();
+        vm.expectRevert(NormiesCanvasStorageV2.LengthMismatch.selector);
+        storageV2.seedAndFinalizeDelegations(ids, ds, new address[](0), block.number, block.timestamp);
+        assertFalse(storageV2.delegationsSeeded());
+
+        storageV2.seedAndFinalizeDelegations(ids, ds, sbs, block.number, block.timestamp);
         assertTrue(storageV2.delegationsSeeded());
+        assertEq(storageV2.delegates(1), delegate_);
+
+        // Sealed for good: neither a second copy nor an empty one goes through.
+        (ids, ds, sbs) = _one(1, hotWallet, user);
         vm.expectRevert(NormiesCanvasStorageV2.DelegationsSealed.selector);
-        storageV2.seedDelegations(ids, ds, sbs);
+        storageV2.seedAndFinalizeDelegations(ids, ds, sbs, block.number, block.timestamp);
         vm.expectRevert(NormiesCanvasStorageV2.DelegationsSealed.selector);
-        storageV2.finalizeDelegations();
-        (ids, ds, sbs) = _one(1, delegate_, user);
-        sbs = new address[](0);
-        vm.expectRevert(NormiesCanvasStorageV2.DelegationsSealed.selector);
-        storageV2.seedDelegations(ids, ds, sbs);
+        storageV2.seedAndFinalizeDelegations(
+            new uint256[](0), new address[](0), new address[](0), block.number, block.timestamp
+        );
+        assertEq(storageV2.delegates(1), delegate_);
     }
 
     // ──────────────────────────────────────────────

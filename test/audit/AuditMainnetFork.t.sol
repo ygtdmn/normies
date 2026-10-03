@@ -58,7 +58,9 @@ contract AuditMainnetForkTest is Test {
         }
         pixels.migrateBatch(ids);
         pixels.finalizeMigration();
-        pixels.finalizeDelegations();
+        pixels.seedAndFinalizeDelegations(
+            new uint256[](0), new address[](0), new address[](0), block.number, block.timestamp
+        );
         canvas.setPaused(false);
         market.setPaused(false);
     }

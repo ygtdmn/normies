@@ -43,7 +43,6 @@ contract NormiesCanvasStorageV2 is INormiesCanvasStorageV2, Ownable, Lifebuoy {
     error LegacyCanvasNotPaused();
     error DelegationsSealed();
     error DelegationsNotFinalized();
-    error DelegationMigrationAlreadyStarted();
     error MigrationNotFinalized();
     error InvalidSnapshot();
     error LengthMismatch();
@@ -96,12 +95,11 @@ contract NormiesCanvasStorageV2 is INormiesCanvasStorageV2, Ownable, Lifebuoy {
     /// @notice Per-token canvas delegate (painting only) and the owner who set it; stale once the token moves.
     mapping(uint256 => address) public delegates;
     mapping(uint256 => address) public delegateSetBy;
-    /// @notice Set once the delegations copied from the original canvas are final; seedDelegations is closed after.
+    /// @notice Set by seedAndFinalizeDelegations, the only way delegations are copied in; nothing can copy after.
     bool public delegationsSeeded;
     /// @notice Block and timestamp read by the one-transaction delegation migration script.
     uint256 public delegationSnapshotBlock;
     uint256 public delegationSnapshotTimestamp;
-    bool private _delegationSeedingStarted;
 
     mapping(address => uint256) public balanceOf;
 
@@ -268,23 +266,13 @@ contract NormiesCanvasStorageV2 is INormiesCanvasStorageV2, Ownable, Lifebuoy {
     }
 
     /**
-     * @notice Copies delegations from the original canvas exactly as they were there (delegate and the owner who
-     *         set it), so a delegate that was live there stays live and one that went stale stays stale. Owner
-     *         only, closed for good by finalizeDelegations. Low-level setup API; the production migration script
-     *         uses seedAndFinalizeDelegations so the copy cannot be partially committed.
-     */
-    function seedDelegations(
-        uint256[] calldata tokenIds,
-        address[] calldata delegates_,
-        address[] calldata setBy
-    ) external onlyOwner {
-        _seedDelegations(tokenIds, delegates_, setBy);
-    }
-
-    /**
-     * @notice Copies the owner's complete delegation snapshot and seals it in the same transaction.
-     *         The snapshot is taken when the script starts, not when this transaction is mined. Later V1 changes
-     *         deliberately do not propagate to V2. Requires a fresh delegation copy and finalized pixel balances.
+     * @notice Copies the owner's complete delegation snapshot from the original canvas and seals it, in one
+     *         transaction and only once. Records are copied exactly as they were there (delegate and the owner
+     *         who set it), so a delegate that was live there stays live and one that went stale stays stale.
+     *         The snapshot is taken when the script starts, not when this transaction is mined; later V1 changes
+     *         deliberately do not propagate to V2. Requires finalized pixel balances and a paused original canvas.
+     *         An empty snapshot is valid and still seals. There is no other way to copy or seal, so the copy can
+     *         never be partial or empty by accident.
      */
     function seedAndFinalizeDelegations(
         uint256[] calldata tokenIds,
@@ -294,35 +282,18 @@ contract NormiesCanvasStorageV2 is INormiesCanvasStorageV2, Ownable, Lifebuoy {
         uint256 snapshotTimestamp
     ) external onlyOwner {
         require(!delegationsSeeded, DelegationsSealed());
-        require(!_delegationSeedingStarted, DelegationMigrationAlreadyStarted());
         require(migrationFinalized, MigrationNotFinalized());
         require(legacyCanvas.paused(), LegacyCanvasNotPaused());
         require(snapshotBlock <= block.number && snapshotTimestamp <= block.timestamp, InvalidSnapshot());
-        _seedDelegations(tokenIds, delegates_, setBy);
-        delegationSnapshotBlock = snapshotBlock;
-        delegationSnapshotTimestamp = snapshotTimestamp;
-        delegationsSeeded = true;
-        emit DelegationSnapshotFinalized(snapshotBlock, snapshotTimestamp, tokenIds.length);
-    }
-
-    function _seedDelegations(
-        uint256[] calldata tokenIds,
-        address[] calldata delegates_,
-        address[] calldata setBy
-    ) internal {
-        require(!delegationsSeeded, DelegationsSealed());
         require(tokenIds.length == delegates_.length && tokenIds.length == setBy.length, LengthMismatch());
-        _delegationSeedingStarted = true;
         for (uint256 i; i < tokenIds.length; i++) {
             _setDelegate(tokenIds[i], delegates_[i], setBy[i]);
         }
         emit DelegationsSeeded(tokenIds.length);
-    }
-
-    /// @notice Ends the copy. Irreversible: after this only the canvas changes delegations.
-    function finalizeDelegations() external onlyOwner {
-        require(!delegationsSeeded, DelegationsSealed());
+        delegationSnapshotBlock = snapshotBlock;
+        delegationSnapshotTimestamp = snapshotTimestamp;
         delegationsSeeded = true;
+        emit DelegationSnapshotFinalized(snapshotBlock, snapshotTimestamp, tokenIds.length);
     }
 
     function _setDelegate(uint256 tokenId, address delegate, address setBy) internal {
