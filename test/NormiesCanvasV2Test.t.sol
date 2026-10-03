@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
+import { Ownable } from "solady/auth/Ownable.sol";
 import { PixelMarketBase } from "./PixelMarketBase.t.sol";
 import { MockZombie } from "./mocks/MockZombie.sol";
 import { NormiesCanvasV2 } from "../src/NormiesCanvasV2.sol";
@@ -503,6 +504,17 @@ contract NormiesCanvasV2Test is PixelMarketBase {
         assertEq(storageV2.totalWallet(), 0);
         vm.expectRevert(abi.encodeWithSelector(NormiesCanvasV2.InvalidGridSize.selector, 40));
         canvas.setEnlargePrice(40, 1);
+    }
+
+    function testOnlyOwnerOrConfigSetsEnlargePrices() public {
+        address config = address(0xC0F1);
+        canvas.grantRoles(config, 1 << 1);
+        vm.prank(config);
+        canvas.setEnlargePrice(70, 3000);
+        vm.prank(unauthorized);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        canvas.setEnlargePrice(70, 3100);
+        assertEq(canvas.enlargePrice(70), 3000);
     }
 
     // ──────────────────────────────────────────────

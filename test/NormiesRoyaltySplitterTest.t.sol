@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
+import { Ownable } from "solady/auth/Ownable.sol";
 import { Test } from "forge-std/src/Test.sol";
 import { NormiesRoyaltySplitter } from "../src/NormiesRoyaltySplitter.sol";
 import { NormiesRevenuePool } from "../src/NormiesRevenuePool.sol";
@@ -95,7 +96,7 @@ contract NormiesRoyaltySplitterTest is Test {
         vm.expectRevert(NormiesRoyaltySplitter.InvalidBps.selector);
         splitter.setPoolBps(10_001);
         vm.prank(team);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.expectRevert(Ownable.Unauthorized.selector);
         splitter.setPoolBps(0);
     }
 

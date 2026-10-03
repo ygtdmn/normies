@@ -5,7 +5,7 @@ import { INormiesCanvasStorage } from "./interfaces/INormiesCanvasStorage.sol";
 import { INormiesCanvasStorageV2 } from "./interfaces/INormiesCanvasStorageV2.sol";
 import { INormiesCanvasV1 } from "./interfaces/INormiesCanvasV1.sol";
 import { SSTORE2 } from "solady/utils/SSTORE2.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { NormiesAccess } from "./NormiesAccess.sol";
 import { Lifebuoy } from "solady/utils/Lifebuoy.sol";
 
 /**
@@ -32,7 +32,7 @@ import { Lifebuoy } from "solady/utils/Lifebuoy.sol";
  *         can still revoke. Balances earned on the original NormiesCanvas are copied in once, at cutover, by
  *         migrateBatch (which reads them from that canvas itself), and the copy is closed with finalizeMigration.
  */
-contract NormiesCanvasStorageV2 is INormiesCanvasStorageV2, Ownable, Lifebuoy {
+contract NormiesCanvasStorageV2 is INormiesCanvasStorageV2, NormiesAccess, Lifebuoy {
     error NotAuthorized();
     error ZeroAddress();
     error TokenNotTransformed(uint256 tokenId);
@@ -142,7 +142,8 @@ contract NormiesCanvasStorageV2 is INormiesCanvasStorageV2, Ownable, Lifebuoy {
     /// @notice Sum of all attached balances.
     uint256 public totalAttached;
 
-    constructor(INormiesCanvasStorage _legacyStorage, INormiesCanvasV1 _legacyCanvas) Ownable() Lifebuoy() {
+    constructor(INormiesCanvasStorage _legacyStorage, INormiesCanvasV1 _legacyCanvas) Lifebuoy() {
+        _initializeOwner(msg.sender);
         legacyStorage = _legacyStorage;
         legacyCanvas = _legacyCanvas;
     }
@@ -175,7 +176,8 @@ contract NormiesCanvasStorageV2 is INormiesCanvasStorageV2, Ownable, Lifebuoy {
 
     /// @notice Kill switch for spending on someone else's behalf (deposits, paid services and listFrom through an
     ///         allowance). Holders acting for themselves are unaffected and can still change or revoke allowances.
-    function setAllowancesPaused(bool paused) external onlyOwner {
+    ///         A guardian or the owner switches it either way, at once.
+    function setAllowancesPaused(bool paused) external onlyOwnerOrRoles(GUARDIAN_ROLE) {
         allowancesPaused = paused;
         emit AllowancesPausedSet(paused);
     }

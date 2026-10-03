@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
+import { Ownable } from "solady/auth/Ownable.sol";
 import { Test } from "forge-std/src/Test.sol";
 import { PixelMarketBase } from "./PixelMarketBase.t.sol";
 import { NormiesCanvas } from "../src/NormiesCanvas.sol";
@@ -158,7 +159,7 @@ contract DelegationMigrationTest is PixelMarketBase {
         uint256[] memory ids = new uint256[](0);
         address[] memory ds = new address[](0);
         vm.prank(unauthorized);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.expectRevert(Ownable.Unauthorized.selector);
         storageV2.seedAndFinalizeDelegations(ids, ds, ds, 100, block.timestamp);
         vm.expectRevert(NormiesCanvasStorageV2.MigrationNotFinalized.selector);
         storageV2.seedAndFinalizeDelegations(ids, ds, ds, 100, block.timestamp);

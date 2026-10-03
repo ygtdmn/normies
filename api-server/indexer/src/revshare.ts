@@ -87,6 +87,15 @@ ponder.on("NormiesRevenuePool:Swept", async ({ event, context }) => {
   await patchStats(context, { swept: returnedToPool }, meta);
 });
 
+// Cancelled before it opened: nothing was ever claimable, so the epoch no longer counts as allocated. The API only
+// offers claims on "posted" epochs, so a cancelled one simply drops out of every wallet's list.
+ponder.on("NormiesRevenuePool:EpochCancelled", async ({ event, context }) => {
+  const { epochId, returnedToPool } = event.args;
+  const meta = eventMeta(event);
+  await context.db.update(revshareEpoch, { epochId }).set({ status: "cancelled" });
+  await patchStats(context, { allocated: -returnedToPool }, meta);
+});
+
 ponder.on("NormiesRoyaltySplitter:Released", async ({ event, context }) => {
   const { toPool, toTeam } = event.args;
   const meta = eventMeta(event);

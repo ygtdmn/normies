@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
+import { Ownable } from "solady/auth/Ownable.sol";
 import { Test } from "forge-std/src/Test.sol";
 import { PixelMarketBase } from "../PixelMarketBase.t.sol";
 import { NormiesRevenuePool } from "../../src/NormiesRevenuePool.sol";
@@ -154,7 +155,7 @@ contract AuditPoolChecksTest is Test {
     function testAudit_InvariantHandlerPostsWithOwnershipAndSurfacesFailures() public {
         PoolHandler handler = new PoolHandler(pool);
         handler.deposit(5 ether);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.expectRevert(Ownable.Unauthorized.selector);
         handler.post(1 ether, 1 ether, 1 ether);
         pool.transferOwnership(address(handler));
         handler.post(1 ether, 1 ether, 1 ether);
@@ -170,6 +171,7 @@ contract AuditPoolChecksTest is Test {
         vm.deal(address(pool), amount * 2);
         pool.postEpoch(leaf, amount, 100, 900, bytes32(0), "");
         pool.postEpoch(leaf, amount, 901, 999, bytes32(0), "");
+        vm.warp(block.timestamp + pool.POST_DELAY());
         vm.expectRevert(NormiesRevenuePool.InvalidProof.selector);
         pool.claim(2, index, account, amount, new bytes32[](0));
         pool.claim(1, index, account, amount, new bytes32[](0));

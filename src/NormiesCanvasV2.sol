@@ -10,7 +10,7 @@ import { IDelegateRegistryV1 } from "./interfaces/IDelegateRegistryV1.sol";
 import { INormiesZombie } from "./interfaces/INormiesZombie.sol";
 import { NormiesBitmap } from "./NormiesBitmap.sol";
 import { IERC721 } from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { NormiesAccess } from "./NormiesAccess.sol";
 import { Lifebuoy } from "solady/utils/Lifebuoy.sol";
 import { ReentrancyGuardTransient } from "solady/utils/ReentrancyGuardTransient.sol";
 
@@ -21,7 +21,7 @@ import { ReentrancyGuardTransient } from "solady/utils/ReentrancyGuardTransient.
  * @notice Burn Normies for pixels, paint with them, move them between a Normie and a wallet, and spend them on
  *         canvas services (enlargement, blank canvas), which burn them out of circulation.
  */
-contract NormiesCanvasV2 is INormiesCanvasV2, Ownable, Lifebuoy, ReentrancyGuardTransient {
+contract NormiesCanvasV2 is INormiesCanvasV2, NormiesAccess, Lifebuoy, ReentrancyGuardTransient {
     struct BurnCommitment {
         address owner;
         uint256 receiverTokenId;
@@ -117,11 +117,8 @@ contract NormiesCanvasV2 is INormiesCanvasV2, Ownable, Lifebuoy, ReentrancyGuard
     /// @notice Starts paused; unpausing needs storage V2's migration and delegation copies to be finalized.
     bool public paused = true;
 
-    constructor(
-        address _normies,
-        INormiesStorage _originalStorage,
-        INormiesCanvasStorageV2 _canvasStorage
-    ) Ownable() Lifebuoy() {
+    constructor(address _normies, INormiesStorage _originalStorage, INormiesCanvasStorageV2 _canvasStorage) Lifebuoy() {
+        _initializeOwner(msg.sender);
         normies = IERC721(_normies);
         normiesStorage = _originalStorage;
         canvasStorage = _canvasStorage;
@@ -440,7 +437,8 @@ contract NormiesCanvasV2 is INormiesCanvasV2, Ownable, Lifebuoy, ReentrancyGuard
     //  Admin
     // ──────────────────────────────────────────────
 
-    function setPaused(bool _paused) external onlyOwner {
+    /// @notice A guardian or the owner pauses or unpauses, at once. Unpausing needs storage V2's copies to be final.
+    function setPaused(bool _paused) external onlyOwnerOrRoles(GUARDIAN_ROLE) {
         if (!_paused) {
             require(canvasStorage.migrationFinalized() && canvasStorage.delegationsSeeded(), MigrationNotFinalized());
         }
@@ -456,13 +454,13 @@ contract NormiesCanvasV2 is INormiesCanvasV2, Ownable, Lifebuoy, ReentrancyGuard
         zombieContract = _zombie;
     }
 
-    function setEnlargePrice(uint256 size, uint256 cumulativeCost) external onlyOwner {
+    function setEnlargePrice(uint256 size, uint256 cumulativeCost) external onlyOwnerOrRoles(CONFIG_ROLE) {
         require(_isEnlargedGrid(size), InvalidGridSize(size));
         enlargePrice[size] = cumulativeCost;
         emit EnlargePriceSet(size, cumulativeCost);
     }
 
-    function setBlankCanvasPrice(uint256 price) external onlyOwner {
+    function setBlankCanvasPrice(uint256 price) external onlyOwnerOrRoles(CONFIG_ROLE) {
         blankCanvasPrice = price;
         emit BlankCanvasPriceSet(price);
     }
@@ -473,7 +471,7 @@ contract NormiesCanvasV2 is INormiesCanvasV2, Ownable, Lifebuoy, ReentrancyGuard
     }
 
     /// @dev At most 100, and never below the top tier's minimum, or every roll would underflow.
-    function setMaxBurnPercent(uint256 _maxBurnPercent) external onlyOwner {
+    function setMaxBurnPercent(uint256 _maxBurnPercent) external onlyOwnerOrRoles(CONFIG_ROLE) {
         require(
             _maxBurnPercent <= 100 && _maxBurnPercent >= tierMinPercents[tierMinPercents.length - 1], InvalidBurnTiers()
         );
@@ -485,7 +483,10 @@ contract NormiesCanvasV2 is INormiesCanvasV2, Ownable, Lifebuoy, ReentrancyGuard
      * @notice Replaces the tier tables. `_minPercents` has one more entry than `_thresholds`: thresholds strictly
      *         ascending, minimums non-decreasing and none above maxBurnPercent. Any number of tiers, at least one.
      */
-    function setBurnTiers(uint256[] calldata _thresholds, uint256[] calldata _minPercents) external onlyOwner {
+    function setBurnTiers(
+        uint256[] calldata _thresholds,
+        uint256[] calldata _minPercents
+    ) external onlyOwnerOrRoles(CONFIG_ROLE) {
         require(_minPercents.length == _thresholds.length + 1, InvalidBurnTiers());
         for (uint256 i; i < _thresholds.length; i++) {
             require(i == 0 || _thresholds[i] > _thresholds[i - 1], InvalidBurnTiers());

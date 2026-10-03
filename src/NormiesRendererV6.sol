@@ -11,7 +11,7 @@ import { NormiesBitmap } from "./NormiesBitmap.sol";
 import { LibString } from "solady/utils/LibString.sol";
 import { Base64 } from "solady/utils/Base64.sol";
 import { DynamicBufferLib } from "solady/utils/DynamicBufferLib.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable } from "solady/auth/Ownable.sol";
 import { Lifebuoy } from "solady/utils/Lifebuoy.sol";
 
 /**
@@ -35,7 +35,8 @@ contract NormiesRendererV6 is INormiesRenderer, Ownable, Lifebuoy {
 
     uint256 internal constant CELL_PX = 50;
 
-    constructor(INormiesStorage _storage, INormiesCanvasStorageV2 _transformStorage) Ownable() Lifebuoy() {
+    constructor(INormiesStorage _storage, INormiesCanvasStorageV2 _transformStorage) Lifebuoy() {
+        _initializeOwner(msg.sender);
         storageContract = _storage;
         transformStorageContract = _transformStorage;
     }

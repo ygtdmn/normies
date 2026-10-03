@@ -16,8 +16,11 @@ first problem (the rules are in `api-server/src/revshare/guards.ts`):
 5. Rebuilds it from scratch against `RPC_URL_VERIFY`, after checking both providers agree on the end block's
    hash. Any difference (amount, samples, total, root, ...) means it does not post.
 6. Re-reads the pool: not paused, same next epoch id, contiguous range, enough unreserved ETH.
-7. Posts the root from the owner key and reads the posted epoch back. Claims open in that block. There is no
-   dispute window, which is why steps 5 and 6 exist.
+7. Posts the root and reads the posted epoch back. There is no owner key on this machine (audit D-H1): the job's
+   `PRIVATE_KEY` holds the pool's POSTER role and nothing else. Claims open 24 hours later (`POST_DELAY`); until
+   then the Operations Safe can `cancelEpoch` a bad root, and the next run posts the range again under a new id.
+   A key without the role writes `REVSHARE_DIR/proposals/<id>.safe.json` (a Safe Transaction Builder batch for the
+   pool owner) instead, and later runs leave a pending proposal alone until the pool shows it posted.
 
 An epoch shorter than `MIN_EPOCH_BLOCKS` is not posted, so running the job twice is harmless. A run that fails
 leaves nothing behind but the epoch file and can simply be run again.

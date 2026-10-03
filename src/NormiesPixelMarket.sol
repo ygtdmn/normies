@@ -3,7 +3,7 @@ pragma solidity 0.8.33;
 
 import { INormiesPixelMarket } from "./interfaces/INormiesPixelMarket.sol";
 import { INormiesCanvasStorageV2 } from "./interfaces/INormiesCanvasStorageV2.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { NormiesAccess } from "./NormiesAccess.sol";
 import { Lifebuoy } from "solady/utils/Lifebuoy.sol";
 import { ReentrancyGuardTransient } from "solady/utils/ReentrancyGuardTransient.sol";
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
@@ -17,7 +17,7 @@ import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
  *         partial-fill or all-or-nothing and can be cancelled at any time. Once a listing has expired anyone can
  *         return its unsold pixels to the seller (reclaimExpired), so escrow never depends on the seller alone.
  */
-contract NormiesPixelMarket is INormiesPixelMarket, Ownable, Lifebuoy, ReentrancyGuardTransient {
+contract NormiesPixelMarket is INormiesPixelMarket, NormiesAccess, Lifebuoy, ReentrancyGuardTransient {
     error Paused();
     error MigrationNotFinalized();
     error ZeroAmount();
@@ -92,7 +92,8 @@ contract NormiesPixelMarket is INormiesPixelMarket, Ownable, Lifebuoy, Reentranc
     /// @notice Starts paused; unpausing needs storage V2's migration to be finalized.
     bool public paused = true;
 
-    constructor(INormiesCanvasStorageV2 _pixels) Ownable() Lifebuoy() {
+    constructor(INormiesCanvasStorageV2 _pixels) Lifebuoy() {
+        _initializeOwner(msg.sender);
         pixels = _pixels;
     }
 
@@ -284,12 +285,12 @@ contract NormiesPixelMarket is INormiesPixelMarket, Ownable, Lifebuoy, Reentranc
     // ──────────────────────────────────────────────
 
     /// @notice Replaces the listing floor (see minPricePerPixel). Open listings below the new floor stay as they are.
-    function setMinPricePerPixel(uint96 _minPricePerPixel) external onlyOwner {
+    function setMinPricePerPixel(uint96 _minPricePerPixel) external onlyOwnerOrRoles(CONFIG_ROLE) {
         minPricePerPixel = _minPricePerPixel;
         emit MinPricePerPixelSet(_minPricePerPixel);
     }
 
-    function setFeeConfig(uint16 _feeBps, uint16 _revenueShareBps) external onlyOwner {
+    function setFeeConfig(uint16 _feeBps, uint16 _revenueShareBps) external onlyOwnerOrRoles(CONFIG_ROLE) {
         require(_feeBps <= MAX_FEE_BPS, FeeTooHigh());
         require(_revenueShareBps <= BPS, InvalidBps());
         feeBps = _feeBps;
@@ -303,7 +304,9 @@ contract NormiesPixelMarket is INormiesPixelMarket, Ownable, Lifebuoy, Reentranc
         emit FeeRecipientsSet(_treasury, _revenueShare);
     }
 
-    function setPaused(bool _paused) external onlyOwner {
+    /// @notice A guardian or the owner pauses or unpauses, at once. Unpausing needs storage V2's balance copy to be
+    ///         final.
+    function setPaused(bool _paused) external onlyOwnerOrRoles(GUARDIAN_ROLE) {
         if (!_paused) require(pixels.migrationFinalized(), MigrationNotFinalized());
         paused = _paused;
         emit PausedSet(_paused);

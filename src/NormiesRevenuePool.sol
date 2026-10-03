@@ -3,7 +3,7 @@ pragma solidity 0.8.33;
 
 import { INormiesRevenuePool } from "./interfaces/INormiesRevenuePool.sol";
 import { IWETH } from "./interfaces/IWETH.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { NormiesAccess } from "./NormiesAccess.sol";
 import { MerkleProofLib } from "solady/utils/MerkleProofLib.sol";
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 import { SafeCastLib } from "solady/utils/SafeCastLib.sol";
@@ -15,14 +15,15 @@ import { ReentrancyGuardTransient } from "solady/utils/ReentrancyGuardTransient.
  * @author Smart Contract by Yigit Duman (https://x.com/yigitduman)
  * @notice Holds the holders' share of Pixel Market fees and collection royalties and pays it out in epochs.
  *         Scores depend on what every wallet holds over time, which no contract can see, so an open-source scorer
- *         computes each epoch's payouts from chain data and the owner publishes their Merkle root here; claims open
- *         at once. The revenue share is run on the owner's word: the owner posts the roots, can pause posting and
- *         can withdraw ETH no epoch has reserved. What holders are owed is reserved the moment a root is posted and
- *         can only leave through claims; a root can never pay out more than its epoch holds; what goes unclaimed
- *         after its fixed claim window rolls back into the pool. Later default-window changes cannot alter
- *         the deadline promised to an already-posted epoch.
+ *         computes each epoch's payouts from chain data and a poster publishes their Merkle root here. Claims open
+ *         POST_DELAY after the post; until then a guardian can cancel a bad root, which returns its reservation to
+ *         the pool and reopens its block range. What holders are owed is reserved the moment a root is posted and
+ *         can only leave through claims (or that cancel); a root can never pay out more than its epoch holds; what
+ *         goes unclaimed after its fixed claim window rolls back into the pool. Later default-window changes cannot
+ *         alter the deadline promised to an already-posted epoch. Withdrawing ETH no epoch has reserved is the
+ *         owner's alone (the Treasury Safe), see NormiesAccess.
  */
-contract NormiesRevenuePool is INormiesRevenuePool, Ownable, ReentrancyGuardTransient {
+contract NormiesRevenuePool is INormiesRevenuePool, NormiesAccess, ReentrancyGuardTransient {
     using SafeCastLib for uint256;
 
     error Paused();
@@ -37,6 +38,8 @@ contract NormiesRevenuePool is INormiesRevenuePool, Ownable, ReentrancyGuardTran
     error ClaimWindowTooShort(uint64 requested, uint64 minimum);
     error ZeroAddress();
     error CannotRescueWeth();
+    error ClaimsNotOpen(uint256 epochId, uint64 claimableAt);
+    error EpochAlreadyOpen(uint256 epochId);
 
     event EpochPosted(
         uint256 indexed epochId,
@@ -51,6 +54,7 @@ contract NormiesRevenuePool is INormiesRevenuePool, Ownable, ReentrancyGuardTran
     );
     event Claimed(uint256 indexed epochId, uint256 indexed index, address indexed account, uint256 amount);
     event Swept(uint256 indexed epochId, uint256 returnedToPool);
+    event EpochCancelled(uint256 indexed epochId, uint256 returnedToPool, uint64 cursorToBlock);
     event Unwrapped(uint256 amount);
     event ClaimWindowSet(uint64 claimWindow);
     event Withdrawn(address indexed to, uint256 amount);
@@ -67,6 +71,8 @@ contract NormiesRevenuePool is INormiesRevenuePool, Ownable, ReentrancyGuardTran
     /// @notice Last block covered by a posted epoch. The next epoch has to start right after it.
     uint64 public cursorToBlock;
 
+    /// @notice How long a posted epoch waits before claims open. A guardian can cancel it until then.
+    uint64 public constant POST_DELAY = 24 hours;
     /// @notice Minimum guaranteed claim window for newly posted epochs.
     uint64 public constant MIN_CLAIM_WINDOW = 1 days;
     /// @notice Default window for future epochs only; each posted epoch retains its own sweepableAt.
@@ -74,7 +80,8 @@ contract NormiesRevenuePool is INormiesRevenuePool, Ownable, ReentrancyGuardTran
     /// @notice Blocks posting only. Claims on a posted epoch can never be paused.
     bool public paused;
 
-    constructor(IWETH _weth) Ownable() {
+    constructor(IWETH _weth) {
+        _initializeOwner(msg.sender);
         weth = _weth;
     }
 
@@ -105,8 +112,9 @@ contract NormiesRevenuePool is INormiesRevenuePool, Ownable, ReentrancyGuardTran
 
     /**
      * @notice Publish an epoch's Merkle root. `amount` is the sum of its leaves and is reserved immediately, so a
-     *         later epoch can never be promised the same ETH. Claims open in the same block. Block ranges have to
-     *         follow each other without gaps. The current claimWindow fixes sweepableAt for this epoch.
+     *         later epoch can never be promised the same ETH. Claims open POST_DELAY later; until then a guardian
+     *         can cancel it. Block ranges have to follow each other without gaps. The current claimWindow, counted
+     *         from the opening, fixes sweepableAt for this epoch. A poster or the owner may post.
      * @param configHash Hash of the scoring config the root was computed with.
      * @param dataURI    Where the full payout table and proofs are published.
      */
@@ -117,7 +125,7 @@ contract NormiesRevenuePool is INormiesRevenuePool, Ownable, ReentrancyGuardTran
         uint64 toBlock,
         bytes32 configHash,
         string calldata dataURI
-    ) external onlyOwner returns (uint256 epochId) {
+    ) external onlyOwnerOrRoles(POSTER_ROLE) returns (uint256 epochId) {
         require(!paused, Paused());
         require(root != bytes32(0) && amount > 0 && toBlock >= fromBlock && toBlock < block.number, InvalidEpoch());
 
@@ -128,14 +136,13 @@ contract NormiesRevenuePool is INormiesRevenuePool, Ownable, ReentrancyGuardTran
         require(amount <= free, InsufficientUnallocated(free, amount));
 
         epochId = nextEpochId++;
-        uint64 claimableAt = block.timestamp.toUint64();
-        uint64 sweepableAt = (block.timestamp + claimWindow).toUint64();
+        uint64 claimableAt = (block.timestamp + POST_DELAY).toUint64();
         _epochs[epochId] = Epoch({
             root: root,
             amount: amount.toUint128(),
             claimed: 0,
             claimableAt: claimableAt,
-            sweepableAt: sweepableAt,
+            sweepableAt: (uint256(claimableAt) + claimWindow).toUint64(),
             fromBlock: fromBlock,
             toBlock: toBlock,
             status: Status.Posted
@@ -143,7 +150,9 @@ contract NormiesRevenuePool is INormiesRevenuePool, Ownable, ReentrancyGuardTran
         outstanding += amount;
         cursorToBlock = toBlock;
 
-        emit EpochPosted(epochId, root, amount, fromBlock, toBlock, claimableAt, sweepableAt, configHash, dataURI);
+        emit EpochPosted(
+            epochId, root, amount, fromBlock, toBlock, claimableAt, _epochs[epochId].sweepableAt, configHash, dataURI
+        );
     }
 
     // ──────────────────────────────────────────────
@@ -177,6 +186,7 @@ contract NormiesRevenuePool is INormiesRevenuePool, Ownable, ReentrancyGuardTran
     ) internal {
         Epoch storage epoch = _epochs[epochId];
         require(epoch.status == Status.Posted, NotClaimable(epochId));
+        require(block.timestamp >= epoch.claimableAt, ClaimsNotOpen(epochId, epoch.claimableAt));
         require(!isClaimed(epochId, index), AlreadyClaimed(epochId, index));
 
         // Same leaf shape as OpenZeppelin's StandardMerkleTree: double hashed, abi.encode of the values.
@@ -207,6 +217,25 @@ contract NormiesRevenuePool is INormiesRevenuePool, Ownable, ReentrancyGuardTran
         emit Swept(epochId, leftover);
     }
 
+    /**
+     * @notice Withdraws an epoch before its claims open: its reservation goes back to the pool, which pays it out
+     *         again in a later epoch. When it is the latest posted range, that range can be posted again (the next
+     *         epoch gets a new id). A guardian or the owner; nothing can be cancelled once claims are open.
+     */
+    function cancelEpoch(uint256 epochId) external onlyOwnerOrRoles(GUARDIAN_ROLE) {
+        Epoch storage epoch = _epochs[epochId];
+        require(epoch.status == Status.Posted, NotClaimable(epochId));
+        require(block.timestamp < epoch.claimableAt, EpochAlreadyOpen(epochId));
+        epoch.status = Status.Cancelled;
+        // Nothing can have been claimed before the opening, so the whole amount is still reserved.
+        outstanding -= epoch.amount;
+        if (epoch.toBlock == cursorToBlock) {
+            uint64 from = epoch.fromBlock;
+            cursorToBlock = from == 0 ? 0 : from - 1;
+        }
+        emit EpochCancelled(epochId, epoch.amount, cursorToBlock);
+    }
+
     /// @notice Turns any WETH the pool holds (royalties from accepted offers arrive as WETH) into ETH.
     function unwrap() external {
         uint256 balance = weth.balanceOf(address(this));
@@ -220,7 +249,7 @@ contract NormiesRevenuePool is INormiesRevenuePool, Ownable, ReentrancyGuardTran
     // ──────────────────────────────────────────────
 
     /// @notice Sets the window for future epochs only. Posted deadlines cannot be shortened or extended.
-    function setClaimWindow(uint64 _claimWindow) external onlyOwner {
+    function setClaimWindow(uint64 _claimWindow) external onlyOwnerOrRoles(CONFIG_ROLE) {
         require(_claimWindow >= MIN_CLAIM_WINDOW, ClaimWindowTooShort(_claimWindow, MIN_CLAIM_WINDOW));
         claimWindow = _claimWindow;
         emit ClaimWindowSet(_claimWindow);
@@ -235,7 +264,8 @@ contract NormiesRevenuePool is INormiesRevenuePool, Ownable, ReentrancyGuardTran
         emit Withdrawn(to, amount);
     }
 
-    function setPaused(bool _paused) external onlyOwner {
+    /// @notice Pausing blocks posting only (claims can never be paused). A guardian or the owner, either way, at once.
+    function setPaused(bool _paused) external onlyOwnerOrRoles(GUARDIAN_ROLE) {
         paused = _paused;
         emit PausedSet(_paused);
     }

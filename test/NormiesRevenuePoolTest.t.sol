@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
+import { Ownable } from "solady/auth/Ownable.sol";
 import { Test } from "forge-std/src/Test.sol";
 import { NormiesRevenuePool } from "../src/NormiesRevenuePool.sol";
 import { INormiesRevenuePool } from "../src/interfaces/INormiesRevenuePool.sol";
@@ -45,6 +46,7 @@ contract PoolHandler is Test {
     uint256 public posts;
     uint256 public claims;
     uint256 public sweeps;
+    uint256 public cancels;
     uint256 public withdrawals;
 
     struct Posted {
@@ -97,10 +99,22 @@ contract PoolHandler is Test {
         if (_posted.length == 0) return;
         Posted storage p = _posted[which % _posted.length];
         uint256 i = who % 3;
-        if (pool.getEpoch(p.id).status != INormiesRevenuePool.Status.Posted || pool.isClaimed(p.id, i)) return;
+        INormiesRevenuePool.Epoch memory e = pool.getEpoch(p.id);
+        if (e.status != INormiesRevenuePool.Status.Posted || pool.isClaimed(p.id, i)) return;
+        if (block.timestamp < e.claimableAt) return;
         pool.claim(p.id, i, accounts[i], p.amounts[i], MerkleTreeLib.leafProof(p.tree, i));
         paid += p.amounts[i];
         claims++;
+    }
+
+    /// @dev The guardian path: withdraw an epoch before it opens; its reservation returns to the pool.
+    function cancel(uint256 which) external {
+        if (_posted.length == 0) return;
+        uint256 id = _posted[which % _posted.length].id;
+        INormiesRevenuePool.Epoch memory e = pool.getEpoch(id);
+        if (e.status != INormiesRevenuePool.Status.Posted || block.timestamp >= e.claimableAt) return;
+        pool.cancelEpoch(id);
+        cancels++;
     }
 
     function sweep(uint256 which) external {
@@ -124,6 +138,9 @@ contract PoolHandler is Test {
 }
 
 contract NormiesRevenuePoolTest is Test {
+    uint256 constant GUARDIAN = 1 << 0;
+    uint256 constant POSTER = 1 << 2;
+
     NormiesRevenuePool pool;
     MockWETH weth;
 
@@ -176,15 +193,15 @@ contract NormiesRevenuePoolTest is Test {
         assertEq(pool.unallocated(), 4 ether);
         INormiesRevenuePool.Epoch memory e = pool.getEpoch(1);
         assertEq(e.amount, 6 ether);
-        assertEq(e.claimableAt, block.timestamp);
-        assertEq(e.sweepableAt, block.timestamp + 365 days);
+        assertEq(e.claimableAt, block.timestamp + pool.POST_DELAY());
+        assertEq(e.sweepableAt, block.timestamp + pool.POST_DELAY() + 365 days);
         assertEq(uint8(e.status), uint8(INormiesRevenuePool.Status.Posted));
     }
 
     function testPostGuards() public {
         vm.deal(address(pool), 1 ether);
         vm.prank(alice);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.expectRevert(Ownable.Unauthorized.selector);
         pool.postEpoch(bytes32(uint256(1)), 1, 1, 2, bytes32(0), "");
         vm.expectRevert(NormiesRevenuePool.InvalidEpoch.selector);
         pool.postEpoch(bytes32(0), 1, 1, 2, bytes32(0), "");
@@ -340,7 +357,7 @@ contract NormiesRevenuePoolTest is Test {
         pool.rescueToken(address(weth), address(this));
         _fundAndPost(); // 10 ether in, 6 reserved
         vm.prank(alice);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.expectRevert(Ownable.Unauthorized.selector);
         pool.withdrawUnallocated(alice, 1 ether);
         vm.expectRevert(abi.encodeWithSelector(NormiesRevenuePool.InsufficientUnallocated.selector, 4 ether, 5 ether));
         pool.withdrawUnallocated(alice, 5 ether);
@@ -350,22 +367,30 @@ contract NormiesRevenuePoolTest is Test {
         assertEq(address(pool).balance, pool.outstanding());
     }
 
-    function testClaimsOpenAtOnceAndWindowChangesAffectOnlyFutureEpochs() public {
+    function testClaimsOpenAfterThePostDelayAndWindowChangesAffectOnlyFutureEpochs() public {
         (uint256 id, bytes32[] memory tree,) = _fundAndPost();
-        uint256 postedAt = block.timestamp;
-        pool.claim(id, 0, alice, 1 ether, MerkleTreeLib.leafProof(tree, 0));
+        uint64 opensAt = uint64(block.timestamp + pool.POST_DELAY());
+        bytes32[] memory proof = MerkleTreeLib.leafProof(tree, 0);
+        vm.expectRevert(abi.encodeWithSelector(NormiesRevenuePool.ClaimsNotOpen.selector, id, opensAt));
+        pool.claim(id, 0, alice, 1 ether, proof);
+        vm.warp(opensAt - 1);
+        vm.expectRevert(abi.encodeWithSelector(NormiesRevenuePool.ClaimsNotOpen.selector, id, opensAt));
+        pool.claim(id, 0, alice, 1 ether, proof);
+        vm.warp(opensAt);
+        pool.claim(id, 0, alice, 1 ether, proof);
         assertEq(alice.balance, 1 ether);
 
         pool.setClaimWindow(30 days);
         bytes32[] memory laterTree = _tree(2, [uint256(1 ether), 1 ether, 1 ether]);
         uint256 later = _post(laterTree, 3 ether, 901, 950);
-        assertEq(pool.getEpoch(id).sweepableAt, postedAt + 365 days);
-        assertEq(pool.getEpoch(later).sweepableAt, postedAt + 30 days);
+        uint256 laterOpens = block.timestamp + pool.POST_DELAY();
+        assertEq(pool.getEpoch(id).sweepableAt, opensAt + 365 days);
+        assertEq(pool.getEpoch(later).sweepableAt, laterOpens + 30 days);
 
-        vm.warp(postedAt + 30 days - 1);
+        vm.warp(laterOpens + 30 days - 1);
         vm.expectRevert(abi.encodeWithSelector(NormiesRevenuePool.ClaimWindowOpen.selector, later));
         pool.sweep(later);
-        vm.warp(postedAt + 30 days);
+        vm.warp(laterOpens + 30 days);
         pool.sweep(later);
         vm.expectRevert(abi.encodeWithSelector(NormiesRevenuePool.ClaimWindowOpen.selector, id));
         pool.sweep(id);
@@ -373,7 +398,7 @@ contract NormiesRevenuePoolTest is Test {
         assertEq(bob.balance, 2 ether);
         assertEq(pool.outstanding(), 3 ether);
 
-        vm.warp(postedAt + 365 days);
+        vm.warp(uint256(opensAt) + 365 days);
         pool.sweep(id);
         assertEq(pool.outstanding(), 0);
     }
@@ -382,13 +407,13 @@ contract NormiesRevenuePoolTest is Test {
         uint64 minimum = pool.MIN_CLAIM_WINDOW();
         pool.setClaimWindow(minimum);
         (uint256 id,,) = _fundAndPost();
-        uint256 postedAt = block.timestamp;
+        uint256 opensAt = block.timestamp + pool.POST_DELAY();
         pool.setClaimWindow(730 days);
         uint256 later = pool.postEpoch(bytes32(uint256(1)), 1 ether, 901, 950, bytes32(0), "");
-        assertEq(pool.getEpoch(id).sweepableAt, postedAt + minimum);
-        assertEq(pool.getEpoch(later).sweepableAt, postedAt + 730 days);
+        assertEq(pool.getEpoch(id).sweepableAt, opensAt + minimum);
+        assertEq(pool.getEpoch(later).sweepableAt, opensAt + 730 days);
 
-        vm.warp(postedAt + minimum);
+        vm.warp(opensAt + minimum);
         pool.sweep(id);
         vm.expectRevert(abi.encodeWithSelector(NormiesRevenuePool.ClaimWindowOpen.selector, later));
         pool.sweep(later);
@@ -403,7 +428,7 @@ contract NormiesRevenuePoolTest is Test {
         vm.expectRevert(abi.encodeWithSelector(NormiesRevenuePool.ClaimWindowTooShort.selector, minimum - 1, minimum));
         pool.setClaimWindow(minimum - 1);
         vm.prank(alice);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.expectRevert(Ownable.Unauthorized.selector);
         pool.setClaimWindow(minimum);
         pool.setClaimWindow(minimum);
         assertEq(pool.claimWindow(), minimum);
@@ -411,13 +436,93 @@ contract NormiesRevenuePoolTest is Test {
 
     function testPostEmitsFixedDeadline() public {
         vm.deal(address(pool), 1 ether);
-        uint64 postedAt = uint64(block.timestamp);
-        uint64 deadline = postedAt + pool.claimWindow();
+        uint64 opensAt = uint64(block.timestamp) + pool.POST_DELAY();
+        uint64 deadline = opensAt + pool.claimWindow();
         bytes32 root = _leaf(1, 0, alice, 1 ether);
         vm.expectEmit(true, false, false, true, address(pool));
-        emit NormiesRevenuePool.EpochPosted(1, root, 1 ether, 100, 900, postedAt, deadline, bytes32(0), "");
+        emit NormiesRevenuePool.EpochPosted(1, root, 1 ether, 100, 900, opensAt, deadline, bytes32(0), "");
         pool.postEpoch(root, 1 ether, 100, 900, bytes32(0), "");
         assertEq(pool.getEpoch(1).sweepableAt, deadline);
+    }
+
+    // ──────────────────────────────────────────────
+    //  Cancelling before claims open, and who may do what
+    // ──────────────────────────────────────────────
+
+    function testGuardianCancelsAnUnopenedEpochAndItsRangeCanBePostedAgain() public {
+        address guardian = address(0x6A4D);
+        pool.grantRoles(guardian, GUARDIAN);
+        (uint256 id, bytes32[] memory tree,) = _fundAndPost(); // blocks 100..900, 6 of 10 ether
+        assertEq(pool.cursorToBlock(), 900);
+
+        vm.prank(alice);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        pool.cancelEpoch(id);
+
+        vm.expectEmit(true, false, false, true, address(pool));
+        emit NormiesRevenuePool.EpochCancelled(id, 6 ether, 99);
+        vm.prank(guardian);
+        pool.cancelEpoch(id);
+        assertEq(uint8(pool.getEpoch(id).status), uint8(INormiesRevenuePool.Status.Cancelled));
+        assertEq(pool.outstanding(), 0);
+        assertEq(pool.unallocated(), 10 ether);
+
+        // Nothing can be claimed or swept from it, ever.
+        vm.warp(block.timestamp + 400 days);
+        vm.expectRevert(abi.encodeWithSelector(NormiesRevenuePool.NotClaimable.selector, id));
+        pool.claim(id, 0, alice, 1 ether, MerkleTreeLib.leafProof(tree, 0));
+        vm.expectRevert(abi.encodeWithSelector(NormiesRevenuePool.NotClaimable.selector, id));
+        pool.sweep(id);
+
+        // The same range goes out again under a new id.
+        uint256 again = _post(_tree(2, [uint256(1 ether), 2 ether, 3 ether]), 6 ether, 100, 900);
+        assertEq(again, 2);
+        assertEq(pool.cursorToBlock(), 900);
+    }
+
+    function testNothingIsCancelledOnceClaimsOpen() public {
+        (uint256 id,,) = _fundAndPost();
+        vm.warp(block.timestamp + pool.POST_DELAY());
+        vm.expectRevert(abi.encodeWithSelector(NormiesRevenuePool.EpochAlreadyOpen.selector, id));
+        pool.cancelEpoch(id);
+    }
+
+    function testCancellingAnOlderEpochKeepsTheLatestRange() public {
+        (uint256 first,,) = _fundAndPost(); // 100..900
+        uint256 second = _post(_tree(2, [uint256(1 ether), 1 ether, 1 ether]), 3 ether, 901, 950);
+        pool.cancelEpoch(first);
+        assertEq(pool.cursorToBlock(), 950);
+        assertEq(pool.outstanding(), 3 ether);
+        assertEq(uint8(pool.getEpoch(second).status), uint8(INormiesRevenuePool.Status.Posted));
+    }
+
+    function testPosterOnlyPostsAndTheGuardianPausesBothWays() public {
+        address poster = address(0x9057);
+        address guardian = address(0x6A4D);
+        pool.grantRoles(poster, POSTER);
+        pool.grantRoles(guardian, GUARDIAN);
+        vm.deal(address(pool), 1 ether);
+
+        vm.prank(poster);
+        uint256 id = pool.postEpoch(_leaf(1, 0, alice, 1 ether), 1 ether, 100, 900, bytes32(0), "");
+        vm.startPrank(poster);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        pool.withdrawUnallocated(poster, 0);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        pool.cancelEpoch(id);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        pool.setPaused(true);
+        vm.stopPrank();
+
+        vm.prank(guardian);
+        pool.setPaused(true);
+        vm.prank(guardian);
+        pool.setPaused(false); // at once
+        assertFalse(pool.paused());
+        pool.setPaused(true); // the owner can too
+        vm.prank(alice);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        pool.setPaused(false);
     }
 
     function testFuzzWindowChangesCannotAlterPostedDeadline(uint64 initial, uint64 updated) public {
@@ -426,7 +531,7 @@ contract NormiesRevenuePoolTest is Test {
         updated = uint64(bound(updated, minimum, 3650 days));
         pool.setClaimWindow(initial);
         (uint256 id,,) = _fundAndPost();
-        uint256 deadline = block.timestamp + initial;
+        uint256 deadline = block.timestamp + pool.POST_DELAY() + initial;
         pool.setClaimWindow(updated);
         assertEq(pool.getEpoch(id).sweepableAt, deadline);
         vm.warp(deadline - 1);
@@ -452,12 +557,16 @@ contract NormiesRevenuePoolInvariantTest is Test {
         // Exercise every operation before fuzzing, leaving both live and swept epochs.
         handler.deposit(5 ether);
         handler.post(1 ether, 1 ether, 1 ether);
+        vm.warp(block.timestamp + pool.POST_DELAY()); // claims open after the post delay
         handler.claim(0, 1);
         handler.warp(366 days);
         handler.sweep(0);
         handler.withdraw(1 ether);
         handler.post(1 ether, 1 ether, 1 ether);
-        handler.claim(1, 0);
+        handler.cancel(1); // cancelled before it opened: its range is posted again below
+        handler.post(1 ether, 1 ether, 1 ether);
+        vm.warp(block.timestamp + pool.POST_DELAY());
+        handler.claim(2, 0);
         targetContract(address(handler));
     }
 
@@ -481,7 +590,8 @@ contract NormiesRevenuePoolInvariantTest is Test {
         }
         assertEq(received, handler.paid());
         assertEq(pool.nextEpochId(), handler.posts() + 1);
-        assertGe(handler.posts(), 2);
+        assertGe(handler.posts(), 3);
+        assertGe(handler.cancels(), 1);
         assertGe(handler.claims(), 2);
         assertGe(handler.sweeps(), 1);
         assertGe(handler.withdrawals(), 1);

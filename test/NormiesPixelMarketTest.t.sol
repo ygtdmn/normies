@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
+import { Ownable } from "solady/auth/Ownable.sol";
 import { PixelMarketBase } from "./PixelMarketBase.t.sol";
 import { NormiesPixelMarket } from "../src/NormiesPixelMarket.sol";
 import { NormiesCanvasStorageV2 } from "../src/NormiesCanvasStorageV2.sol";
@@ -235,7 +236,7 @@ contract NormiesPixelMarketTest is PixelMarketBase {
         vm.expectRevert(NormiesPixelMarket.InvalidBps.selector);
         market.setFeeConfig(1000, 10_001);
         vm.prank(unauthorized);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.expectRevert(Ownable.Unauthorized.selector);
         market.setFeeConfig(500, 5000);
         market.setFeeConfig(500, 2000);
         assertEq(market.feeBps(), 500);
@@ -373,7 +374,7 @@ contract NormiesPixelMarketTest is PixelMarketBase {
         fresh.list(50, 0.0018 ether, true, 0);
 
         vm.prank(unauthorized);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.expectRevert(Ownable.Unauthorized.selector);
         fresh.setMinPricePerPixel(1);
         vm.expectEmit(false, false, false, true);
         emit NormiesPixelMarket.MinPricePerPixelSet(0.002 ether);

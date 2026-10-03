@@ -94,7 +94,7 @@ contract PoolWindowReviewTest is Test {
         bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(uint256(1), uint256(0), holder, uint256(1 ether)))));
         pool.postEpoch(leaf, 1 ether, 1, 999, bytes32(0), "");
         uint256 deadline = pool.getEpoch(1).sweepableAt;
-        assertEq(deadline, block.timestamp + 365 days);
+        assertEq(deadline, block.timestamp + pool.POST_DELAY() + 365 days);
         uint64 minimum = pool.MIN_CLAIM_WINDOW();
         vm.expectRevert(abi.encodeWithSelector(NormiesRevenuePool.ClaimWindowTooShort.selector, 0, minimum));
         pool.setClaimWindow(0);

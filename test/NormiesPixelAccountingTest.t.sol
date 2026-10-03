@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
+import { Ownable } from "solady/auth/Ownable.sol";
 import { Test } from "forge-std/src/Test.sol";
 import { PixelMarketBase } from "./PixelMarketBase.t.sol";
 import { NormiesCanvasStorageV2 } from "../src/NormiesCanvasStorageV2.sol";
@@ -103,7 +104,7 @@ contract NormiesPixelAccountingTest is PixelMarketBase {
 
     function testSetMoverOnlyOwner() public {
         vm.prank(unauthorized);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.expectRevert(Ownable.Unauthorized.selector);
         storageV2.setMoverRoles(unauthorized, 1);
         vm.expectRevert(NormiesCanvasStorageV2.ZeroAddress.selector);
         storageV2.setMoverRoles(address(0), 1);
@@ -208,7 +209,7 @@ contract NormiesPixelAccountingTest is PixelMarketBase {
 
     function testFinalizeClosesMigration() public {
         vm.prank(unauthorized);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.expectRevert(Ownable.Unauthorized.selector);
         storageV2.finalizeMigration();
 
         uint256 got = _earnOnV1(user, 1, 48);
@@ -282,7 +283,7 @@ contract NormiesPixelAccountingTest is PixelMarketBase {
 
         storageV2.finalizeMigration();
         vm.prank(unauthorized);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.expectRevert(Ownable.Unauthorized.selector);
         storageV2.seedAndFinalizeDelegations(ids, ds, sbs, block.number, block.timestamp);
 
         vm.expectEmit(true, true, false, true);
@@ -396,7 +397,7 @@ contract NormiesPixelAccountingTest is PixelMarketBase {
         vm.expectRevert(abi.encodeWithSelector(NormiesCanvasStorageV2.CooldownTooLong.selector, 30, 7 days));
         storageV2.setCooldown(wrapper, 30); // never shorter than the default
         vm.prank(unauthorized);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.expectRevert(Ownable.Unauthorized.selector);
         storageV2.setCooldown(wrapper, 7 days);
         vm.expectEmit(true, false, false, true);
         emit NormiesCanvasStorageV2.CooldownSet(wrapper, 7 days);
@@ -447,7 +448,7 @@ contract NormiesPixelAccountingTest is PixelMarketBase {
         vm.prank(user);
         storageV2.approve(buyer, 50);
         vm.prank(unauthorized);
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.expectRevert(Ownable.Unauthorized.selector);
         storageV2.setAllowancesPaused(true);
         vm.expectEmit(false, false, false, true);
         emit NormiesCanvasStorageV2.AllowancesPausedSet(true);

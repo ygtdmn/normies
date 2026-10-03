@@ -125,6 +125,7 @@ contract CurrentDefaultsForkReviewTest is Test {
         assertEq(TEAM.balance - beforeTeam, distributable - distributable / 2);
         bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(uint256(1), uint256(0), BUYER, uint256(1 ether)))));
         pool.postEpoch(leaf, 1 ether, uint64(FORK_BLOCK - 1), uint64(FORK_BLOCK - 1), bytes32(0), "");
+        vm.warp(block.timestamp + pool.POST_DELAY());
         uint256 beforeBuyer = BUYER.balance;
         pool.claim(1, 0, BUYER, 1 ether, new bytes32[](0));
         assertEq(BUYER.balance - beforeBuyer, 1 ether);

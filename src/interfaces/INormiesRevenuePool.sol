@@ -5,14 +5,15 @@ interface INormiesRevenuePool {
     enum Status {
         None,
         Posted,
-        Swept
+        Swept,
+        Cancelled
     }
 
     struct Epoch {
         bytes32 root;
         uint128 amount;
         uint128 claimed;
-        /// @dev When the epoch was posted; claims open at once and the claim window counts from here.
+        /// @dev POST_DELAY after the epoch was posted; claims open here and the claim window counts from here.
         uint64 claimableAt;
         /// @dev Fixed at posting. Changes to the default claim window never change this deadline.
         uint64 sweepableAt;
@@ -40,6 +41,7 @@ interface INormiesRevenuePool {
     function claim(uint256 epochId, uint256 index, address account, uint256 amount, bytes32[] calldata proof) external;
     function claimMany(Claim[] calldata claims) external;
     function sweep(uint256 epochId) external;
+    function cancelEpoch(uint256 epochId) external;
     function unwrap() external;
 
     function getEpoch(uint256 epochId) external view returns (Epoch memory);

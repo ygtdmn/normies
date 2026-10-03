@@ -134,6 +134,10 @@ const RevenueClaimedEvent = parseAbiItem(
 const EpochSweptEvent = parseAbiItem(
   "event Swept(uint256 indexed epochId, uint256 returnedToPool)",
 );
+// A guardian withdrew an epoch before its claims opened (audit D-H1): its reservation went back to the pool.
+const EpochCancelledEvent = parseAbiItem(
+  "event EpochCancelled(uint256 indexed epochId, uint256 returnedToPool, uint64 cursorToBlock)",
+);
 const RoyaltiesReleasedEvent = parseAbiItem(
   "event Released(uint256 toPool, uint256 toTeam)",
 );
@@ -265,7 +269,7 @@ export default createConfig({
       startBlock: pixelMarketStartBlock,
     },
     NormiesRevenuePool: {
-      abi: [EpochPostedEvent, RevenueClaimedEvent, EpochSweptEvent],
+      abi: [EpochPostedEvent, RevenueClaimedEvent, EpochSweptEvent, EpochCancelledEvent],
       chain: chainName,
       address: requiredEnv("PONDER_REVENUE_POOL_ADDRESS") as `0x${string}`,
       startBlock: pixelMarketStartBlock,

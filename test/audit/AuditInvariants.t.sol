@@ -56,6 +56,7 @@ contract AuditRevenueHandler is Test {
         uint256 id = 1 + seed % posts;
         INormiesRevenuePool.Epoch memory e = pool.getEpoch(id);
         if (e.status != INormiesRevenuePool.Status.Posted || e.claimed != 0) return;
+        if (block.timestamp < e.claimableAt) return;
         pool.claim(id, 0, ACCOUNT, e.amount, new bytes32[](0));
         paid += e.amount;
         claims++;
@@ -95,6 +96,7 @@ contract AuditRevenueInvariantTest is Test {
         handler.deposit(5 ether);
         handler.post(1 ether);
         handler.post(1 ether);
+        vm.warp(block.timestamp + pool.POST_DELAY()); // claims open after the post delay
         handler.claim(0);
         handler.advance(366 days);
         handler.sweep(1);

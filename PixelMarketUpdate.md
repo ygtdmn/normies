@@ -169,7 +169,9 @@ Order matters. Do not deploy before pausing V1.
    until the required copies are finalized.
 3. **Deploy.** `forge script script/DeployPixelMarket.s.sol --rpc-url mainnet --broadcast --verify`
    with the env above. The script wires movers, writers, treasury, fee recipients and renderer
-   references, then leaves CanvasV2 and the market paused. Then, from the same key,
+   references, then leaves CanvasV2 and the market paused. The deployer key signs from a trusted workstation
+   (a hardware wallet, `--ledger`), never from the API server, and owns nothing once step 5 is done. Then, from
+   the deployer,
    `forge script script/MigrateLegacy.s.sol --rpc-url mainnet --broadcast` with
    `CANVAS_STORAGE_V2_ADDRESS`: it refuses while any V1 commitment is unrevealed, pauses V1 itself if
    needed (then stops; rerun), scans all 10,000 ids (or the `TOKEN_IDS` you pass), copies every nonzero V1
@@ -177,7 +179,8 @@ Order matters. Do not deploy before pausing V1.
    equals the sum of V1 `actionPoints` (37,805 at block 25,999,628) and `migrationFinalized() == true`.
    Then, in `api-server`, `pnpm cutover:delegations --dry-run` and, when the list looks right,
    `pnpm cutover:delegations` with `RPC_URL`, `CHAIN_ID=1`, `CANVAS_STORAGE_V2_ADDRESS` and `PRIVATE_KEY`
-   (the storage owner): takes the delegation snapshot at the current block, then copies every nonzero V1
+   (the storage owner, still the deployer at this point; run it on the same workstation and do not leave the key
+   in any env file afterwards): takes the delegation snapshot at the current block, then copies every nonzero V1
    delegate and its original setter and seals seeding in one transaction.
    Check `storageV2.delegationsSeeded() == true`, the saved snapshot block/timestamp, and a known delegate.
    After this snapshot, only V2 delegation changes matter. The balance preparation above is separate;
@@ -188,42 +191,94 @@ Order matters. Do not deploy before pausing V1.
    `canvasV2.canvasStorage()`, `zombieContract()`, `paused() == true`;
    `market.pixels()`, `treasuryRecipient()`, `revenueShareRecipient() == revenuePool`, `feeBps() == 1000`,
    `revenueShareBps() == 5000`, `minPricePerPixel() == 1800000000000000`, `paused() == true`;
-   `pool.claimWindow() == 31536000`, `MIN_CLAIM_WINDOW() == 86400`, `pool.owner()`;
+   `pool.claimWindow() == 31536000`, `MIN_CLAIM_WINDOW() == 86400`, `POST_DELAY() == 86400`;
+   every `owner()` is still the deployer at this point;
    `splitter.pool()`, `splitter.team()`, `splitter.poolBps() == 5000`;
    `rendererV6.transformStorageContract()`, `zombieContract()`, `legendaryCanvasContract()`.
-5. **Renderer flip.** From the Normies owner: `setRendererContract(rendererV6)`. Spot check
+5. **Hand off ownership (audit D-H1).** Before anything is unpaused, the deployer stops owning anything. Create
+   the three Safes first (see "Ownership" below), record their addresses and thresholds here, and run one
+   harmless transaction from each. Pick the revshare job's gas-only key (`REVSHARE_POSTER`). Then, from the
+   deployer: `forge script script/HandoffOwnership.s.sol --rpc-url mainnet --broadcast --ledger` with the six
+   contract addresses (`CANVAS_STORAGE_V2_ADDRESS`, `CANVAS_V2_ADDRESS`, `MARKET_ADDRESS`, `RENDERER_V6_ADDRESS`,
+   `REVENUE_POOL_ADDRESS`, `ROYALTY_SPLITTER_ADDRESS`), `ADMIN_SAFE`, `TREASURY_SAFE`, `OPERATIONS_SAFE` and
+   `REVSHARE_POSTER`. It refuses unless both copies are finalized, the deployer holds no mover role or writer
+   slot, the wiring is right and the four holders are distinct. It then grants the roles, locks the deployer's
+   Lifebuoy rescue access and hands every contract to its Safe. Each step is skipped when already done: if a run
+   stops half way, rerun it. Then `MODE=check DEPLOYER=<deployer> forge script script/HandoffOwnership.s.sol
+   --rpc-url mainnet` (same env) must print "handoff verified". Paste the output here.
+6. **Renderer flip.** From the Normies owner: `setRendererContract(rendererV6)`. Spot check
    `tokenURI` for token 0 (bot overlay), a token with AP, and a zombie.
-6. **Indexer + API.** Set the three addresses and the start block, deploy the indexer (new schema,
+7. **Indexer + API.** Set the three addresses and the start block, deploy the indexer (new schema,
    full reindex), then the API server with the three addresses. Confirm `/canvas/status` returns
    `pixelMarket`, `/pixels/supply` answers, `/market/stats` answers.
-7. **Site.** Set `NEXT_PUBLIC_CANVAS_V2_ADDRESS`, `NEXT_PUBLIC_CANVAS_STORAGE_V2_ADDRESS`,
+8. **Site.** Set `NEXT_PUBLIC_CANVAS_V2_ADDRESS`, `NEXT_PUBLIC_CANVAS_STORAGE_V2_ADDRESS`,
    `NEXT_PUBLIC_MARKET_ADDRESS`, `NEXT_PUBLIC_REVENUE_POOL_ADDRESS`, deploy. Update the
    constants in `src/lib/contracts.js`, the address tables in `api-server/src/content/*` and
    `src/views/Docs.jsx` afterwards.
-8. **Royalties.** From the Normies owner: `setRoyaltyInfo(royaltySplitter, 500)`. OpenSea does not read
+9. **Royalties.** From the Normies owner: `setRoyaltyInfo(royaltySplitter, 500)`. OpenSea does not read
    ERC2981 for the payout address: set the splitter as the payout address under the collection's
    Creator Earnings too, then make one cheap test sale and check the splitter received it (listings
    pay ETH mid-sale, accepted offers pay WETH; `release()` handles both). Check Blur and Magic Eden.
-9. **Unpause.** `canvasV2.setPaused(false)` (refused until `migrationFinalized()` and
-   `delegationsSeeded()` are both true), then `market.setPaused(false)` (refused until `migrationFinalized()`).
-10. **Holders.** Announce that the canvas needs a fresh `setApprovalForAll(canvasV2, true)` before
+10. **Unpause, from the Operations Safe.** Pausing and unpausing are GUARDIAN actions with no delay:
+    `canvasV2.setPaused(false)` (refused until `migrationFinalized()` and `delegationsSeeded()`), then
+    `market.setPaused(false)` (refused until `migrationFinalized()`). The first live state is already under the
+    Safes.
+11. **Revenue share job.** Install `deploy/revshare/` with `PRIVATE_KEY` = the `REVSHARE_POSTER` key: it holds
+    the pool's POSTER role and nothing else. See "Running a revenue share epoch".
+12. **Holders.** Announce that the canvas needs a fresh `setApprovalForAll(canvasV2, true)` before
     burning; the site prompts for it.
-11. **Beeple bot.** Switch its writes to StorageV2 and to the right bitmap length for token 0's
+13. **Beeple bot.** Switch its writes to StorageV2 and to the right bitmap length for token 0's
     grid size (200 bytes while it stays 40x40).
+
+## Ownership
+
+No key or Safe reaches both the pixel ledger and the ETH, no single key holds an owner power, and no owner key lives
+on an internet-facing machine (audit D-H1, sections 7.4.2 and 7.4.4). Storage V2, canvas V2, the market and the pool
+use Solady `OwnableRoles` through `NormiesAccess`; the splitter and renderer V6 use Solady `Ownable`. Later
+ownership moves use the two-step handover (`requestOwnershipHandover` / `completeOwnershipHandover`).
+
+| Holder | Who | Holds | What it can do |
+| --- | --- | --- | --- |
+| Admin Safe | 3-of-5, hardware wallets, at least 3 people | owner of storage V2, canvas V2, market, renderer V6 | Mover roles, overlay writers, cooldowns, role grants, fee recipients, contract pointers, ownership |
+| Treasury Safe | 2-of-3 or 3-of-5, other signers | owner of revenue pool, royalty splitter | Withdraw unreserved pool ETH, royalty split and team, role grants, ownership. Cannot touch #PIXEL |
+| Operations Safe | 2-of-3, different people | GUARDIAN on storage V2, canvas, market, pool; CONFIG on canvas, market, pool | Pause and unpause anything at once, the allowance kill switch (both ways), cancel an epoch before it opens. Config: prices, burn tiers, fee (at most 10%), listing floor, claim window (at least 1 day). Can never grant roles or move value |
+| Revshare job key | EOA on the API host, gas only | POSTER on the pool | `postEpoch` only. Claims open 24 h later, so a bad root can be cancelled by the Operations Safe |
+| Overlay bot key | EOA | an `authorizedWriters` slot | Overlays only; it cannot move pixels |
+| Deployer | hardware wallet | nothing after step 5 | Retired; no roles, Lifebuoy rescue locked |
+
+Owner actions take effect as soon as the owning Safe executes them; there is no timelock. The Safe threshold is the
+protection, so a takeover needs a quorum of that Safe's signers, and even then the Admin Safe never reaches the ETH
+and the Treasury Safe never reaches #PIXEL. A compromised Operations Safe can stop things and move bounded
+parameters, never value. A compromised revshare key can post a root that the Operations Safe cancels before it
+opens.
+
+The Normies NFT owner (renderer, royalty receiver, minters) is outside this script and still a plain key. Keep it
+offline until the remint guard is decided; remints of burned ids are only possible from that owner.
+
+Signers: hardware wallets only, never 1-of-N, different people across the three Safes. Write down who can pause
+what and practice it once on a fork, including an epoch cancel. Review the signer list whenever someone leaves.
+
+**Monitoring.** Alert on every one of these; each should be expected, so a surprise is an incident. On the three
+Safes: every executed transaction and every owner or threshold change. On the V2 contracts: `OwnershipTransferred`,
+`OwnershipHandoverRequested`, `RolesUpdated`, `MoverRolesSet`, `AuthorizedWriterSet`, `CooldownSet`,
+`AllowancesPausedSet`, `FeeRecipientsSet`, `FeeConfigSet`, `MinPricePerPixelSet`, `EnlargePriceSet`, `BurnTiersSet`,
+`MaxBurnPercentSet`, `PoolBpsSet`, `TeamSet`, `EpochPosted`, `EpochCancelled`, `Withdrawn`, `ClaimWindowSet`,
+`PausedSet`. An owner action nobody expected means the Operations Safe pauses first and the signers find out why.
 
 ## Running a revenue share epoch
 
 The pool pays in epochs. Scores need what every wallet held over time, which no contract can see, so
 `api-server/src/revshare` computes them from RPC state and the pool stores only a Merkle root.
 
-A posted root pays out at once and can never be cancelled (audit C-M2), so posting always follows the same order
-and stops at the first thing that is not right: **release, unwrap, wait for finality, build, verify on a second
-RPC, re-check the pool, post, read back.** A wrong post is unrecoverable for that epoch. The tooling enforces the
-order; the rules are in `api-server/src/revshare/guards.ts`.
+A posted root opens for claims `POST_DELAY` (24 hours) later; until then the Operations Safe can `cancelEpoch`,
+which returns its reservation and, for the latest epoch, its block range. Once open it pays out and cannot be
+taken back (audit C-M2). So posting always follows the same order and stops at the first thing that is not
+right: **release, unwrap, wait for finality, build, verify on a second RPC, re-check the pool, post, read back.**
+The tooling enforces the order; the rules are in `api-server/src/revshare/guards.ts`.
 
 On the server this is a monthly systemd timer, `deploy/revshare/` (units, env example, install and operating
 notes). `pnpm revshare run` does the whole sequence and refuses to post without `RPC_URL_VERIFY`, an independent
-second provider (not the same endpoint as `RPC_URL`):
+second provider (not the same endpoint as `RPC_URL`). Its key holds the pool's POSTER role and nothing else:
 
 1. `splitter.release()` and `pool.unwrap()` when they hold anything, so the epoch holds everything earned in it.
    Market fees need no step: every fill pays its half into the pool.
@@ -236,25 +291,32 @@ second provider (not the same endpoint as `RPC_URL`):
    samples or root stops the run.
 5. Re-reads the pool right before posting: not paused, the epoch id is still `nextEpochId`, the range starts
    right after the last posted epoch, and the total still fits what is unreserved.
-6. Posts, then reads `getEpoch(id)` back and fails loudly if the pool recorded anything else.
+6. Posts, reads `getEpoch(id)` back and prints when claims open. In the 24 hours before that, anyone can run
+   `pnpm revshare verify <file>` (the file is public at its `dataURI`) on their own RPC; the Operations Safe
+   cancels with `cancelEpoch(id)` if anything is off, and the next run posts the range again under a new id.
+7. A key without the POSTER role (or a pool not yet handed off) gets `REVSHARE_DIR/proposals/<id>.safe.json`
+   instead, a Safe Transaction Builder batch for the pool owner; later runs leave a pending proposal alone until
+   the pool shows it posted (`--replace-proposal` rebuilds it).
 
 By hand (for example when the post goes through a Safe), the same order:
 
 1. `splitter.release()` and `pool.unwrap()` (both permissionless). Wait until both blocks are finalized.
-2. `pnpm revshare build --epoch <pool.nextEpochId()> --from <lastEpoch.toBlock + 1> --to <finalized block>` in
+2. `pnpm revshare build --epoch <pool.nextEpochId()> --from <pool.cursorToBlock() + 1> --to <finalized block>` in
    `api-server` (archive `RPC_URL`, `CHAIN_ID` and the contract addresses in env, see `src/revshare/cli.ts`).
    `--epoch` is required: the leaves embed it, and an id that moves before the post makes every leaf unclaimable.
 3. `RPC_URL=<second provider> pnpm revshare verify <file>`. It rebuilds the file (amount included) and checks it
    is postable now; it must print both "verified" and "postable". Every Safe signer runs it on their own RPC
    before signing.
 4. Publish the file (the API serves it from `REVSHARE_DIR`; pin it to IPFS for the `dataURI`), then send the
-   printed `postEpoch(...)` call. Holders claim from the site (or `claimMany`) straight away.
+   printed `postEpoch(...)` call from the POSTER key. Holders claim from the site (or `claimMany`) once it opens,
+   24 hours later.
 5. `pnpm revshare verify <file>` once more: for a posted epoch it checks the pool recorded exactly the file.
-5. At that epoch's fixed `getEpoch(id).sweepableAt` anyone can `sweep(id)`: unclaimed ETH returns to the pool for later epochs.
-   Each epoch snapshots the default window when posted (365 days at launch). `setClaimWindow` affects future epochs only
-   and requires at least `MIN_CLAIM_WINDOW = 1 days`; it cannot shorten or extend existing deadlines. Claims remain open
-   until the epoch is actually swept. The owner can
-   take ETH no epoch has reserved with `withdrawUnallocated`; what a posted root owes cannot be touched.
+
+At that epoch's fixed `getEpoch(id).sweepableAt` anyone can `sweep(id)`: unclaimed ETH returns to the pool for later
+epochs. Each epoch snapshots the default window when posted (365 days at launch), counted from its opening.
+`setClaimWindow` (CONFIG) affects future epochs only and requires at least `MIN_CLAIM_WINDOW = 1 days`; it cannot
+shorten or extend existing deadlines. Claims remain open until the epoch is actually swept. Only the Treasury
+Safe can take ETH no epoch has reserved (`withdrawUnallocated`); what a posted root owes cannot be touched.
 
 Scoring rules live in `api-server/src/revshare/config.ts`; every epoch records their `configHash`.
 Changing them is a product decision: update the site copy and announce it before the epoch it applies to.

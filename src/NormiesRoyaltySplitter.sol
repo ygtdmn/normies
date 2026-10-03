@@ -3,7 +3,7 @@ pragma solidity 0.8.33;
 
 import { INormiesRoyaltySplitter } from "./interfaces/INormiesRoyaltySplitter.sol";
 import { IWETH } from "./interfaces/IWETH.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable } from "solady/auth/Ownable.sol";
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
 /**
@@ -32,7 +32,8 @@ contract NormiesRoyaltySplitter is INormiesRoyaltySplitter, Ownable {
     /// @notice The holders' share of every royalty, in basis points.
     uint16 public poolBps = 5000;
 
-    constructor(IWETH _weth, address _pool, address _team) Ownable() {
+    constructor(IWETH _weth, address _pool, address _team) {
+        _initializeOwner(msg.sender);
         require(_pool != address(0) && _team != address(0), ZeroAddress());
         weth = _weth;
         pool = _pool;
