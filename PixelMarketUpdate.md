@@ -216,23 +216,40 @@ Order matters. Do not deploy before pausing V1.
 The pool pays in epochs. Scores need what every wallet held over time, which no contract can see, so
 `api-server/src/revshare` computes them from RPC state and the pool stores only a Merkle root.
 
-On the server this is a monthly systemd timer, `deploy/revshare/` (units, env example, install and operating
-notes): `pnpm revshare run` releases the splitter, unwraps the pool, waits for finality, builds the epoch, verifies
-it against a second RPC, writes the file where the API serves it and posts the root from the owner key. The
-steps below are the same job by hand.
+A posted root pays out at once and can never be cancelled (audit C-M2), so posting always follows the same order
+and stops at the first thing that is not right: **release, unwrap, wait for finality, build, verify on a second
+RPC, re-check the pool, post, read back.** A wrong post is unrecoverable for that epoch. The tooling enforces the
+order; the rules are in `api-server/src/revshare/guards.ts`.
 
-1. Just before the epoch's last block: `splitter.release()` and `pool.unwrap()` (both permissionless), so the
-   epoch holds everything earned in it. Market fees need no step: every fill pays its half into the pool.
-2. `pnpm revshare build --from <lastEpoch.toBlock + 1> --to <block>` in `api-server` (needs an archive
-   `RPC_URL`, `CHAIN_ID` and the contract addresses in env, see `src/revshare/cli.ts`). It samples four
-   unpredictable blocks per UTC day, scores every wallet at each, and writes
-   `REVSHARE_DIR/epochs/<id>.json` with the payout table, proofs and root. The amount is what the pool
-   held unpromised at `--to`; the posted `total` is the sum of the leaves (dust stays in the pool).
-3. Run `pnpm revshare verify <file>` once more from a second RPC before posting: there is no dispute
-   window, a posted root pays out at once and cannot be cancelled.
-4. Publish the file (the API serves it from `REVSHARE_DIR`; pin it to IPFS for the `dataURI`), then
-   post from the owner key with the printed `cast send ... postEpoch(...)`. Holders claim from the site
-   (or `claimMany`) straight away.
+On the server this is a monthly systemd timer, `deploy/revshare/` (units, env example, install and operating
+notes). `pnpm revshare run` does the whole sequence and refuses to post without `RPC_URL_VERIFY`, an independent
+second provider (not the same endpoint as `RPC_URL`):
+
+1. `splitter.release()` and `pool.unwrap()` when they hold anything, so the epoch holds everything earned in it.
+   Market fees need no step: every fill pays its half into the pool.
+2. The epoch ends at the chain's finalized block, and at least `EPOCH_FINALITY_BLOCKS` below the head, after the
+   release and unwrap blocks. ETH that arrives after the epoch's end belongs to the next epoch.
+3. Builds the epoch: four unpredictable sample blocks per UTC day, every wallet scored at each; the amount is
+   what the pool held unpromised at the end block, the posted `total` is the sum of the leaves (dust stays).
+4. Rebuilds it from scratch on the second RPC (its own amount, samples and scores) after checking both
+   providers return the same hash for the end block. Any difference in id, range, amount, total, config,
+   samples or root stops the run.
+5. Re-reads the pool right before posting: not paused, the epoch id is still `nextEpochId`, the range starts
+   right after the last posted epoch, and the total still fits what is unreserved.
+6. Posts, then reads `getEpoch(id)` back and fails loudly if the pool recorded anything else.
+
+By hand (for example when the post goes through a Safe), the same order:
+
+1. `splitter.release()` and `pool.unwrap()` (both permissionless). Wait until both blocks are finalized.
+2. `pnpm revshare build --epoch <pool.nextEpochId()> --from <lastEpoch.toBlock + 1> --to <finalized block>` in
+   `api-server` (archive `RPC_URL`, `CHAIN_ID` and the contract addresses in env, see `src/revshare/cli.ts`).
+   `--epoch` is required: the leaves embed it, and an id that moves before the post makes every leaf unclaimable.
+3. `RPC_URL=<second provider> pnpm revshare verify <file>`. It rebuilds the file (amount included) and checks it
+   is postable now; it must print both "verified" and "postable". Every Safe signer runs it on their own RPC
+   before signing.
+4. Publish the file (the API serves it from `REVSHARE_DIR`; pin it to IPFS for the `dataURI`), then send the
+   printed `postEpoch(...)` call. Holders claim from the site (or `claimMany`) straight away.
+5. `pnpm revshare verify <file>` once more: for a posted epoch it checks the pool recorded exactly the file.
 5. At that epoch's fixed `getEpoch(id).sweepableAt` anyone can `sweep(id)`: unclaimed ETH returns to the pool for later epochs.
    Each epoch snapshots the default window when posted (365 days at launch). `setClaimWindow` affects future epochs only
    and requires at least `MIN_CLAIM_WINDOW = 1 days`; it cannot shorten or extend existing deadlines. Claims remain open

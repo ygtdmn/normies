@@ -3,16 +3,21 @@
 `pnpm revshare run` is the whole monthly job; the timer here runs it on the first of each month at 03:00 UTC on
 the server that hosts the API (the epoch file has to land in the directory the API serves).
 
-What one run does, in order, stopping at the first problem:
+A posted root pays out at once and can never be cancelled, so a run always goes in this order and stops at the
+first problem (the rules are in `api-server/src/revshare/guards.ts`):
 
 1. Reads the pool: the next epoch starts where the last one ended (`REVSHARE_GENESIS_BLOCK` the first time).
-2. Calls `release()` on the royalty splitter and `unwrap()` on the pool when they hold anything, then waits
-   `EPOCH_FINALITY_BLOCKS` so the epoch's end block includes those transfers.
-3. Builds the epoch: four sampled blocks per UTC day, every wallet scored at each, payouts and Merkle proofs
+   Refuses to start at all without `RPC_URL_VERIFY`, or if it is the same endpoint as `RPC_URL`.
+2. Calls `release()` on the royalty splitter and `unwrap()` on the pool when they hold anything.
+3. Ends the epoch at the chain's finalized block (and at least `EPOCH_FINALITY_BLOCKS` deep), after those two
+   transfers.
+4. Builds the epoch: four sampled blocks per UTC day, every wallet scored at each, payouts and Merkle proofs
    written to `REVSHARE_DIR/epochs/<id>.json`.
-4. Rebuilds it against `RPC_URL_VERIFY`; a different root means it does not post.
-5. Posts the root from the owner key. Claims open in that block. There is no dispute window, which is why step 4
-   exists.
+5. Rebuilds it from scratch against `RPC_URL_VERIFY`, after checking both providers agree on the end block's
+   hash. Any difference (amount, samples, total, root, ...) means it does not post.
+6. Re-reads the pool: not paused, same next epoch id, contiguous range, enough unreserved ETH.
+7. Posts the root from the owner key and reads the posted epoch back. Claims open in that block. There is no
+   dispute window, which is why steps 5 and 6 exist.
 
 An epoch shorter than `MIN_EPOCH_BLOCKS` is not posted, so running the job twice is harmless. A run that fails
 leaves nothing behind but the epoch file and can simply be run again.
@@ -43,7 +48,9 @@ sudo -u normies -i sh -c 'cd /opt/normies/smart-contracts/api-server && set -a &
 ```
 
 A dry run does everything except send transactions: it reports the block range, the payout count and the root it
-would post. `pnpm revshare verify data/revshare/epochs/<id>.json` recomputes a posted epoch from any archive node.
+would post. A dry run without `RPC_URL_VERIFY` skips the second rebuild and says so; a real run never does.
+`pnpm revshare verify data/revshare/epochs/<id>.json` rebuilds an epoch file from any archive node and checks it
+against the pool: a posted epoch must match what the pool recorded, an unposted one must be postable now.
 
 ## Changing the rules
 

@@ -5,24 +5,35 @@ import { createPublicClient, createWalletClient, http, parseAbi, type Hex, type 
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry, mainnet, sepolia } from "viem/chains";
 import { buildEpoch, type EpochAddresses, type EpochFile } from "./build.js";
+import {
+    epochEndBlock,
+    epochMismatches,
+    postedMismatches,
+    prePostProblems,
+    requireIndependentVerifier,
+    type PoolState,
+} from "./guards.js";
 
 /**
  * Revenue share epochs from the command line.
  *
- *   pnpm revshare build --from <block> --to <block> [--epoch <id>] [--amount <wei>]
+ *   pnpm revshare build --epoch <id> --from <block> --to <block> [--amount <wei>]
  *   pnpm revshare verify <epoch.json>
  *   pnpm revshare run [--dry-run]
  *
- * `run` is the whole monthly job in one command, for the systemd timer in deploy/revshare: it releases the
- * splitter and unwraps the pool so the epoch holds everything earned, picks the block range (from the last
- * epoch's end, to a finalized head), builds the epoch, verifies it against a second RPC when RPC_URL_VERIFY
- * is set, writes the file where the API serves it, and posts the root from the owner key. It refuses to post
- * an epoch shorter than MIN_EPOCH_BLOCKS, so a double run is harmless.
+ * A posted root pays out at once and cannot be cancelled (audit C-M2), so posting follows one fixed order and
+ * stops at the first thing that is not right: release the splitter, unwrap the pool, wait until those transfers
+ * are finalized, build, rebuild on a second independent RPC and compare everything, re-read the pool, post, and
+ * read the posted epoch back. The rules live in guards.ts.
  *
- * `build` writes <REVSHARE_DIR>/epochs/<id>.json and prints the postEpoch call. Before picking --to, run the
- * splitter's release() and the pool's unwrap() so the epoch holds everything earned in
- * it. `verify` recomputes an epoch file from chain state and fails loudly if the root differs; it needs an archive
- * node and nothing else.
+ * `run` is that whole sequence, for the systemd timer in deploy/revshare. It refuses to post an epoch shorter
+ * than MIN_EPOCH_BLOCKS, so a double run is harmless, and it never posts without RPC_URL_VERIFY.
+ *
+ * `build` and `verify` are the manual path. `build` needs the epoch id explicitly (the pool's next id can move
+ * while a build runs) and writes <REVSHARE_DIR>/epochs/<id>.json. `verify` rebuilds a file from chain state,
+ * amount included, and then checks it against the pool: a posted epoch must match what the pool recorded, an
+ * unposted one must be postable right now. Run it on an RPC other than the one that built the file, before
+ * anyone sends the postEpoch call.
  */
 /**
  * Env: RPC_URL (an archive node), CHAIN_ID (1, 11155111 or 31337), NORMIES_ADDRESS (mainnet Normies by default),
@@ -80,7 +91,51 @@ const opsAbi = parseAbi([
     "function release()",
     "function postEpoch(bytes32 root, uint256 amount, uint64 fromBlock, uint64 toBlock, bytes32 configHash, string dataURI) returns (uint256)",
     "function balanceOf(address) view returns (uint256)",
+    "function cursorToBlock() view returns (uint64)",
+    "function unallocated() view returns (uint256)",
+    "function paused() view returns (bool)",
+    "function outstanding() view returns (uint256)",
 ]);
+
+function makeClient(url: string): PublicClient {
+    return createPublicClient({ chain, transport: http(url, { timeout: 600_000, retryCount: 3, retryDelay: 2_000 }) }) as PublicClient;
+}
+
+async function poolState(client: PublicClient, pool: `0x${string}`): Promise<PoolState> {
+    const [nextEpochId, cursorToBlock, unallocated, paused] = await Promise.all([
+        client.readContract({ address: pool, abi: opsAbi, functionName: "nextEpochId" }),
+        client.readContract({ address: pool, abi: opsAbi, functionName: "cursorToBlock" }),
+        client.readContract({ address: pool, abi: opsAbi, functionName: "unallocated" }),
+        client.readContract({ address: pool, abi: opsAbi, functionName: "paused" }),
+    ]);
+    return { nextEpochId, cursorToBlock: BigInt(cursorToBlock), unallocated, paused };
+}
+
+/** The chain's finalized block, or null when the provider does not serve the tag (a local fork). */
+async function finalizedBlock(client: PublicClient): Promise<bigint | null> {
+    try {
+        return (await client.getBlock({ blockTag: "finalized" })).number;
+    } catch {
+        return null;
+    }
+}
+
+/** Both providers must be on the same chain and agree on the epoch's last block, or a rebuild proves nothing. */
+async function sameChainAt(first: PublicClient, second: PublicClient, block: bigint) {
+    const [idA, idB, a, b] = await Promise.all([
+        first.getChainId(),
+        second.getChainId(),
+        first.getBlock({ blockNumber: block }),
+        second.getBlock({ blockNumber: block }),
+    ]);
+    if (idA !== idB) throw new Error(`the two RPCs are on different chains (${idA} vs ${idB})`);
+    if (a.hash !== b.hash) throw new Error(`the two RPCs disagree on block ${block}: ${a.hash} vs ${b.hash}`);
+}
+
+function fail(problems: string[], what: string): void {
+    if (problems.length === 0) return;
+    throw new Error(`${what}:\n  - ${problems.join("\n  - ")}`);
+}
 
 function writeEpochFile(epoch: EpochFile): string {
     const dir = join(REVSHARE_DIR, "epochs");
@@ -100,6 +155,9 @@ async function runEpoch(dryRun: boolean) {
         ? privateKeyToAccount(process.env.PRIVATE_KEY as Hex)
         : (process.env.FROM as `0x${string}` | undefined);
     if (!account && !dryRun) throw new Error("PRIVATE_KEY (or FROM on anvil) is not set");
+    // Checked before anything is sent, so a misconfigured job does not even release or unwrap.
+    const verifierUrl = dryRun && !process.env.RPC_URL_VERIFY ? null : requireIndependentVerifier(RPC_URL, process.env.RPC_URL_VERIFY);
+    if (!verifierUrl) console.log("dry run without RPC_URL_VERIFY: the second-RPC rebuild is skipped; a real run refuses");
     const wallet = account ? createWalletClient({ account, chain, transport: http(RPC_URL, { timeout: 120_000 }) }) : null;
 
     // 1. Where the last epoch ended.
@@ -142,13 +200,14 @@ async function runEpoch(dryRun: boolean) {
         }
     }
 
-    // 3. The epoch ends at a finalized block that already includes those transfers.
-    let head = await publicClient.getBlockNumber();
-    while (settledAt > 0n && head < settledAt + finality) {
+    // 3. The epoch ends at a finalized block (and at least EPOCH_FINALITY_BLOCKS deep) that already includes those
+    //    transfers, so neither a reorg nor a late transfer can change what it covers.
+    let toBlock = epochEndBlock(await publicClient.getBlockNumber(), await finalizedBlock(publicClient), finality);
+    while (settledAt > 0n && toBlock < settledAt) {
         await new Promise((r) => setTimeout(r, 15_000));
-        head = await publicClient.getBlockNumber();
+        toBlock = epochEndBlock(await publicClient.getBlockNumber(), await finalizedBlock(publicClient), finality);
     }
-    const toBlock = head - finality;
+    if (settledAt > 0n) console.log(`release/unwrap in block ${settledAt} is final; epoch ends at ${toBlock}`);
     if (toBlock < fromBlock + minBlocks - 1n) {
         console.log(`epoch ${nextEpochId} would cover only ${toBlock - fromBlock + 1n} blocks (from ${fromBlock} to ${toBlock}); nothing to post yet`);
         return;
@@ -170,23 +229,23 @@ async function runEpoch(dryRun: boolean) {
         console.log("nothing to pay out; not posting");
         return;
     }
-    if (process.env.RPC_URL_VERIFY) {
-        const second = createPublicClient({
-            chain,
-            transport: http(process.env.RPC_URL_VERIFY, { timeout: 600_000, retryCount: 3, retryDelay: 2_000 }),
-        }) as PublicClient;
-        const again = await buildEpoch(second, a, { fromBlock, toBlock, epochId: nextEpochId, amount: BigInt(epoch.amount), config: epoch.config });
-        if (again.root !== epoch.root || again.total !== epoch.total) {
-            throw new Error(`verification mismatch: ${epoch.root} (${epoch.total}) vs ${again.root} (${again.total}); not posting`);
-        }
-        console.log("verified against the second RPC");
+    // 5. Rebuild from scratch on the second provider: its own amount, its own samples, its own scores.
+    if (verifierUrl) {
+        const second = makeClient(verifierUrl);
+        await sameChainAt(publicClient, second, toBlock);
+        const again = await buildEpoch(second, a, { fromBlock, toBlock, epochId: nextEpochId, config: epoch.config });
+        fail(epochMismatches(epoch, again), "the second RPC built a different epoch; not posting");
+        console.log(`verified against the second RPC: ${epoch.root}`);
     }
+
+    // 6. Building took a while: read the pool again and post only if this epoch still fits it exactly.
+    fail(prePostProblems(epoch, await poolState(publicClient, a.pool)), `epoch ${epoch.epochId} cannot be posted`);
     if (dryRun || !wallet) {
         console.log(`dry run: would post root ${epoch.root} for ${epoch.total} wei`);
         return;
     }
 
-    // 5. Post. Claims open in the same block.
+    // 7. Post. Claims open in the same block, so read back what the pool recorded.
     const dataURI = `${publicUrl}/${epoch.epochId}`;
     const hash = await wallet.writeContract({
         address: a.pool,
@@ -196,7 +255,18 @@ async function runEpoch(dryRun: boolean) {
     });
     const r = await publicClient.waitForTransactionReceipt({ hash, timeout: 600_000 });
     if (r.status !== "success") throw new Error(`postEpoch reverted: ${hash}`);
-    console.log(`epoch ${epoch.epochId} posted in block ${r.blockNumber}: ${hash}`);
+    const posted = await publicClient.readContract({
+        address: a.pool,
+        abi: opsAbi,
+        functionName: "getEpoch",
+        args: [BigInt(epoch.epochId)],
+        blockNumber: r.blockNumber,
+    });
+    fail(
+        postedMismatches(epoch, { root: posted.root, amount: posted.amount, fromBlock: posted.fromBlock, toBlock: posted.toBlock }),
+        `epoch ${epoch.epochId} was posted (${hash}) but the pool recorded something else; stop claims tooling and investigate`,
+    );
+    console.log(`epoch ${epoch.epochId} posted in block ${r.blockNumber} and read back: ${hash}`);
 }
 
 async function main() {
@@ -205,18 +275,25 @@ async function main() {
     if (command === "build") {
         const from = flag(args, "from");
         const to = flag(args, "to");
+        const id = flag(args, "epoch");
         if (!from || !to) throw new Error("build needs --from and --to");
+        // Read from the pool by default, the id could change before the post and orphan every leaf (audit D-I2).
+        if (!id) throw new Error("build needs --epoch <id>: the pool's next epoch id, as you intend to post it");
         const epoch = await buildEpoch(publicClient, addresses(), {
             fromBlock: BigInt(from),
             toBlock: BigInt(to),
-            epochId: flag(args, "epoch") ? BigInt(flag(args, "epoch")!) : undefined,
+            epochId: BigInt(id),
             amount: flag(args, "amount") ? BigInt(flag(args, "amount")!) : undefined,
         });
         const path = writeEpochFile(epoch);
+        const publicUrl = (process.env.REVSHARE_PUBLIC_URL ?? "https://api.normies.art/revshare/epochs").replace(/\/$/, "");
         console.log(`epoch ${epoch.epochId}: ${epoch.leaves.length} payouts, ${epoch.total} wei of ${epoch.amount} -> ${path}`);
         console.log(`samples: ${epoch.sampleBlocks.join(", ")}`);
+        console.log(`next, on a second, independent RPC (it must print "verified" and "postable"):`);
+        console.log(`  RPC_URL=<second rpc> pnpm revshare verify ${path}`);
+        console.log(`then, and only then:`);
         console.log(
-            `post: cast send ${epoch.addresses.pool} "postEpoch(bytes32,uint256,uint64,uint64,bytes32,string)" ${epoch.root} ${epoch.total} ${epoch.fromBlock} ${epoch.toBlock} ${epoch.configHash} "<dataURI>"`,
+            `  cast send ${epoch.addresses.pool} "postEpoch(bytes32,uint256,uint64,uint64,bytes32,string)" ${epoch.root} ${epoch.total} ${epoch.fromBlock} ${epoch.toBlock} ${epoch.configHash} "${publicUrl}/${epoch.epochId}"`,
         );
         return;
     }
@@ -225,18 +302,42 @@ async function main() {
         const path = args[0];
         if (!path) throw new Error("verify needs a path to an epoch file");
         const file = JSON.parse(readFileSync(path, "utf8")) as EpochFile;
-        const rebuilt = await buildEpoch(publicClient, addresses(), {
-            fromBlock: BigInt(file.fromBlock),
-            toBlock: BigInt(file.toBlock),
-            epochId: BigInt(file.epochId),
-            amount: BigInt(file.amount),
-            config: file.config,
-        });
-        if (rebuilt.root !== file.root || rebuilt.total !== file.total) {
-            console.error(`MISMATCH epoch ${file.epochId}: file ${file.root} (${file.total}), chain ${rebuilt.root} (${rebuilt.total})`);
+        const a = addresses();
+        const options = { fromBlock: BigInt(file.fromBlock), toBlock: BigInt(file.toBlock), epochId: BigInt(file.epochId), config: file.config };
+        // The amount is recomputed from the pool at toBlock, unless the file was built with a deliberate --amount.
+        const [balance, outstanding] = await Promise.all([
+            publicClient.getBalance({ address: a.pool, blockNumber: options.toBlock }),
+            publicClient.readContract({ address: a.pool, abi: opsAbi, functionName: "outstanding", blockNumber: options.toBlock }),
+        ]);
+        const chainAmount = (balance - outstanding).toString();
+        const rebuilt = await buildEpoch(publicClient, a, chainAmount === file.amount ? options : { ...options, amount: BigInt(file.amount) });
+        if (chainAmount !== file.amount) {
+            console.warn(`note: the file distributes ${file.amount} wei; the pool held ${chainAmount} wei unreserved at block ${file.toBlock}`);
+        }
+        const problems = epochMismatches(file, rebuilt);
+        if (problems.length > 0) {
+            console.error(`MISMATCH epoch ${file.epochId}:\n  - ${problems.join("\n  - ")}`);
             process.exit(1);
         }
         console.log(`epoch ${file.epochId} verified: ${file.root}`);
+
+        const pool = await poolState(publicClient, a.pool);
+        if (BigInt(file.epochId) < pool.nextEpochId) {
+            const posted = await publicClient.readContract({ address: a.pool, abi: opsAbi, functionName: "getEpoch", args: [BigInt(file.epochId)] });
+            const differs = postedMismatches(file, { root: posted.root, amount: posted.amount, fromBlock: posted.fromBlock, toBlock: posted.toBlock });
+            if (differs.length > 0) {
+                console.error(`POSTED DIFFERENTLY epoch ${file.epochId}:\n  - ${differs.join("\n  - ")}`);
+                process.exit(1);
+            }
+            console.log(`epoch ${file.epochId} matches what the pool recorded`);
+            return;
+        }
+        const blockers = prePostProblems(file, pool);
+        if (blockers.length > 0) {
+            console.error(`NOT POSTABLE epoch ${file.epochId}:\n  - ${blockers.join("\n  - ")}`);
+            process.exit(1);
+        }
+        console.log(`epoch ${file.epochId} is postable now`);
         return;
     }
 
@@ -245,7 +346,7 @@ async function main() {
         return;
     }
 
-    console.error("usage: revshare build --from <block> --to <block> [--epoch <id>] [--amount <wei>] | verify <epoch.json> | run [--dry-run]");
+    console.error("usage: revshare build --epoch <id> --from <block> --to <block> [--amount <wei>] | verify <epoch.json> | run [--dry-run]");
     process.exit(1);
 }
 
