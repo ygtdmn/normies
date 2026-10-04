@@ -102,6 +102,13 @@ pnpm dev
 | NormiesLegendaryCanvas | `0xfA55f6592522dA74224a67c7D3Fd1DF759c628e8` |
 | NormiesRendererV5      | `0x7c726f02C5e840e1656b522A5C22caaf87C1C35C` |
 
+## Security
+
+The Canvas V2 / Pixel Market contracts (storage V2, Canvas V2, Pixel Market, revenue pool, royalty splitter) and
+their deploy, migration and revenue share tooling were reviewed by Trislit Consulting LLC in October 2026, including
+a fix review of every remediation. Read the public report:
+[audits/2026-10-03-trislit-pixel-market.pdf](audits/2026-10-03-trislit-pixel-market.pdf).
+
 ## Development
 
 ### Prerequisites
