@@ -17,20 +17,22 @@ import { Lifebuoy } from "solady/utils/Lifebuoy.sol";
  * @notice Moves the V2 stack off the deployer key. After it:
  *
  *           Admin Safe         owns storage V2, canvas V2, market, renderer V6
- *           Treasury Safe      owns revenue pool, royalty splitter
+ *           Treasury Safe      owns revenue pool, royalty splitter (TREASURY_SAFE; defaults to the Admin Safe,
+ *                              which is the launch layout)
  *           Operations Safe    GUARDIAN (pause and unpause, allowance kill switch, cancel an unopened epoch)
  *                              and CONFIG (prices, tiers, fees, floor, claim window) on canvas, market, pool;
  *                              GUARDIAN on storage V2
  *           Revshare job key   POSTER on the pool: postEpoch only; claims open 24 h later
  *           Deployer           nothing: no role, Lifebuoy rescue locked
  *
- *         No owner reaches both the pixel ledger and the ETH, and no single key holds any of these powers. Run it
+ *         No single key holds any of these powers, and the guardian is its own Safe with its own signers. Run it
  *         after the cutover (migration and delegations finalized), from the deployer. Every step is skipped when
  *         already done, so a run that stopped half way is simply rerun. Unpausing comes after, from the Operations
  *         Safe.
  *
- *         Both modes first check that the three Safes are real multisigs: Admin at least 3 signers required,
- *         Treasury and Operations at least 2, no two with the same signer set, and the poster key a signer of none.
+ *         Both modes first check that the Safes are real multisigs: Admin at least 3 signers required, a separate
+ *         Treasury and Operations at least 2, no two distinct Safes with the same signer set, and the poster key a
+ *         signer of none.
  *
  *         MODE=handoff (default) does the above. MODE=check is read-only and passes only when every piece is in
  *         place. It also replays every RolesUpdated, MoverRolesSet and AuthorizedWriterSet event since
@@ -39,7 +41,7 @@ import { Lifebuoy } from "solady/utils/Lifebuoy.sol";
  *         also requires the Normies NFT to be owned by the Admin Safe, with the deployer's rescue access locked.
  *
  * Env: CANVAS_STORAGE_V2_ADDRESS, CANVAS_V2_ADDRESS, MARKET_ADDRESS, RENDERER_V6_ADDRESS, REVENUE_POOL_ADDRESS,
- *      ROYALTY_SPLITTER_ADDRESS, ADMIN_SAFE, TREASURY_SAFE, OPERATIONS_SAFE, REVSHARE_POSTER; optional MODE.
+ *      ROYALTY_SPLITTER_ADDRESS, ADMIN_SAFE, OPERATIONS_SAFE, REVSHARE_POSTER; optional MODE, TREASURY_SAFE.
  *      Check mode: DEPLOY_BLOCK (required, the block the V2 stack was deployed in), DEPLOYER, EXTRA_WRITERS
  *      (comma separated overlay writers besides canvas V2, e.g. the bot key), NORMIES_ADDRESS.
  */
@@ -81,7 +83,7 @@ contract HandoffOwnership is Script {
         Stack memory s = _stack();
         Holders memory h = Holders(
             vm.envAddress("ADMIN_SAFE"),
-            vm.envAddress("TREASURY_SAFE"),
+            vm.envOr("TREASURY_SAFE", vm.envAddress("ADMIN_SAFE")),
             vm.envAddress("OPERATIONS_SAFE"),
             vm.envAddress("REVSHARE_POSTER")
         );
@@ -145,8 +147,12 @@ contract HandoffOwnership is Script {
         _owned(address(s.canvas), h.adminSafe, "canvas V2 is not owned by the Admin Safe");
         _owned(address(s.market), h.adminSafe, "the market is not owned by the Admin Safe");
         _owned(address(s.renderer), h.adminSafe, "renderer V6 is not owned by the Admin Safe");
-        _owned(address(s.pool), h.treasurySafe, "the revenue pool is not owned by the Treasury Safe");
-        _owned(address(s.splitter), h.treasurySafe, "the royalty splitter is not owned by the Treasury Safe");
+        _owned(address(s.pool), h.treasurySafe, "the revenue pool is not owned by the Treasury Safe (TREASURY_SAFE)");
+        _owned(
+            address(s.splitter),
+            h.treasurySafe,
+            "the royalty splitter is not owned by the Treasury Safe (TREASURY_SAFE)"
+        );
 
         _exactRoles(s.storageV2, h.operationsSafe, GUARDIAN, "operations on storage V2");
         _exactRoles(s.canvas, h.operationsSafe, GUARDIAN | CONFIG, "operations on canvas V2");
@@ -270,10 +276,9 @@ contract HandoffOwnership is Script {
 
     function _checkHolders(Holders memory h, address deployer) internal view {
         _checkSafe(h.adminSafe, MIN_ADMIN_THRESHOLD, "ADMIN_SAFE");
-        _checkSafe(h.treasurySafe, MIN_THRESHOLD, "TREASURY_SAFE");
+        if (h.treasurySafe != h.adminSafe) _checkSafe(h.treasurySafe, MIN_THRESHOLD, "TREASURY_SAFE");
         _checkSafe(h.operationsSafe, MIN_THRESHOLD, "OPERATIONS_SAFE");
-        // The pixel ledger and the ETH never sit behind the same owner, and the guardian is its own Safe.
-        require(h.adminSafe != h.treasurySafe, "the Admin and Treasury Safes must differ");
+        // The Admin Safe may also own the pool and splitter; the guardian is always its own Safe.
         require(
             h.operationsSafe != h.adminSafe && h.operationsSafe != h.treasurySafe,
             "the Operations Safe must differ from Admin and Treasury"
@@ -286,7 +291,9 @@ contract HandoffOwnership is Script {
         address[] memory admin = ISafe(h.adminSafe).getOwners();
         address[] memory treasury = ISafe(h.treasurySafe).getOwners();
         address[] memory operations = ISafe(h.operationsSafe).getOwners();
-        require(!_sameSet(admin, treasury), "the Admin and Treasury Safes have the same signers");
+        if (h.treasurySafe != h.adminSafe) {
+            require(!_sameSet(admin, treasury), "the Admin and Treasury Safes have the same signers");
+        }
         require(!_sameSet(admin, operations), "the Admin and Operations Safes have the same signers");
         require(!_sameSet(treasury, operations), "the Treasury and Operations Safes have the same signers");
         require(

@@ -21,7 +21,7 @@ import { ReentrancyGuardTransient } from "solady/utils/ReentrancyGuardTransient.
  *         can only leave through claims (or that cancel); a root can never pay out more than its epoch holds; what
  *         goes unclaimed after its fixed claim window rolls back into the pool. Later default-window changes cannot
  *         alter the deadline promised to an already-posted epoch. Withdrawing ETH no epoch has reserved is the
- *         owner's alone (the Treasury Safe), see NormiesAccess.
+ *         owner's alone (a Safe), see NormiesAccess.
  */
 contract NormiesRevenuePool is INormiesRevenuePool, NormiesAccess, ReentrancyGuardTransient {
     using SafeCastLib for uint256;

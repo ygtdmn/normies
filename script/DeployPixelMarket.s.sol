@@ -26,7 +26,7 @@ import { INormiesLegendaryCanvas } from "../src/interfaces/INormiesLegendaryCanv
  *         - normies.setRoyaltyInfo(royaltySplitter, 500) and the OpenSea creator earnings payout address,
  *         - unpausing CanvasV2 and the market (both start paused and refuse to unpause until the storage
  *           migration and the delegation copy are finalized).
- *         - handing ownership to the Admin and Treasury Safes and the roles to the Operations Safe and the
+ *         - handing ownership to the owner Safe(s) and the roles to the Operations Safe and the
  *           revshare poster: HandoffOwnership.s.sol, after the cutover and before the unpause (which the
  *           Operations Safe then sends).
  *

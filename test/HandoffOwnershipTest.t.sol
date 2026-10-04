@@ -191,6 +191,23 @@ contract HandoffOwnershipTest is PixelMarketBase {
         assertEq(storageV2.owner(), address(this));
     }
 
+    function testOneSafeCanOwnTheWholeStack() public {
+        // The launch layout: the Admin Safe also owns the pool and the splitter.
+        HandoffOwnership.Holders memory h = _holders();
+        h.treasurySafe = h.adminSafe;
+        handoff.handoff(_stack(), h, address(this));
+        handoff.check(_stack(), h, address(this));
+        handoff.checkHistory(_stack(), h, new address[](0), _logs());
+        assertEq(pool.owner(), address(adminSafe));
+        assertEq(splitter.owner(), address(adminSafe));
+        adminSafe.exec(address(pool), abi.encodeCall(pool.withdrawUnallocated, (address(adminSafe), 0)));
+
+        // The guardian still has to be its own Safe.
+        h.operationsSafe = h.adminSafe;
+        vm.expectRevert("the Operations Safe must differ from Admin and Treasury");
+        handoff.check(_stack(), h, address(this));
+    }
+
     function testRefusesSafesThatAreNotRealMultisigs() public {
         HandoffOwnership.Holders memory h = _holders();
         h.adminSafe = address(_safe(0xA0, 5, 2));

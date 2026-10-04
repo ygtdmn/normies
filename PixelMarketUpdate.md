@@ -165,12 +165,15 @@ server at the indexer (`api-server/.env`: `CANVAS_V2_ADDRESS`, `CANVAS_STORAGE_V
    `DEPLOY_BLOCK` and `NORMIES_ADDRESS` after step 10's two calls from the impersonated Normies owner. This is
    the first real run of the role-event replay, so check it reads the fork's logs.
 7. The stolen-key drill ("A post nobody expected" under Ownership): post from the poster key, then the
-   Operations Safe's cancel and pause MultiSend and the Treasury Safe's `revokeRoles`, executed through the Safe
+   Operations Safe's cancel and pause MultiSend and the Admin Safe's `revokeRoles`, executed through the Safe
    app against the fork or with impersonated signers.
 
 ## 2. Mainnet
 
-Order matters. Do not deploy before pausing V1.
+Order matters. Deploying early is safe: every V2 contract starts paused and empty, nothing reads V1 at
+deployment, and the setup calls are owner-only. Do not migrate before pausing V1 (`migrateBatch` refuses anyway).
+If you deploy hours before launch, set `REVSHARE_GENESIS_BLOCK` to the launch block, not the deployment block, so the
+first epoch does not score the hours before launch.
 
 1. **Drain V1.** Reveal every unrevealed V1 commitment (permissionless):
    `GET /history/burns/pending/legacy` lists them once the indexer is on the new schema; before
@@ -212,16 +215,16 @@ Order matters. Do not deploy before pausing V1.
    every `owner()` is still the deployer at this point;
    `splitter.pool()`, `splitter.team()`, `splitter.poolBps() == 5000`;
    `rendererV6.transformStorageContract()`, `zombieContract()`, `legendaryCanvasContract()`.
-5. **Hand off ownership.** Before anything is unpaused, the deployer stops owning anything. Create
-   the three Safes first (see "Ownership" below), record their addresses and thresholds here, and run one
-   harmless transaction from each. Pick the revshare job's gas-only key (`REVSHARE_POSTER`). Then, from the
-   deployer: `forge script script/HandoffOwnership.s.sol --rpc-url mainnet --broadcast --ledger` with the six
-   contract addresses (`CANVAS_STORAGE_V2_ADDRESS`, `CANVAS_V2_ADDRESS`, `MARKET_ADDRESS`, `RENDERER_V6_ADDRESS`,
-   `REVENUE_POOL_ADDRESS`, `ROYALTY_SPLITTER_ADDRESS`), `ADMIN_SAFE`, `TREASURY_SAFE`, `OPERATIONS_SAFE` and
-   `REVSHARE_POSTER`. It refuses unless both copies are finalized, the deployer holds no mover role or writer
-   slot, the wiring is right, the four holders are distinct and the Safes are real multisigs (Admin needs at least
-   3 signatures, Treasury and Operations at least 2, no two Safes with the same signer set, and the poster key a
-   signer of none). It then grants the roles, locks the deployer's Lifebuoy rescue access and hands every contract
+5. **Hand off ownership.** Before anything is unpaused, the deployer stops owning anything. The two Safes (see
+   "Ownership" below) must exist with a harmless transaction run from each. Pick the revshare job's gas-only key
+   (`REVSHARE_POSTER`). Then, from the deployer: `forge script script/HandoffOwnership.s.sol --rpc-url mainnet
+   --broadcast` (signing with the deployer key) with the six contract addresses (`CANVAS_STORAGE_V2_ADDRESS`,
+   `CANVAS_V2_ADDRESS`, `MARKET_ADDRESS`, `RENDERER_V6_ADDRESS`, `REVENUE_POOL_ADDRESS`,
+   `ROYALTY_SPLITTER_ADDRESS`), `ADMIN_SAFE`, `OPERATIONS_SAFE` and `REVSHARE_POSTER` (`TREASURY_SAFE` left unset:
+   the Admin Safe owns the pool and splitter too). It refuses unless both copies are finalized, the deployer holds
+   no mover role or writer slot, the wiring is right, the Operations Safe and the poster are separate from the
+   owner, and the Safes are real multisigs (Admin needs at least 3 signatures, Operations at least 2, different
+   signer sets, and the poster key a signer of none). It then grants the roles, locks the deployer's Lifebuoy rescue access and hands every contract
    to its Safe. Each step is skipped when already done: if a run stops half way, rerun it. Then
    `MODE=check DEPLOY_BLOCK=<step 3's first block> DEPLOYER=<deployer> EXTRA_WRITERS=<bot key> forge script
    script/HandoffOwnership.s.sol --rpc-url mainnet` (same env) must print "handoff verified". Besides the current
@@ -262,23 +265,27 @@ Order matters. Do not deploy before pausing V1.
 
 ## Ownership
 
-No key or Safe reaches both the pixel ledger and the ETH, no single key holds an owner power, and no owner key lives
-on an internet-facing machine. Storage V2, canvas V2, the market and the pool
-use Solady `OwnableRoles` through `NormiesAccess`; the splitter and renderer V6 use Solady `Ownable`. Later
-ownership moves use the two-step handover (`requestOwnershipHandover` / `completeOwnershipHandover`).
+No single key holds an owner power, the guardian is its own Safe with its own signers, and no owner key lives on an
+internet-facing machine. At launch one Safe, the Admin Safe (`0xAF8e9BDcF6463EA1f50f8f70ECF13d85a092a1Aa`, 3-of-5),
+owns every contract, including the revenue pool and the royalty splitter; the Operations Safe
+(`0x94afe25e744aEC9629cB67F63929fA4603898eB7`, 3-of-5, other signers) holds GUARDIAN and CONFIG. The handoff
+script also accepts a separate `TREASURY_SAFE` for the pool and splitter, if that is ever wanted. Storage V2,
+canvas V2, the market and the pool use Solady `OwnableRoles` through `NormiesAccess`; the splitter and renderer V6
+use Solady `Ownable`. Later ownership moves use the two-step handover (`requestOwnershipHandover` /
+`completeOwnershipHandover`).
 
 | Holder | Who | Holds | What it can do |
 | --- | --- | --- | --- |
-| Admin Safe | 3-of-5, hardware wallets, at least 3 people | owner of storage V2, canvas V2, market, renderer V6, and the Normies NFT (step 10) | Mover roles, overlay writers, cooldowns, role grants, fee recipients, contract pointers, ownership; on the NFT: renderer, royalties, minters |
-| Treasury Safe | 2-of-3 or 3-of-5, other signers | owner of revenue pool, royalty splitter | Withdraw unreserved pool ETH, royalty split and team, role grants, ownership. Cannot touch #PIXEL |
+| Admin Safe | 3-of-5, hardware wallets, at least 3 people | owner of storage V2, canvas V2, market, renderer V6, revenue pool, royalty splitter, and the Normies NFT (step 10). Also receives the team's half of fees and royalties | Mover roles, overlay writers, cooldowns, role grants, fee recipients, contract pointers, ownership; on the pool: withdraw ETH no epoch has reserved; on the splitter: the royalty split and the team address; on the NFT: renderer, royalties, minters |
 | Operations Safe | 2-of-3, different people | GUARDIAN on storage V2, canvas, market, pool; CONFIG on canvas, market, pool | Pause and unpause anything at once, the allowance kill switch (both ways), cancel an epoch before it opens. Config: prices, burn tiers, fee (at most 10%), listing floor, claim window (at least 30 days). Can never grant roles or withdraw ETH or #PIXEL, but can still cost holders: see below |
 | Revshare job key | EOA on the API host, gas only | POSTER on the pool | `postEpoch` only. Claims open 24 h later, so a bad root can be cancelled by the Operations Safe |
 | Overlay bot key | EOA | an `authorizedWriters` slot | Overlays only; it cannot move pixels |
 | Deployer | hardware wallet | nothing after step 5 | Retired; no roles, Lifebuoy rescue locked |
 
-Owner actions take effect as soon as the owning Safe executes them; there is no timelock. The Safe threshold is the
-protection, so a takeover needs a quorum of that Safe's signers, and even then the Admin Safe never reaches the ETH
-and the Treasury Safe never reaches #PIXEL. A compromised revshare key can post a root that the Operations Safe
+Owner actions take effect as soon as the Admin Safe executes them; there is no timelock. Its threshold is the whole
+protection: a quorum of its signers controls both the #PIXEL roles and the ETH no epoch has reserved yet (what a
+posted epoch owes can never be withdrawn). So its signers stay on hardware wallets, and every Admin Safe transaction
+is on the alert list. A compromised revshare key can post a root that the Operations Safe
 cancels before it opens (see "A post nobody expected" below).
 
 The Operations Safe cannot withdraw ETH or #PIXEL, but two of its powers can still cost holders, so treat its
@@ -310,8 +317,8 @@ range comes back, and the key can post it again in the next block, reserving eve
 1. Any `EpochPosted` that the revshare job's journal does not show it posting is treated as a stolen key.
 2. The Operations Safe sends one MultiSend: `pool.cancelEpoch(id)` and `pool.setPaused(true)`. Pausing stops
    posting; claims on already open epochs are never paused.
-3. The Treasury Safe revokes the role: `pool.revokeRoles(<poster>, 4)`. Stop the timer on the API host and
-   rotate the key: a new gas-only key, `grantRoles(<new key>, 4)` from the Treasury Safe, the new key in
+3. The Admin Safe (the pool's owner) revokes the role: `pool.revokeRoles(<poster>, 4)`. Stop the timer on the API host and
+   rotate the key: a new gas-only key, `grantRoles(<new key>, 4)` from the Admin Safe, the new key in
    `/etc/normies/revshare.env`.
 4. The Operations Safe unpauses the pool; the next run posts the cancelled range again under a new id.
 
