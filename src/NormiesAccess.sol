@@ -12,9 +12,11 @@ import { OwnableRoles } from "solady/auth/OwnableRoles.sol";
  *                     withdrawals, pointers to other contracts, ownership. Two-step handover
  *                     (requestOwnershipHandover / completeOwnershipHandover) for later moves.
  *           GUARDIAN  operations, with no delay: pause and unpause, the allowance kill switch, cancelling an epoch
- *                     before its claims open. It can never grant anything or move value.
+ *                     before its claims open. It can never grant anything or withdraw value, though a long canvas
+ *                     pause lowers pending burn rolls.
  *           CONFIG    operating parameters: prices, burn tiers, fees (capped), the listing floor, the claim window
- *                     (with a floor).
+ *                     (with a floor). Burn tiers are read at reveal, so lowering them also lowers burns already
+ *                     committed.
  *           POSTER    revenue pool only: postEpoch. A posted epoch opens for claims POST_DELAY later, so a guardian
  *                     can cancel a bad root before it pays anything.
  */

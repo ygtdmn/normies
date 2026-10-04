@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import { Script, console } from "forge-std/src/Script.sol";
+import { VmSafe } from "forge-std/src/Vm.sol";
 import { NormiesCanvasStorageV2 } from "../src/NormiesCanvasStorageV2.sol";
 import { NormiesCanvasV2 } from "../src/NormiesCanvasV2.sol";
 import { NormiesPixelMarket } from "../src/NormiesPixelMarket.sol";
@@ -28,19 +29,34 @@ import { Lifebuoy } from "solady/utils/Lifebuoy.sol";
  *         already done, so a run that stopped half way is simply rerun. Unpausing comes after, from the Operations
  *         Safe.
  *
+ *         Both modes first check that the three Safes are real multisigs: Admin at least 3 signers required,
+ *         Treasury and Operations at least 2, no two with the same signer set, and the poster key a signer of none.
+ *
  *         MODE=handoff (default) does the above. MODE=check is read-only and passes only when every piece is in
- *         place.
+ *         place. It also replays every RolesUpdated, MoverRolesSet and AuthorizedWriterSet event since
+ *         DEPLOY_BLOCK, so a role, mover or writer held by any address outside the expected list fails it, and it
+ *         prints the fee and royalty recipients and the Safe thresholds for the runbook. With NORMIES_ADDRESS set it
+ *         also requires the Normies NFT to be owned by the Admin Safe, with the deployer's rescue access locked.
  *
  * Env: CANVAS_STORAGE_V2_ADDRESS, CANVAS_V2_ADDRESS, MARKET_ADDRESS, RENDERER_V6_ADDRESS, REVENUE_POOL_ADDRESS,
- *      ROYALTY_SPLITTER_ADDRESS, ADMIN_SAFE, TREASURY_SAFE, OPERATIONS_SAFE, REVSHARE_POSTER; optional MODE,
- *      DEPLOYER (check mode).
+ *      ROYALTY_SPLITTER_ADDRESS, ADMIN_SAFE, TREASURY_SAFE, OPERATIONS_SAFE, REVSHARE_POSTER; optional MODE.
+ *      Check mode: DEPLOY_BLOCK (required, the block the V2 stack was deployed in), DEPLOYER, EXTRA_WRITERS
+ *      (comma separated overlay writers besides canvas V2, e.g. the bot key), NORMIES_ADDRESS.
  */
+/// @dev The two Safe reads the checks need.
+interface ISafe {
+    function getThreshold() external view returns (uint256);
+    function getOwners() external view returns (address[] memory);
+}
+
 contract HandoffOwnership is Script {
     /// @dev The role bits of NormiesAccess (internal there): GUARDIAN, CONFIG, POSTER.
     uint256 public constant GUARDIAN = 1 << 0;
     uint256 public constant CONFIG = 1 << 1;
     uint256 public constant POSTER = 1 << 2;
     uint256 internal constant DEPLOYER_RESCUE_LOCK = 1;
+    uint256 public constant MIN_ADMIN_THRESHOLD = 3;
+    uint256 public constant MIN_THRESHOLD = 2;
 
     struct Stack {
         NormiesCanvasStorageV2 storageV2;
@@ -49,6 +65,9 @@ contract HandoffOwnership is Script {
         NormiesRendererV6 renderer;
         NormiesRevenuePool pool;
         NormiesRoyaltySplitter splitter;
+        /// @dev Optional (zero skips it): the Normies NFT, which moves to the Admin Safe after the renderer flip and
+        ///      the royalty change.
+        address normies;
     }
 
     struct Holders {
@@ -69,6 +88,9 @@ contract HandoffOwnership is Script {
         string memory mode = vm.envOr("MODE", string("handoff"));
         if (keccak256(bytes(mode)) == keccak256("check")) {
             check(s, h, vm.envOr("DEPLOYER", address(0)));
+            address[] memory none;
+            checkHistory(s, h, vm.envOr("EXTRA_WRITERS", ",", none), _roleLogs(s, vm.envUint("DEPLOY_BLOCK")));
+            console.log("handoff verified");
         } else {
             require(keccak256(bytes(mode)) == keccak256("handoff"), "MODE must be handoff or check");
             handoff(s, h, msg.sender);
@@ -112,10 +134,10 @@ contract HandoffOwnership is Script {
         _transfer(address(s.splitter), h.treasurySafe, deployer);
         vm.stopBroadcast();
 
-        console.log("now run MODE=check with DEPLOYER set");
+        console.log("now run MODE=check with DEPLOY_BLOCK and DEPLOYER set");
     }
 
-    /// @notice Read-only verification. Reverts naming the first thing that is not in place.
+    /// @notice Read-only verification of the current state. Reverts naming the first thing that is not in place.
     function check(Stack memory s, Holders memory h, address deployer) public view {
         _checkHolders(h, deployer);
 
@@ -150,7 +172,72 @@ contract HandoffOwnership is Script {
         } else {
             console.log("DEPLOYER not set: the deployer's roles were not checked");
         }
-        console.log("handoff verified");
+
+        if (s.normies != address(0)) {
+            _owned(s.normies, h.adminSafe, "the Normies NFT is not owned by the Admin Safe");
+            _rescueLocked(s.normies, "Normies");
+        } else {
+            console.log("NORMIES_ADDRESS not set: the Normies NFT owner was not checked");
+        }
+
+        // For the runbook: who receives what, and how many signers each Safe needs.
+        console.log("market treasury recipient ", s.market.treasuryRecipient());
+        console.log("market revenue share      ", s.market.revenueShareRecipient());
+        console.log("splitter team             ", s.splitter.team());
+        console.log("splitter pool             ", s.splitter.pool());
+        console.log("admin safe threshold      ", ISafe(h.adminSafe).getThreshold());
+        console.log("treasury safe threshold   ", ISafe(h.treasurySafe).getThreshold());
+        console.log("operations safe threshold ", ISafe(h.operationsSafe).getThreshold());
+    }
+
+    /**
+     * @notice Roles, movers and writers cannot be enumerated on chain, so this walks every event that ever set one
+     *         (`logs`, from the deployment on) and requires each address it names to hold exactly what the layout
+     *         gives it now: the Operations Safe and the poster their roles, canvas V2 and the market their mover
+     *         roles, canvas V2 and `extraWriters` a writer slot, everyone else nothing.
+     */
+    function checkHistory(
+        Stack memory s,
+        Holders memory h,
+        address[] memory extraWriters,
+        VmSafe.Log[] memory logs
+    ) public view {
+        require(s.storageV2.authorizedWriters(address(s.canvas)), "canvas V2 is not an overlay writer on storage V2");
+        uint256 replayed;
+        for (uint256 i; i < logs.length; ++i) {
+            VmSafe.Log memory l = logs[i];
+            if (l.topics.length < 2) continue;
+            address who = address(uint160(uint256(l.topics[1])));
+            if (l.topics[0] == OwnableRoles.RolesUpdated.selector && _isRoleContract(s, l.emitter)) {
+                require(
+                    OwnableRoles(l.emitter).rolesOf(who) == _expectedRoles(s, h, l.emitter, who),
+                    string.concat("unexpected roles on ", vm.toString(l.emitter), " for ", vm.toString(who))
+                );
+            } else if (
+                l.emitter == address(s.storageV2) && l.topics[0] == NormiesCanvasStorageV2.MoverRolesSet.selector
+            ) {
+                uint8
+                    want = who == address(s.canvas)
+                        ? s.storageV2.ROLE_CANVAS()
+                        : who == address(s.market) ? s.storageV2.ROLE_MARKET() : 0;
+                require(
+                    s.storageV2.moverRoles(who) == want, string.concat("unexpected mover role for ", vm.toString(who))
+                );
+            } else if (
+                l.emitter == address(s.storageV2) && l.topics[0] == NormiesCanvasStorageV2.AuthorizedWriterSet.selector
+            ) {
+                bool want = who == address(s.canvas) || _contains(extraWriters, who);
+                require(
+                    s.storageV2.authorizedWriters(who) == want,
+                    string.concat(want ? "missing" : "unexpected", " overlay writer ", vm.toString(who))
+                );
+            } else {
+                continue;
+            }
+            ++replayed;
+        }
+        require(replayed > 0, "no role events found: is DEPLOY_BLOCK at or before the deployment?");
+        console.log("role events replayed      ", replayed);
     }
 
     // ──────────────────────────────────────────────
@@ -182,9 +269,9 @@ contract HandoffOwnership is Script {
     // ──────────────────────────────────────────────
 
     function _checkHolders(Holders memory h, address deployer) internal view {
-        require(h.adminSafe.code.length > 0, "ADMIN_SAFE has no code: is it deployed on this chain?");
-        require(h.treasurySafe.code.length > 0, "TREASURY_SAFE has no code: is it deployed on this chain?");
-        require(h.operationsSafe.code.length > 0, "OPERATIONS_SAFE has no code: is it deployed on this chain?");
+        _checkSafe(h.adminSafe, MIN_ADMIN_THRESHOLD, "ADMIN_SAFE");
+        _checkSafe(h.treasurySafe, MIN_THRESHOLD, "TREASURY_SAFE");
+        _checkSafe(h.operationsSafe, MIN_THRESHOLD, "OPERATIONS_SAFE");
         // The pixel ledger and the ETH never sit behind the same owner, and the guardian is its own Safe.
         require(h.adminSafe != h.treasurySafe, "the Admin and Treasury Safes must differ");
         require(
@@ -196,6 +283,62 @@ contract HandoffOwnership is Script {
             h.poster != h.adminSafe && h.poster != h.treasurySafe && h.poster != h.operationsSafe,
             "REVSHARE_POSTER must not be a Safe"
         );
+        address[] memory admin = ISafe(h.adminSafe).getOwners();
+        address[] memory treasury = ISafe(h.treasurySafe).getOwners();
+        address[] memory operations = ISafe(h.operationsSafe).getOwners();
+        require(!_sameSet(admin, treasury), "the Admin and Treasury Safes have the same signers");
+        require(!_sameSet(admin, operations), "the Admin and Operations Safes have the same signers");
+        require(!_sameSet(treasury, operations), "the Treasury and Operations Safes have the same signers");
+        require(
+            !_contains(admin, h.poster) && !_contains(treasury, h.poster) && !_contains(operations, h.poster),
+            "REVSHARE_POSTER is a Safe signer; it lives on the API host and must sign nothing"
+        );
+    }
+
+    /// @dev Has code, answers as a Safe, and needs at least `minThreshold` of its signers.
+    function _checkSafe(address safe, uint256 minThreshold, string memory name) internal view {
+        require(safe.code.length > 0, string.concat(name, " has no code: is it deployed on this chain?"));
+        uint256 threshold;
+        try ISafe(safe).getThreshold() returns (uint256 t) {
+            threshold = t;
+        } catch {
+            revert(string.concat(name, " does not answer getThreshold(): is it a Safe?"));
+        }
+        require(
+            threshold >= minThreshold,
+            string.concat(name, " needs at least ", vm.toString(minThreshold), " signers to execute")
+        );
+    }
+
+    function _isRoleContract(Stack memory s, address target) internal pure returns (bool) {
+        return target == address(s.storageV2) || target == address(s.canvas) || target == address(s.market)
+            || target == address(s.pool);
+    }
+
+    function _expectedRoles(
+        Stack memory s,
+        Holders memory h,
+        address target,
+        address who
+    ) internal pure returns (uint256) {
+        if (who == h.operationsSafe) return target == address(s.storageV2) ? GUARDIAN : GUARDIAN | CONFIG;
+        if (who == h.poster && target == address(s.pool)) return POSTER;
+        return 0;
+    }
+
+    function _contains(address[] memory list, address who) internal pure returns (bool) {
+        for (uint256 i; i < list.length; ++i) {
+            if (list[i] == who) return true;
+        }
+        return false;
+    }
+
+    function _sameSet(address[] memory a, address[] memory b) internal pure returns (bool) {
+        if (a.length != b.length) return false;
+        for (uint256 i; i < a.length; ++i) {
+            if (!_contains(b, a[i])) return false;
+        }
+        return true;
     }
 
     function _owned(address target, address owner, string memory what) internal view {
@@ -220,5 +363,42 @@ contract HandoffOwnership is Script {
         s.renderer = NormiesRendererV6(vm.envAddress("RENDERER_V6_ADDRESS"));
         s.pool = NormiesRevenuePool(payable(vm.envAddress("REVENUE_POOL_ADDRESS")));
         s.splitter = NormiesRoyaltySplitter(payable(vm.envAddress("ROYALTY_SPLITTER_ADDRESS")));
+        s.normies = vm.envOr("NORMIES_ADDRESS", address(0));
+    }
+
+    /// @dev Every role, mover and writer event on the four role contracts since `fromBlock`, in chain order per
+    ///      contract. The RPC must serve eth_getLogs over that range.
+    function _roleLogs(Stack memory s, uint256 fromBlock) internal returns (VmSafe.Log[] memory out) {
+        address[6] memory targets = [
+            address(s.storageV2),
+            address(s.storageV2),
+            address(s.storageV2),
+            address(s.canvas),
+            address(s.market),
+            address(s.pool)
+        ];
+        bytes32[6] memory sigs = [
+            OwnableRoles.RolesUpdated.selector,
+            NormiesCanvasStorageV2.MoverRolesSet.selector,
+            NormiesCanvasStorageV2.AuthorizedWriterSet.selector,
+            OwnableRoles.RolesUpdated.selector,
+            OwnableRoles.RolesUpdated.selector,
+            OwnableRoles.RolesUpdated.selector
+        ];
+        VmSafe.EthGetLogs[][6] memory found;
+        uint256 total;
+        for (uint256 i; i < 6; ++i) {
+            bytes32[] memory topics = new bytes32[](1);
+            topics[0] = sigs[i];
+            found[i] = vm.eth_getLogs(fromBlock, block.number, targets[i], topics);
+            total += found[i].length;
+        }
+        out = new VmSafe.Log[](total);
+        uint256 n;
+        for (uint256 i; i < 6; ++i) {
+            for (uint256 j; j < found[i].length; ++j) {
+                out[n++] = VmSafe.Log(found[i][j].topics, found[i][j].data, found[i][j].emitter);
+            }
+        }
     }
 }

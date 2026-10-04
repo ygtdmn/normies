@@ -13,6 +13,7 @@ import {
     prePostProblems,
     requireIndependentVerifier,
     type PoolState,
+    type UnopenedEpoch,
 } from "./guards.js";
 
 /**
@@ -28,7 +29,9 @@ import {
  * read the posted epoch back. The rules live in guards.ts.
  *
  * `run` is that whole sequence, for the systemd timer in deploy/revshare. It refuses to post an epoch shorter
- * than MIN_EPOCH_BLOCKS, so a double run is harmless, and it never posts without RPC_URL_VERIFY.
+ * than MIN_EPOCH_BLOCKS or while the previous epoch has not opened for claims, so a double run is harmless, and it
+ * never posts without RPC_URL_VERIFY. A run that leaves a person something to do (a Safe proposal written or still
+ * waiting) exits with code 2, so the timer unit shows as failed and alerts.
  *
  * No owner key on the server: the job's PRIVATE_KEY holds the pool's POSTER role and nothing else.
  * It posts directly; claims open POST_DELAY (24 h) later, and until then the Operations Safe can cancel a bad
@@ -46,7 +49,7 @@ import {
  * Env: RPC_URL (an archive node), CHAIN_ID (1, 11155111 or 31337), NORMIES_ADDRESS (mainnet Normies by default),
  * CANVAS_STORAGE_V2_ADDRESS, MARKET_ADDRESS, CANVAS_V2_ADDRESS, REVENUE_POOL_ADDRESS, optional ROYALTY_SPLITTER_ADDRESS
  * and REVSHARE_DIR (data/revshare by default). `run` also needs PRIVATE_KEY (a key holding the pool's POSTER role, or
- * any key, which then writes a Safe proposal instead; or FROM, an unlocked account on anvil) and takes RPC_URL_VERIFY, EPOCH_FINALITY_BLOCKS (64), MIN_EPOCH_BLOCKS (7000, about a day),
+ * any key, which then writes a Safe proposal instead; or FROM, an unlocked account on anvil) and takes RPC_URL_VERIFY, EPOCH_FINALITY_BLOCKS (64), MIN_EPOCH_BLOCKS (7000, about 23 hours),
  * REVSHARE_GENESIS_BLOCK (the first epoch's start; PIXEL_MARKET_START_BLOCK is also accepted) and
  * REVSHARE_PUBLIC_URL (https://api.normies.art/revshare/epochs), which becomes the on-chain dataURI.
  */
@@ -131,7 +134,25 @@ async function poolState(client: PublicClient, pool: `0x${string}`): Promise<Poo
         client.readContract({ address: pool, abi: opsAbi, functionName: "unallocated" }),
         client.readContract({ address: pool, abi: opsAbi, functionName: "paused" }),
     ]);
-    return { nextEpochId, cursorToBlock: BigInt(cursorToBlock), unallocated, paused };
+    const unopened = await unopenedEpoch(client, pool, nextEpochId);
+    return { nextEpochId, cursorToBlock: BigInt(cursorToBlock), unallocated, paused, unopened };
+}
+
+/** The newest epoch that is not cancelled, if its claims have not opened by the latest block. */
+async function unopenedEpoch(client: PublicClient, pool: `0x${string}`, nextEpochId: bigint): Promise<UnopenedEpoch | null> {
+    const now = (await client.getBlock({ blockTag: "latest" })).timestamp;
+    for (let id = nextEpochId - 1n; id >= 1n; id--) {
+        const e = await client.readContract({ address: pool, abi: opsAbi, functionName: "getEpoch", args: [id] });
+        if (e.status === STATUS_CANCELLED) continue;
+        return BigInt(e.claimableAt) > now ? { id, claimableAt: BigInt(e.claimableAt) } : null;
+    }
+    return null;
+}
+
+/** The run stopped on something only a person can do; exit code 2 makes the systemd unit fail and alert. */
+function needsAction(message: string): void {
+    console.error(`ACTION NEEDED: ${message}`);
+    process.exitCode = 2;
 }
 
 /** The chain's finalized block, or null when the provider does not serve the tag (a local fork). */
@@ -187,8 +208,17 @@ async function runEpoch(dryRun: boolean, replaceProposal: boolean) {
     const nextEpochId = await publicClient.readContract({ address: a.pool, abi: opsAbi, functionName: "nextEpochId" });
     // An epoch proposed to the Safe and not yet posted: its file is what the signers are checking, so leave it be.
     if (existsSync(proposalPath(nextEpochId)) && !replaceProposal) {
-        console.log(`epoch ${nextEpochId} is waiting for the pool owner to execute ${proposalPath(nextEpochId)}; nothing to do`);
+        needsAction(`epoch ${nextEpochId} is still waiting for the pool owner to execute ${proposalPath(nextEpochId)}`);
         console.log("(rerun with --replace-proposal to rebuild it, then delete the old transaction from the Safe queue)");
+        return;
+    }
+    // One unopened epoch at a time (see prePostProblems). Checked here too, so an early run stops before building.
+    const unopened = await unopenedEpoch(publicClient, a.pool, nextEpochId);
+    if (unopened) {
+        console.log(
+            `epoch ${unopened.id} opens for claims at ${new Date(Number(unopened.claimableAt) * 1000).toISOString()}; ` +
+                "nothing to post until then",
+        );
         return;
     }
     // The pool's cursor, not the last epoch's range: a cancelled epoch hands its range back to be posted again.
@@ -285,7 +315,7 @@ async function runEpoch(dryRun: boolean, replaceProposal: boolean) {
     ]);
     if (!canPost && poolOwner.toLowerCase() !== sender.toLowerCase()) {
         const path = writeProposal(epoch, a.pool, poolOwner, dataURI, await publicClient.getChainId());
-        console.log(`epoch ${epoch.epochId} proposed: ${path}`);
+        needsAction(`${sender} lacks the POSTER role, so epoch ${epoch.epochId} was written as a Safe proposal: ${path}`);
         console.log(`import it into the Transaction Builder of ${poolOwner}; signers verify ${dataURI} on their own RPC before signing`);
         return;
     }

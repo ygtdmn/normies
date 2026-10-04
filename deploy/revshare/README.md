@@ -15,7 +15,9 @@ Operations Safe can cancel it. So a run always goes in this order and stops at t
    written to `REVSHARE_DIR/epochs/<id>.json`.
 5. Rebuilds it from scratch against `RPC_URL_VERIFY`, after checking both providers agree on the end block's
    hash. Any difference (amount, samples, total, root, ...) means it does not post.
-6. Re-reads the pool: not paused, same next epoch id, contiguous range, enough unreserved ETH.
+6. Re-reads the pool: not paused, same next epoch id, contiguous range, enough unreserved ETH, and the previous
+   epoch already open for claims (a cancel only hands back the latest range, so there is never more than one
+   epoch a cancel could still reach; an early run stops before building).
 7. Posts the root and reads the posted epoch back. There is no owner key on this machine: the job's
    `PRIVATE_KEY` holds the pool's POSTER role and nothing else. Claims open 24 hours later (`POST_DELAY`); until
    then the Operations Safe can `cancelEpoch` a bad root, and the next run posts the range again under a new id.
@@ -24,6 +26,15 @@ Operations Safe can cancel it. So a run always goes in this order and stops at t
 
 An epoch shorter than `MIN_EPOCH_BLOCKS` is not posted, so running the job twice is harmless. A run that fails
 leaves nothing behind but the epoch file and can simply be run again.
+
+## Alerts
+
+The unit fails, and should page someone, in two cases. Any error exits 1. A run that leaves a person something to
+do exits 2 and logs `ACTION NEEDED`: a proposal was written because the key lacks POSTER, or an earlier proposal
+is still waiting for the Safe. After the handoff neither should ever happen, so both mean the key or its role is
+wrong. Point the host's failed-unit alerting at `normies-revshare.service` (for example an `OnFailure=` unit that
+sends the alert), and page on every `EpochPosted` the journal does not show this job posting: that is the stolen
+key case in the runbook ("A post nobody expected").
 
 ## Install
 

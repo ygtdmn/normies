@@ -40,12 +40,19 @@ export function epochMismatches(a: EpochFile, b: EpochFile): string[] {
     return out;
 }
 
+/** The newest epoch that is not cancelled, when its claims have not opened yet. */
+export interface UnopenedEpoch {
+    id: bigint;
+    claimableAt: bigint;
+}
+
 /** What the pool says right before posting. Building takes hours, so this is read again at the last moment. */
 export interface PoolState {
     nextEpochId: bigint;
     cursorToBlock: bigint;
     unallocated: bigint;
     paused: boolean;
+    unopened: UnopenedEpoch | null;
 }
 
 /**
@@ -56,6 +63,14 @@ export interface PoolState {
 export function prePostProblems(epoch: EpochFile, pool: PoolState): string[] {
     const out: string[] = [];
     if (pool.paused) out.push("the pool is paused for posting");
+    // A cancel only hands back the latest range. With two unopened epochs, cancelling the older and then the newer
+    // would leave the older range unpostable for good, so there is never more than one.
+    if (pool.unopened) {
+        out.push(
+            `epoch ${pool.unopened.id} has not opened for claims yet (opens ${new Date(Number(pool.unopened.claimableAt) * 1000).toISOString()}); ` +
+                "post after that, so there is never more than one epoch a cancel could still reach",
+        );
+    }
     if (BigInt(epoch.epochId) !== pool.nextEpochId) {
         out.push(`epoch id ${epoch.epochId} is not the pool's next id ${pool.nextEpochId}; every leaf would be unclaimable`);
     }

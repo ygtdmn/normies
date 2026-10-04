@@ -34,6 +34,7 @@ const pool = (over: Partial<PoolState> = {}): PoolState => ({
     cursorToBlock: 1000n,
     unallocated: 1000n,
     paused: false,
+    unopened: null,
     ...over,
 });
 
@@ -74,6 +75,12 @@ describe("epochMismatches", () => {
 });
 
 describe("prePostProblems", () => {
+    it("refuses while the previous epoch has not opened, so a cancel can never strand an older range", () => {
+        const problems = prePostProblems(epoch(), pool({ unopened: { id: 2n, claimableAt: 1_790_000_000n } }));
+        expect(problems).toHaveLength(1);
+        expect(problems[0]).toMatch(/epoch 2 has not opened for claims yet \(opens 2026-09-21T/);
+    });
+
     it("passes an epoch that fits the pool exactly", () => {
         expect(prePostProblems(epoch(), pool())).toEqual([]);
     });

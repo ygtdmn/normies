@@ -8,9 +8,22 @@ import { NormiesRoyaltySplitter } from "../src/NormiesRoyaltySplitter.sol";
 import { IWETH } from "../src/interfaces/IWETH.sol";
 import { MockWETH } from "./mocks/MockWETH.sol";
 import { Ownable } from "solady/auth/Ownable.sol";
+import { VmSafe } from "forge-std/src/Vm.sol";
 
-/// @notice Stands in for a Safe: it has code and sends whatever call its signers agreed on.
+/// @notice Stands in for a Safe: it has code, signers and a threshold, and sends whatever call its signers agreed on.
 contract SafeStub {
+    address[] internal owners;
+    uint256 public getThreshold;
+
+    constructor(address[] memory _owners, uint256 _threshold) {
+        owners = _owners;
+        getThreshold = _threshold;
+    }
+
+    function getOwners() external view returns (address[] memory) {
+        return owners;
+    }
+
     function exec(address target, bytes calldata data) external returns (bytes memory) {
         (bool ok, bytes memory ret) = target.call(data);
         if (!ok) {
@@ -32,6 +45,8 @@ contract HandoffOwnershipTest is PixelMarketBase {
     NormiesRoyaltySplitter splitter;
 
     function setUp() public override {
+        // Every role, mover and writer event from the deployment on, for checkHistory.
+        vm.recordLogs();
         super.setUp();
         pool = new NormiesRevenuePool(IWETH(address(new MockWETH())));
         splitter = new NormiesRoyaltySplitter(IWETH(address(0xE7)), address(pool), feeTreasury);
@@ -41,13 +56,26 @@ contract HandoffOwnershipTest is PixelMarketBase {
         canvas.setPaused(true);
         market.setPaused(true);
         handoff = new HandoffOwnership();
-        adminSafe = new SafeStub();
-        treasurySafe = new SafeStub();
-        operationsSafe = new SafeStub();
+        adminSafe = _safe(0xA0, 5, 3);
+        treasurySafe = _safe(0xB0, 3, 2);
+        operationsSafe = _safe(0xC0, 3, 2);
+    }
+
+    /// @dev A Safe of `count` signers starting at address `first`.
+    function _safe(uint160 first, uint160 count, uint256 threshold) internal returns (SafeStub) {
+        address[] memory signers = new address[](count);
+        for (uint160 i; i < count; ++i) {
+            signers[i] = address(first + i);
+        }
+        return new SafeStub(signers, threshold);
     }
 
     function _stack() internal view returns (HandoffOwnership.Stack memory) {
-        return HandoffOwnership.Stack(storageV2, canvas, market, renderer, pool, splitter);
+        return HandoffOwnership.Stack(storageV2, canvas, market, renderer, pool, splitter, address(0));
+    }
+
+    function _logs() internal returns (VmSafe.Log[] memory) {
+        return vm.getRecordedLogs();
     }
 
     function _holders() internal view returns (HandoffOwnership.Holders memory) {
@@ -61,6 +89,7 @@ contract HandoffOwnershipTest is PixelMarketBase {
     function testHandoffLeavesTheDeployerWithNothing() public {
         _run();
         handoff.check(_stack(), _holders(), address(this));
+        handoff.checkHistory(_stack(), _holders(), new address[](0), _logs());
 
         assertEq(storageV2.owner(), address(adminSafe));
         assertEq(canvas.owner(), address(adminSafe));
@@ -130,7 +159,7 @@ contract HandoffOwnershipTest is PixelMarketBase {
 
         // Checking against a Safe that does not own the stack fails.
         HandoffOwnership.Holders memory wrong = _holders();
-        wrong.adminSafe = address(new SafeStub());
+        wrong.adminSafe = address(_safe(0xD0, 5, 3));
         vm.expectRevert("storage V2 is not owned by the Admin Safe");
         handoff.check(_stack(), wrong, address(this));
     }
@@ -151,10 +180,107 @@ contract HandoffOwnershipTest is PixelMarketBase {
         vm.expectRevert("ADMIN_SAFE has no code: is it deployed on this chain?");
         handoff.handoff(_stack(), h, address(this));
 
+        h = _holders();
+        h.treasurySafe = address(market); // code, but not a Safe
+        vm.expectRevert("TREASURY_SAFE does not answer getThreshold(): is it a Safe?");
+        handoff.handoff(_stack(), h, address(this));
+
         storageV2.setMoverRoles(address(this), storageV2.ROLE_WRAPPER());
         vm.expectRevert("the deployer still holds a mover role on storage V2");
         handoff.handoff(_stack(), _holders(), address(this));
         assertEq(storageV2.owner(), address(this));
+    }
+
+    function testRefusesSafesThatAreNotRealMultisigs() public {
+        HandoffOwnership.Holders memory h = _holders();
+        h.adminSafe = address(_safe(0xA0, 5, 2));
+        vm.expectRevert("ADMIN_SAFE needs at least 3 signers to execute");
+        handoff.handoff(_stack(), h, address(this));
+
+        h = _holders();
+        h.operationsSafe = address(_safe(0xC0, 1, 1));
+        vm.expectRevert("OPERATIONS_SAFE needs at least 2 signers to execute");
+        handoff.handoff(_stack(), h, address(this));
+
+        h = _holders();
+        h.treasurySafe = address(_safe(0xC0, 3, 2)); // the Operations Safe's signers again
+        vm.expectRevert("the Treasury and Operations Safes have the same signers");
+        handoff.handoff(_stack(), h, address(this));
+
+        h = _holders();
+        h.poster = address(0xA2); // one of the Admin Safe's signers
+        vm.expectRevert("REVSHARE_POSTER is a Safe signer; it lives on the API host and must sign nothing");
+        handoff.handoff(_stack(), h, address(this));
+
+        // The same holders pass the read-only check too, so a Safe changed after the handoff is caught.
+        _run();
+        h = _holders();
+        h.adminSafe = address(_safe(0xA0, 5, 1));
+        vm.expectRevert("ADMIN_SAFE needs at least 3 signers to execute");
+        handoff.check(_stack(), h, address(this));
+    }
+
+    function testHistoryCatchesARoleOutsideTheLayout() public {
+        canvas.grantRoles(address(0xBAD), 2); // CONFIG to a stranger, while the deployer still owns canvas V2
+        _run();
+        handoff.check(_stack(), _holders(), address(this)); // the current-state check cannot see it...
+        VmSafe.Log[] memory logs = _logs();
+        vm.expectRevert(
+            bytes(
+                string.concat(
+                    "unexpected roles on ", vm.toString(address(canvas)), " for ", vm.toString(address(0xBAD))
+                )
+            )
+        );
+        handoff.checkHistory(_stack(), _holders(), new address[](0), logs); // ...the replay does
+    }
+
+    function testHistoryCatchesAStrayMover() public {
+        storageV2.setMoverRoles(address(0x3A9), storageV2.ROLE_WRAPPER());
+        _run();
+        VmSafe.Log[] memory logs = _logs();
+        vm.expectRevert(bytes(string.concat("unexpected mover role for ", vm.toString(address(0x3A9)))));
+        handoff.checkHistory(_stack(), _holders(), new address[](0), logs);
+    }
+
+    function testHistoryAcceptsOnlyTheListedWriters() public {
+        address bot = address(0xB07);
+        storageV2.setAuthorizedWriter(bot, true);
+        _run();
+        VmSafe.Log[] memory logs = _logs();
+        vm.expectRevert(bytes(string.concat("unexpected overlay writer ", vm.toString(bot))));
+        handoff.checkHistory(_stack(), _holders(), new address[](0), logs);
+
+        address[] memory writers = new address[](1);
+        writers[0] = bot;
+        handoff.checkHistory(_stack(), _holders(), writers, logs);
+
+        // A listed writer that was removed is reported as missing.
+        adminSafe.exec(address(storageV2), abi.encodeCall(storageV2.setAuthorizedWriter, (bot, false)));
+        vm.expectRevert(bytes(string.concat("missing overlay writer ", vm.toString(bot))));
+        handoff.checkHistory(_stack(), _holders(), writers, logs);
+    }
+
+    function testHistoryNeedsTheDeploymentEvents() public {
+        _run();
+        vm.expectRevert("no role events found: is DEPLOY_BLOCK at or before the deployment?");
+        handoff.checkHistory(_stack(), _holders(), new address[](0), new VmSafe.Log[](0));
+    }
+
+    function testNormiesMustSitWithTheAdminSafeWithRescueLocked() public {
+        _run();
+        HandoffOwnership.Stack memory s = _stack();
+        s.normies = address(normies);
+        vm.expectRevert("the Normies NFT is not owned by the Admin Safe");
+        handoff.check(s, _holders(), address(this));
+
+        // Moving it without locking the deployer's rescue access first is not enough.
+        normies.transferOwnership(address(adminSafe));
+        vm.expectRevert("Normies: the deployer's rescue access is not locked");
+        handoff.check(s, _holders(), address(this));
+
+        adminSafe.exec(address(normies), abi.encodeCall(normies.lockRescue, (1)));
+        handoff.check(s, _holders(), address(this));
     }
 
     function testPosterPostsAndTheGuardianCancelsBeforeClaimsOpen() public {
@@ -184,8 +310,18 @@ contract HandoffOwnershipPreCutoverTest is PixelMarketBase {
         HandoffOwnership handoff = new HandoffOwnership();
         HandoffOwnership.Stack memory s;
         s.storageV2 = storageV2;
+        address[] memory a = new address[](3);
+        a[0] = address(0xA0);
+        a[1] = address(0xA1);
+        a[2] = address(0xA2);
+        address[] memory b = new address[](2);
+        b[0] = address(0xB0);
+        b[1] = address(0xB1);
+        address[] memory c = new address[](2);
+        c[0] = address(0xC0);
+        c[1] = address(0xC1);
         HandoffOwnership.Holders memory h = HandoffOwnership.Holders(
-            address(new SafeStub()), address(new SafeStub()), address(new SafeStub()), address(0x9057)
+            address(new SafeStub(a, 3)), address(new SafeStub(b, 2)), address(new SafeStub(c, 2)), address(0x9057)
         );
         vm.expectRevert("finalize the balance migration first (MigrateLegacy.s.sol)");
         handoff.handoff(s, h, address(this));
