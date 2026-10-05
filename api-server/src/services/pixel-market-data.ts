@@ -13,7 +13,13 @@ export interface PixelBalanceData {
 
 export interface PixelHolderRow {
     address: string;
+    /** wallet + listed + attached: every #PIXEL the wallet controls. */
     balance: string;
+    wallet: string;
+    /** In the wallet's open market listings. */
+    listed: string;
+    /** On the Normies the wallet owns. */
+    attached: string;
     updatedBlock: string;
 }
 
@@ -155,6 +161,20 @@ export async function getPixelBalance(address: string): Promise<PixelBalanceData
 
 export async function getPixelHolders(limit = 50, offset = 0): Promise<{ holders: PixelHolderRow[]; hasMore: boolean }> {
     return ponderFetch(`/pixels/holders?${page(limit, offset).toString()}`);
+}
+
+export interface PixelHolderTotals {
+    address: string;
+    balance: string;
+    wallet: string;
+    listed: string;
+    attached: string;
+    normiesWithPixels: number;
+}
+
+/** One wallet's #PIXEL, counted like /pixels/holders: wallet + listed + pixels on the Normies it owns. */
+export async function getPixelHolder(address: string): Promise<PixelHolderTotals> {
+    return ponderFetch(`/pixels/holders/${address.toLowerCase()}`);
 }
 
 export async function getTokenPixels(tokenId: number): Promise<TokenPixelsData> {

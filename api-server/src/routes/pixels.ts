@@ -5,6 +5,7 @@ import {
     getPixelActivity,
     getPixelBalance,
     getPixelHolders,
+    getPixelHolder,
     getPixelSupply,
     getTokenPixelsBatch,
 } from "../services/pixel-market-data.js";
@@ -65,6 +66,12 @@ pixels.get("/balance/:address", async (c) => {
 pixels.get("/holders", async (c) => {
     const { limit, offset } = parsePagination(c);
     return c.json(await getPixelHolders(limit, offset));
+});
+
+pixels.get("/holders/:address", async (c) => {
+    const address = c.req.param("address");
+    if (!ADDRESS_RE.test(address)) return c.json({ error: "Invalid Ethereum address" }, 400);
+    return c.json(await getPixelHolder(address));
 });
 
 pixels.get("/activity/:address", async (c) => {

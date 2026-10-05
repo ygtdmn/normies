@@ -2,7 +2,7 @@ import { db } from "ponder:api";
 import schema from "ponder:schema";
 import { Hono } from "hono";
 import { ownKey, queryInt } from "./query.js";
-import { eq, desc, asc, and, or, gt, lt, lte, count, inArray } from "ponder";
+import { eq, desc, asc, and, or, gt, lt, lte, count, inArray, ne, sql } from "ponder";
 
 // ──────────────────────────────────────────────
 //  Pixel Market read API: ledger balances, listings, fills, stats, sinks.
@@ -88,14 +88,16 @@ app.get("/pixels/balance/:address", async (c) => {
 });
 
 /**
- * Holders of #PIXEL outside Normies, largest first. Pixels in an open listing still belong to the seller, so the
- * market's escrow is credited back to each seller (`listed`) and the market contract itself is left out. `balance` is
- * `wallet + listed`, so the shares still add up to every #PIXEL held in wallets.
+ * Holders of #PIXEL, largest first, counting every pixel a wallet controls: its wallet balance, pixels in its open
+ * listings (the market's escrow is credited back to each seller as `listed`, and the market contract itself is left
+ * out) and pixels on the Normies it owns (`attached`). `balance` is `wallet + listed + attached`, so the shares add up
+ * to every #PIXEL in wallets and on living Normies.
  */
+const ZERO = "0x0000000000000000000000000000000000000000";
 const MARKET = (process.env.PONDER_MARKET_ADDRESS ?? "").toLowerCase();
 
 async function rankedHolders() {
-  const [wallets, listings] = await Promise.all([
+  const [wallets, listings, onNormies] = await Promise.all([
     db
       .select()
       .from(schema.pixelBalance)
@@ -108,14 +110,24 @@ async function rankedHolders() {
       })
       .from(schema.marketListing)
       .where(and(eq(schema.marketListing.status, "active"), gt(schema.marketListing.remaining, 0))),
+    // Pixels on each owner's Normies. A burned Normie belongs to the zero address and drops out.
+    db
+      .select({
+        owner: schema.normieOwner.owner,
+        attached: sql<string>`sum(${schema.canvasTokenState.actionPoints})`,
+      })
+      .from(schema.canvasTokenState)
+      .innerJoin(schema.normieOwner, eq(schema.normieOwner.tokenId, schema.canvasTokenState.tokenId))
+      .where(and(gt(schema.canvasTokenState.actionPoints, 0n), ne(schema.normieOwner.owner, ZERO)))
+      .groupBy(schema.normieOwner.owner),
   ]);
 
-  const byAddress = new Map<string, { wallet: bigint; listed: bigint; updatedBlock: bigint }>();
+  const byAddress = new Map<string, { wallet: bigint; listed: bigint; attached: bigint; updatedBlock: bigint }>();
   const entry = (address: string) => {
     const key = address.toLowerCase();
     let row = byAddress.get(key);
     if (!row) {
-      row = { wallet: 0n, listed: 0n, updatedBlock: 0n };
+      row = { wallet: 0n, listed: 0n, attached: 0n, updatedBlock: 0n };
       byAddress.set(key, row);
     }
     return row;
@@ -132,8 +144,19 @@ async function rankedHolders() {
     if (l.updatedBlockNumber > row.updatedBlock) row.updatedBlock = l.updatedBlockNumber;
   }
 
+  for (const n of onNormies) {
+    entry(n.owner).attached += BigInt(n.attached ?? 0);
+  }
+
   return [...byAddress.entries()]
-    .map(([address, r]) => ({ address, balance: r.wallet + r.listed, wallet: r.wallet, listed: r.listed, updatedBlock: r.updatedBlock }))
+    .map(([address, r]) => ({
+      address,
+      balance: r.wallet + r.listed + r.attached,
+      wallet: r.wallet,
+      listed: r.listed,
+      attached: r.attached,
+      updatedBlock: r.updatedBlock,
+    }))
     .filter((r) => r.balance > 0n)
     .sort((a, b) => (a.balance === b.balance ? (a.address < b.address ? -1 : 1) : a.balance > b.balance ? -1 : 1));
 }
@@ -143,6 +166,46 @@ app.get("/pixels/holders", async (c) => {
   const ranked = await rankedHolders();
   const page = ranked.slice(offset, offset + limit);
   return c.json({ holders: page.map(serializeBigints), hasMore: ranked.length > offset + limit });
+});
+
+// One wallet, counted the way /pixels/holders counts it: wallet + listed + pixels on the Normies it owns.
+app.get("/pixels/holders/:address", async (c) => {
+  const address = c.req.param("address").toLowerCase() as `0x${string}`;
+  if (!isAddress(address)) return c.json({ error: "Invalid Ethereum address" }, 400);
+
+  const [[wallet], [listed], [onNormies]] = await Promise.all([
+    db.select().from(schema.pixelBalance).where(eq(schema.pixelBalance.address, address)).limit(1),
+    db
+      .select({ listed: sql<string>`coalesce(sum(${schema.marketListing.remaining}), 0)` })
+      .from(schema.marketListing)
+      .where(
+        and(
+          eq(schema.marketListing.seller, address),
+          eq(schema.marketListing.status, "active"),
+          gt(schema.marketListing.remaining, 0),
+        ),
+      ),
+    db
+      .select({
+        attached: sql<string>`coalesce(sum(${schema.canvasTokenState.actionPoints}), 0)`,
+        normies: sql<string>`count(*)`,
+      })
+      .from(schema.canvasTokenState)
+      .innerJoin(schema.normieOwner, eq(schema.normieOwner.tokenId, schema.canvasTokenState.tokenId))
+      .where(and(eq(schema.normieOwner.owner, address), gt(schema.canvasTokenState.actionPoints, 0n))),
+  ]);
+
+  const w = address === MARKET ? 0n : (wallet?.balance ?? 0n);
+  const l = BigInt(listed?.listed ?? 0);
+  const a = BigInt(onNormies?.attached ?? 0);
+  return c.json({
+    address,
+    balance: (w + l + a).toString(),
+    wallet: w.toString(),
+    listed: l.toString(),
+    attached: a.toString(),
+    normiesWithPixels: Number(onNormies?.normies ?? 0),
+  });
 });
 
 app.get("/pixels/token/:tokenId", async (c) => {
@@ -223,7 +286,7 @@ app.get("/pixels/supply", async (c) => {
     .from(schema.pixelSupply)
     .where(eq(schema.pixelSupply.id, GLOBAL_ID))
     .limit(1);
-  // Same holders as /pixels/holders: sellers count through their listings, the market contract does not.
+  // Same holders as /pixels/holders: wallets, listings and the Normies each wallet owns; the market contract is not one.
   const holders = await rankedHolders();
   return c.json({
     totalWallet: (supply?.totalWallet ?? 0n).toString(),

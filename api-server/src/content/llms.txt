@@ -204,8 +204,12 @@ Wallet-level pixel balances from NormiesCanvasStorageV2. 404 until the Pixel Mar
   - Cache: `public, max-age=10, s-maxage=10`
 
 - `GET /pixels/holders`
-  - Wallets with a non-zero balance, largest first.
+  - Holders of #PIXEL, largest first. `balance` counts every pixel a wallet controls: `wallet` + `listed` (its open market listings) + `attached` (on the Normies it owns).
   - Query: `limit`, `offset`.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /pixels/holders/{address}`
+  - One wallet counted the same way: `{ address, balance, wallet, listed, attached, normiesWithPixels }`.
   - Cache: `public, max-age=10, s-maxage=10`
 
 - `GET /pixels/activity/{address}`

@@ -331,8 +331,14 @@
 
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/pixels/holders</span><span class="response-type">application/json</span>
-            <p class="desc">Wallets with a non-zero balance, largest first.</p>
+            <p class="desc">Holders of #PIXEL, largest first. <code>balance</code> counts every pixel a wallet controls: <code>wallet</code> + <code>listed</code> (its open market listings) + <code>attached</code> (on the Normies it owns).</p>
             <p class="meta">Query: <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/pixels/holders/:address</span><span class="response-type">application/json</span>
+            <p class="desc">One wallet counted the same way: <code>{ address, balance, wallet, listed, attached, normiesWithPixels }</code>.</p>
+            <p class="meta">Cache: <code>public, max-age=10, s-maxage=10</code></p>
         </div>
 
         <div class="endpoint">
