@@ -87,17 +87,58 @@ app.get("/pixels/balance/:address", async (c) => {
   });
 });
 
+/**
+ * Holders of #PIXEL outside Normies, largest first. Pixels in an open listing still belong to the seller, so the
+ * market's escrow is credited back to each seller (`listed`) and the market contract itself is left out. `balance` is
+ * `wallet + listed`, so the shares still add up to every #PIXEL held in wallets.
+ */
+const MARKET = (process.env.PONDER_MARKET_ADDRESS ?? "").toLowerCase();
+
 app.get("/pixels/holders", async (c) => {
   const { limit, offset } = parsePagination(c);
-  const rows = await db
-    .select()
-    .from(schema.pixelBalance)
-    .where(gt(schema.pixelBalance.balance, 0n))
-    .orderBy(desc(schema.pixelBalance.balance), asc(schema.pixelBalance.address))
-    .limit(limit + 1)
-    .offset(offset);
-  const page = rows.slice(0, limit);
-  return c.json({ holders: page.map(serializeBigints), hasMore: rows.length > limit });
+  const [wallets, listings] = await Promise.all([
+    db
+      .select()
+      .from(schema.pixelBalance)
+      .where(gt(schema.pixelBalance.balance, 0n)),
+    db
+      .select({
+        seller: schema.marketListing.seller,
+        remaining: schema.marketListing.remaining,
+        updatedBlockNumber: schema.marketListing.updatedBlockNumber,
+      })
+      .from(schema.marketListing)
+      .where(and(eq(schema.marketListing.status, "active"), gt(schema.marketListing.remaining, 0))),
+  ]);
+
+  const byAddress = new Map<string, { wallet: bigint; listed: bigint; updatedBlock: bigint }>();
+  const entry = (address: string) => {
+    const key = address.toLowerCase();
+    let row = byAddress.get(key);
+    if (!row) {
+      row = { wallet: 0n, listed: 0n, updatedBlock: 0n };
+      byAddress.set(key, row);
+    }
+    return row;
+  };
+  for (const w of wallets) {
+    if (w.address.toLowerCase() === MARKET) continue;
+    const row = entry(w.address);
+    row.wallet += w.balance;
+    if (w.updatedBlock > row.updatedBlock) row.updatedBlock = w.updatedBlock;
+  }
+  for (const l of listings) {
+    const row = entry(l.seller);
+    row.listed += BigInt(l.remaining);
+    if (l.updatedBlockNumber > row.updatedBlock) row.updatedBlock = l.updatedBlockNumber;
+  }
+
+  const ranked = [...byAddress.entries()]
+    .map(([address, r]) => ({ address, balance: r.wallet + r.listed, wallet: r.wallet, listed: r.listed, updatedBlock: r.updatedBlock }))
+    .filter((r) => r.balance > 0n)
+    .sort((a, b) => (a.balance === b.balance ? (a.address < b.address ? -1 : 1) : a.balance > b.balance ? -1 : 1));
+  const page = ranked.slice(offset, offset + limit);
+  return c.json({ holders: page.map(serializeBigints), hasMore: ranked.length > offset + limit });
 });
 
 app.get("/pixels/token/:tokenId", async (c) => {
