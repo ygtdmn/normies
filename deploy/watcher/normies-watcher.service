@@ -1,0 +1,25 @@
+# Watches the Normies contracts and Safes and posts every admin event and Safe transaction to Discord
+# (api-server/src/watch). Long-running; resumes from the last finished block after a restart or a crash.
+[Unit]
+Description=Normies on-chain watcher (Discord alerts)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=normies
+Group=normies
+WorkingDirectory=/opt/normies/api-server
+EnvironmentFile=/etc/normies/watcher.env
+Environment=WATCHER_STATE=/var/lib/normies-watcher/state.json
+ExecStart=/opt/normies/api-server/node_modules/.bin/tsx src/watch/cli.ts
+Restart=always
+RestartSec=60
+StateDirectory=normies-watcher
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
