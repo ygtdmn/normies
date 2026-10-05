@@ -94,8 +94,7 @@ app.get("/pixels/balance/:address", async (c) => {
  */
 const MARKET = (process.env.PONDER_MARKET_ADDRESS ?? "").toLowerCase();
 
-app.get("/pixels/holders", async (c) => {
-  const { limit, offset } = parsePagination(c);
+async function rankedHolders() {
   const [wallets, listings] = await Promise.all([
     db
       .select()
@@ -133,10 +132,15 @@ app.get("/pixels/holders", async (c) => {
     if (l.updatedBlockNumber > row.updatedBlock) row.updatedBlock = l.updatedBlockNumber;
   }
 
-  const ranked = [...byAddress.entries()]
+  return [...byAddress.entries()]
     .map(([address, r]) => ({ address, balance: r.wallet + r.listed, wallet: r.wallet, listed: r.listed, updatedBlock: r.updatedBlock }))
     .filter((r) => r.balance > 0n)
     .sort((a, b) => (a.balance === b.balance ? (a.address < b.address ? -1 : 1) : a.balance > b.balance ? -1 : 1));
+}
+
+app.get("/pixels/holders", async (c) => {
+  const { limit, offset } = parsePagination(c);
+  const ranked = await rankedHolders();
   const page = ranked.slice(offset, offset + limit);
   return c.json({ holders: page.map(serializeBigints), hasMore: ranked.length > offset + limit });
 });
@@ -219,15 +223,13 @@ app.get("/pixels/supply", async (c) => {
     .from(schema.pixelSupply)
     .where(eq(schema.pixelSupply.id, GLOBAL_ID))
     .limit(1);
-  const [wallets] = await db
-    .select({ total: count() })
-    .from(schema.pixelBalance)
-    .where(gt(schema.pixelBalance.balance, 0n));
+  // Same holders as /pixels/holders: sellers count through their listings, the market contract does not.
+  const holders = await rankedHolders();
   return c.json({
     totalWallet: (supply?.totalWallet ?? 0n).toString(),
     totalAttached: (supply?.totalAttached ?? 0n).toString(),
     totalMigrated: supply?.totalMigrated ?? 0,
-    wallets: wallets?.total ?? 0,
+    wallets: holders.length,
     blockNumber: supply?.blockNumber?.toString() ?? null,
     timestamp: supply?.timestamp?.toString() ?? null,
   });
