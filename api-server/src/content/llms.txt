@@ -259,7 +259,7 @@ Sell-side order book of the NormiesPixelMarket, ETH priced per pixel. Prices and
 
 ## Revenue share
 
-Half of Pixel Market fees and half of collection royalties go to `NormiesRevenuePool` and are paid to holders in epochs. Payouts are computed off chain from RPC state (wallet score = (Normies held x bracket + weighted #PIXEL) x boost, sampled four times a day and averaged over the epoch) and claimed on chain with Merkle proofs as soon as the owner posts the epoch. 404 while the pool is not configured.
+Half of Pixel Market fees and half of collection royalties go to `NormiesRevenuePool` and are paid to holders in epochs. Payouts are computed off chain from RPC state (wallet score = (Normies held x bracket + weighted #PIXEL) x boost, sampled four times a day and averaged over the epoch) and claimed on chain with Merkle proofs: each epoch opens for claims 24 hours after it is posted. 404 while the pool is not configured.
 
 - `GET /revshare/config`
   - The scoring rules (`brackets`, `ladder`, `boost`, `looseWeight100`, factors, sampling) and their `configHash`, which every posted epoch records on chain.
@@ -577,15 +577,19 @@ Historical routes omit OpenSea listings and floor price because those are curren
 - NormiesRendererV5: `0x7c726f02C5e840e1656b522A5C22caaf87C1C35C`
   - V5 renderer: V4-compatible renderer with zombie metadata and art branches.
 
-Pixel Market stack (addresses published at deployment; until then the `/pixels` and `/market` routes return 404):
-- NormiesCanvasV2
+Pixel Market stack:
+- NormiesCanvasV2: `0xF14f2852e1fD6A4108156054AF49B3915dc40E2e`
   - Burns, painting, withdraw/deposit of pixels, canvas enlargement and blank canvas. The original NormiesCanvas is paused.
-- NormiesCanvasStorageV2
+- NormiesCanvasStorageV2: `0x96F2DA32Bb9D429d59ac13dB469f4950cBe02084`
   - Overlay bitmaps of any grid size, emitting on every write, falling back to NormiesCanvasStorage for older overlays; and the pixel accounting (wallet and per-Normie balances, copied from NormiesCanvas once at cutover).
-- NormiesPixelMarket
+- NormiesPixelMarket: `0x86156A8d6e4B9925F7fEca527ea5D71B0deeDB64`
   - Sell-side order book with partial or all-or-nothing fills and a fee taken out of seller proceeds.
-- NormiesRendererV6
+- NormiesRendererV6: `0xd6747533697878a6a3a29B5cCf815740BA23998D`
   - Grid-size aware renderer with Canvas Size and Blank Canvas traits.
+- NormiesRevenuePool: `0x481384812e79bf0d11FC0b1704af445D5F06813c`
+  - Holds the holders' half of market fees and royalties and pays it out in epochs with Merkle proofs.
+- NormiesRoyaltySplitter: `0xA68A225f62772E6158f2B5f8afC184AdB69c3282`
+  - Royalty receiver: splits royalties between the revenue pool and the team.
 
 ## Status Codes
 
