@@ -1,0 +1,22 @@
+# Pages Discord (exit code 2 -> normies-revshare-alert@) while an epoch built in approval mode waits to be posted.
+# Quiet when nothing waits. Triggered daily by normies-revshare-reminder.timer.
+[Unit]
+Description=Normies revenue share approval reminder
+After=network-online.target
+Wants=network-online.target
+OnFailure=normies-revshare-alert@%N.service
+
+[Service]
+Type=oneshot
+User=normies
+Group=normies
+WorkingDirectory=/opt/normies/api-server
+EnvironmentFile=/etc/normies/revshare.env
+ExecStart=/opt/normies/api-server/node_modules/.bin/tsx src/revshare/cli.ts pending
+StateDirectory=normies-revshare
+StateDirectoryMode=0755
+UMask=0022
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true

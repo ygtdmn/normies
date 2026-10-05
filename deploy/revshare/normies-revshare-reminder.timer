@@ -1,0 +1,11 @@
+# Every day at 12:00 UTC: a reminder while an epoch waits for approval (silent otherwise).
+[Unit]
+Description=Daily Normies revenue share approval reminder
+
+[Timer]
+OnCalendar=*-*-* 12:00:00 UTC
+Persistent=true
+Unit=normies-revshare-reminder.service
+
+[Install]
+WantedBy=timers.target

@@ -32,7 +32,8 @@ revshare.get("/status", async (c) => {
 
 revshare.get("/epochs", async (c) => {
     const { epochs } = await getEpochs();
-    return c.json({ epochs: epochs.map((e) => ({ ...e, published: loadEpochFile(e.epochId) !== null })) });
+    const files = await Promise.all(epochs.map((e) => loadEpochFile(e.epochId)));
+    return c.json({ epochs: epochs.map((e, i) => ({ ...e, published: files[i] !== null })) });
 });
 
 revshare.get("/epochs/:id", async (c) => {
@@ -44,7 +45,7 @@ revshare.get("/epochs/:id", async (c) => {
     } catch {
         return c.json({ error: "Epoch not found" }, 404);
     }
-    const file = loadEpochFile(id);
+    const file = await loadEpochFile(id);
     return c.json({
         ...epoch,
         published: file !== null,
@@ -55,11 +56,21 @@ revshare.get("/epochs/:id", async (c) => {
     });
 });
 
-revshare.get("/epochs/:id/proof/:address", (c) => {
+/** The raw epoch file (payouts and proofs): the on-chain dataURI, so anyone can check it with `pnpm revshare verify <url>`. */
+revshare.get("/files/:name", async (c) => {
+    const match = /^(\d+)\.json$/.exec(c.req.param("name"));
+    if (!match) return c.json({ error: "Expected <epochId>.json" }, 400);
+    const file = await loadEpochFile(match[1]);
+    if (!file) return c.json({ error: "Epoch file not published" }, 404);
+    c.header("Cache-Control", "public, max-age=60");
+    return c.json(file);
+});
+
+revshare.get("/epochs/:id/proof/:address", async (c) => {
     const id = c.req.param("id");
     const address = c.req.param("address").toLowerCase();
     if (!ADDRESS_RE.test(address)) return c.json({ error: "Invalid address" }, 400);
-    const file = loadEpochFile(id);
+    const file = await loadEpochFile(id);
     if (!file) return c.json({ error: "Epoch file not published" }, 404);
     const leaf = file.leaves.find((l) => l.account.toLowerCase() === address);
     if (!leaf) return c.json({ error: "No payout for this address in this epoch" }, 404);
@@ -82,7 +93,7 @@ revshare.get("/wallet/:address", async (c) => {
     const claimable = [];
     for (const epoch of epochs) {
         if (epoch.status !== "posted" || claimedEpochs.has(epoch.epochId)) continue;
-        const file = loadEpochFile(epoch.epochId);
+        const file = await loadEpochFile(epoch.epochId);
         if (!file || file.root !== epoch.root) continue;
         const leaf = file.leaves.find((l) => l.account.toLowerCase() === address);
         if (!leaf) continue;

@@ -1,0 +1,10 @@
+# Goes inside the indexer.normies.art { } block of /etc/caddy/Caddyfile, before `handle @authorized`.
+# Serves the revenue share epoch files read-only. Cloudflare only lets requests carrying X-Ponder-Secret through to
+# this host, so in practice the API fetches them here and serves them publicly at api.normies.art/revshare/files/.
+# The path must not overlap the indexer's own /revshare/* routes, which the API reaches through the same host.
+	handle_path /revshare-epochs/* {
+		root * /var/lib/normies-revshare/epochs
+		header Cache-Control "public, max-age=60"
+		header Access-Control-Allow-Origin "*"
+		file_server
+	}

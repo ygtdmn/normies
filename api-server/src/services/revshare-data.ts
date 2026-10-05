@@ -129,15 +129,37 @@ export async function getLiveScores(): Promise<LiveScores> {
     return liveInFlight;
 }
 
-export function loadEpochFile(epochId: string): EpochFile | null {
+/** A fetched epoch file, or null when it is not published, kept for `until` (ms). */
+const epochFiles = new Map<string, { file: EpochFile | null; until: number }>();
+const FOUND_TTL_MS = 10 * 60_000;
+const MISSING_TTL_MS = 60_000;
+
+/**
+ * An epoch's payout table. A local file in REVSHARE_DIR wins (a dev machine); otherwise it is read from the job's
+ * folder on the indexer host (/revshare-epochs/<id>.json, with the indexer secret). /revshare/files/<id>.json serves
+ * it publicly, which is the epoch's on-chain dataURI. Callers still compare its root with the indexed epoch.
+ */
+export async function loadEpochFile(epochId: string): Promise<EpochFile | null> {
     if (!/^\d+$/.test(epochId)) return null;
     const path = join(REVSHARE_DIR, "epochs", `${epochId}.json`);
-    if (!existsSync(path)) return null;
-    try {
-        return JSON.parse(readFileSync(path, "utf8")) as EpochFile;
-    } catch {
-        return null;
+    if (existsSync(path)) {
+        try {
+            return JSON.parse(readFileSync(path, "utf8")) as EpochFile;
+        } catch {
+            return null;
+        }
     }
+    const cached = epochFiles.get(epochId);
+    if (cached && cached.until > Date.now()) return cached.file;
+    let file: EpochFile | null = null;
+    try {
+        const parsed = await ponderFetch<EpochFile>(`/revshare-epochs/${epochId}.json`);
+        if (parsed.epochId === epochId && Array.isArray(parsed.leaves)) file = parsed;
+    } catch {
+        // Not there (404) or unreachable right now: treated as not published, retried after the short TTL.
+    }
+    epochFiles.set(epochId, { file, until: Date.now() + (file ? FOUND_TTL_MS : MISSING_TTL_MS) });
+    return file;
 }
 
 export const getEpochs = () => ponderFetch<{ epochs: IndexedEpoch[] }>("/revshare/epochs");

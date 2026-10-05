@@ -1,11 +1,12 @@
 import "dotenv/config";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createPublicClient, createWalletClient, http, parseAbi, type Hex, type PublicClient } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry, mainnet, sepolia } from "viem/chains";
 import { buildEpoch, type EpochAddresses, type EpochFile } from "./build.js";
 import { safeBatch } from "./proposal.js";
+import { confirmPublished, epochUrl } from "./publish.js";
 import {
     epochEndBlock,
     epochMismatches,
@@ -39,6 +40,10 @@ import {
  * writing <REVSHARE_DIR>/proposals/<id>.safe.json, a Safe Transaction Builder batch for the pool owner, and stops;
  * until the pool shows that epoch posted, later runs leave the proposal and its epoch file alone.
  *
+ * Approval mode (REVSHARE_REQUIRE_APPROVAL=true): `run` stops right before postEpoch, leaves REVSHARE_DIR/pending/<id>.json
+ * and exits 2 so Discord is paged; `pending` reminds (daily timer), `approve <id>` posts after the same last-moment
+ * checks, `reject <id>` drops it. On the server: sudo /opt/normies/deploy/revshare/revshare.sh <command>.
+ *
  * `build` and `verify` are the manual path. `build` needs the epoch id explicitly (the pool's next id can move
  * while a build runs) and writes <REVSHARE_DIR>/epochs/<id>.json. `verify` rebuilds a file from chain state,
  * amount included, and then checks it against the pool: a posted epoch must match what the pool recorded, an
@@ -51,7 +56,9 @@ import {
  * and REVSHARE_DIR (data/revshare by default). `run` also needs PRIVATE_KEY (a key holding the pool's POSTER role, or
  * any key, which then writes a Safe proposal instead; or FROM, an unlocked account on anvil) and takes RPC_URL_VERIFY, EPOCH_FINALITY_BLOCKS (64), MIN_EPOCH_BLOCKS (7000, about 23 hours),
  * REVSHARE_GENESIS_BLOCK (the first epoch's start; PIXEL_MARKET_START_BLOCK is also accepted) and
- * REVSHARE_PUBLIC_URL (https://api.normies.art/revshare/epochs), which becomes the on-chain dataURI.
+ * REVSHARE_PUBLIC_URL (https://indexer.normies.art/revshare-epochs; <base>/<id>.json becomes the on-chain dataURI). The
+ * server serves REVSHARE_DIR/epochs at that URL, and a real run reads the file back through it before it posts (see
+ * publish.ts).
  */
 const RPC_URL = process.env.RPC_URL;
 const CHAIN_ID = Number(process.env.CHAIN_ID ?? 1);
@@ -189,12 +196,115 @@ function writeEpochFile(epoch: EpochFile): string {
     return path;
 }
 
+// ──────────────────────────────────────────────
+//  Approval mode
+// ──────────────────────────────────────────────
+
+/**
+ * With REVSHARE_REQUIRE_APPROVAL=true a run builds, verifies on the second RPC and publishes the epoch file, then
+ * stops before postEpoch and leaves a marker in REVSHARE_DIR/pending. It exits 2 ("action needed"), which pages
+ * Discord; later runs and the daily reminder keep paging until someone posts it with `approve <id>` (which re-checks
+ * the pool first) or drops it with `reject <id>`.
+ */
+interface PendingApproval {
+    epochId: string;
+    root: `0x${string}`;
+    total: string;
+    amount: string;
+    payouts: number;
+    fromBlock: string;
+    toBlock: string;
+    dataURI: string;
+    builtAt: string;
+}
+
+const approvalRequired = () => /^(1|true|yes)$/i.test(process.env.REVSHARE_REQUIRE_APPROVAL ?? "");
+const pendingPath = (epochId: string | bigint) => join(REVSHARE_DIR, "pending", `${epochId}.json`);
+const epochFilePath = (epochId: string | bigint) => join(REVSHARE_DIR, "epochs", `${epochId}.json`);
+const ADMIN = "sudo /opt/normies/deploy/revshare/revshare.sh";
+
+function writePending(epoch: EpochFile, dataURI: string): PendingApproval {
+    const pending: PendingApproval = {
+        epochId: epoch.epochId,
+        root: epoch.root,
+        total: epoch.total,
+        amount: epoch.amount,
+        payouts: epoch.leaves.length,
+        fromBlock: epoch.fromBlock,
+        toBlock: epoch.toBlock,
+        dataURI,
+        builtAt: new Date().toISOString(),
+    };
+    mkdirSync(join(REVSHARE_DIR, "pending"), { recursive: true });
+    writeFileSync(pendingPath(epoch.epochId), `${JSON.stringify(pending, null, 2)}\n`);
+    return pending;
+}
+
+function remindPending(p: PendingApproval): void {
+    const eth = (wei: string) => (Number(BigInt(wei) / 10n ** 12n) / 1e6).toFixed(6);
+    needsAction(`revenue share epoch ${p.epochId} is built, verified and waiting for your approval`);
+    console.log(`  blocks ${p.fromBlock}..${p.toBlock}, ${p.payouts} payouts, ${eth(p.total)} ETH (${p.total} wei)`);
+    console.log(`  root ${p.root}`);
+    console.log(`  file ${p.dataURI}`);
+    console.log(`  built ${p.builtAt}`);
+    console.log(`  post it:   ${ADMIN} approve ${p.epochId}`);
+    console.log(`  drop it:   ${ADMIN} reject ${p.epochId}`);
+}
+
+function poster() {
+    if (!process.env.PRIVATE_KEY && !process.env.FROM) throw new Error("PRIVATE_KEY (or FROM on anvil) is not set");
+    const account = process.env.PRIVATE_KEY ? privateKeyToAccount(process.env.PRIVATE_KEY as Hex) : (process.env.FROM as `0x${string}`);
+    return { account, wallet: createWalletClient({ account, chain, transport: http(RPC_URL, { timeout: 120_000 }) }) };
+}
+
+/** Posts an approved epoch: the same last-moment pool checks and public-file check as a run, then postEpoch. */
+async function approveEpoch(epochId: string): Promise<void> {
+    if (!/^\d+$/.test(epochId)) throw new Error("approve needs an epoch id");
+    if (!existsSync(pendingPath(epochId))) throw new Error(`no epoch ${epochId} is waiting for approval`);
+    const pending = JSON.parse(readFileSync(pendingPath(epochId), "utf8")) as PendingApproval;
+    const epoch = JSON.parse(readFileSync(epochFilePath(epochId), "utf8")) as EpochFile;
+    if (epoch.root !== pending.root || epoch.total !== pending.total) {
+        throw new Error(`the epoch file changed since it was built (root ${epoch.root}); reject it and let the job rebuild`);
+    }
+    const a = addresses();
+    fail(prePostProblems(epoch, await poolState(publicClient, a.pool)), `epoch ${epochId} cannot be posted`);
+    const dataURI = await confirmPublished(epoch);
+    const { account, wallet } = poster();
+    await postEpochOnChain(epoch, dataURI, account, wallet);
+    rmSync(pendingPath(epochId), { force: true });
+}
+
+/** Drops a waiting epoch; the next run builds the same range again (and asks again). */
+function rejectEpoch(epochId: string): void {
+    if (!existsSync(pendingPath(epochId))) throw new Error(`no epoch ${epochId} is waiting for approval`);
+    rmSync(pendingPath(epochId), { force: true });
+    rmSync(epochFilePath(epochId), { force: true });
+    console.log(`epoch ${epochId} rejected: its file is withdrawn and the next run builds the range again`);
+}
+
+/** The daily reminder: pages while an epoch waits, and clears markers of epochs that have since been posted. */
+async function remindIfPending(): Promise<void> {
+    const dir = join(REVSHARE_DIR, "pending");
+    if (!existsSync(dir)) return console.log("nothing is waiting for approval");
+    const nextEpochId = await publicClient.readContract({ address: addresses().pool, abi: opsAbi, functionName: "nextEpochId" });
+    let waiting = 0;
+    for (const name of readdirSync(dir).filter((n) => /^\d+\.json$/.test(n))) {
+        const id = BigInt(name.replace(".json", ""));
+        if (id < nextEpochId) {
+            rmSync(join(dir, name), { force: true }); // posted since
+            continue;
+        }
+        remindPending(JSON.parse(readFileSync(join(dir, name), "utf8")) as PendingApproval);
+        waiting++;
+    }
+    if (waiting === 0) console.log("nothing is waiting for approval");
+}
+
 /** The monthly job. Every step is idempotent and the run stops at the first thing that is not right. */
 async function runEpoch(dryRun: boolean, replaceProposal: boolean) {
     const a = addresses();
     const finality = BigInt(process.env.EPOCH_FINALITY_BLOCKS ?? 64);
     const minBlocks = BigInt(process.env.MIN_EPOCH_BLOCKS ?? 7000);
-    const publicUrl = (process.env.REVSHARE_PUBLIC_URL ?? "https://api.normies.art/revshare/epochs").replace(/\/$/, "");
     const account = process.env.PRIVATE_KEY
         ? privateKeyToAccount(process.env.PRIVATE_KEY as Hex)
         : (process.env.FROM as `0x${string}` | undefined);
@@ -210,6 +320,11 @@ async function runEpoch(dryRun: boolean, replaceProposal: boolean) {
     if (existsSync(proposalPath(nextEpochId)) && !replaceProposal) {
         needsAction(`epoch ${nextEpochId} is still waiting for the pool owner to execute ${proposalPath(nextEpochId)}`);
         console.log("(rerun with --replace-proposal to rebuild it, then delete the old transaction from the Safe queue)");
+        return;
+    }
+    // Approval mode: an epoch already built and waiting is not rebuilt, only reminded about.
+    if (existsSync(pendingPath(nextEpochId))) {
+        remindPending(JSON.parse(readFileSync(pendingPath(nextEpochId), "utf8")) as PendingApproval);
         return;
     }
     // One unopened epoch at a time (see prePostProblems). Checked here too, so an early run stops before building.
@@ -305,10 +420,28 @@ async function runEpoch(dryRun: boolean, replaceProposal: boolean) {
         return;
     }
 
-    // 7. Post with the POSTER role and read back what the pool recorded. Claims open POST_DELAY later; the guardian
-    //    can cancel until then. A key without the role hands the call to the pool owner instead.
-    const dataURI = `${publicUrl}/${epoch.epochId}`;
-    const sender = typeof account === "string" ? account : account!.address;
+    // 7. The payout table must be public before its root is: the file is served from this server's REVSHARE_DIR.
+    const dataURI = await confirmPublished(epoch);
+    console.log(`epoch file is public: ${dataURI}`);
+    if (approvalRequired()) {
+        remindPending(writePending(epoch, dataURI));
+        return;
+    }
+    await postEpochOnChain(epoch, dataURI, account!, wallet);
+}
+
+/**
+ * Post with the POSTER role and read back what the pool recorded. Claims open POST_DELAY later; the guardian can
+ * cancel until then. A key without the role hands the call to the pool owner instead.
+ */
+async function postEpochOnChain(
+    epoch: EpochFile,
+    dataURI: string,
+    account: ReturnType<typeof privateKeyToAccount> | `0x${string}`,
+    wallet: ReturnType<typeof createWalletClient>,
+): Promise<void> {
+    const a = addresses();
+    const sender = typeof account === "string" ? account : account.address;
     const [poolOwner, canPost] = await Promise.all([
         publicClient.readContract({ address: a.pool, abi: opsAbi, functionName: "owner" }),
         publicClient.readContract({ address: a.pool, abi: opsAbi, functionName: "hasAnyRole", args: [sender, POSTER_ROLE] }),
@@ -320,6 +453,8 @@ async function runEpoch(dryRun: boolean, replaceProposal: boolean) {
         return;
     }
     const hash = await wallet.writeContract({
+        account,
+        chain,
         address: a.pool,
         abi: opsAbi,
         functionName: "postEpoch",
@@ -341,7 +476,7 @@ async function runEpoch(dryRun: boolean, replaceProposal: boolean) {
     console.log(`epoch ${epoch.epochId} posted in block ${r.blockNumber} and read back: ${hash}`);
     console.log(
         `claims open at ${new Date(Number(posted.claimableAt) * 1000).toISOString()}; until then the Operations Safe ` +
-            `can cancelEpoch(${epoch.epochId}) if anything is wrong. Everyone can check it with: pnpm revshare verify <file>`,
+            `can cancelEpoch(${epoch.epochId}) if anything is wrong. Everyone can check it with: pnpm revshare verify ${dataURI}`,
     );
 }
 
@@ -362,22 +497,25 @@ async function main() {
             amount: flag(args, "amount") ? BigInt(flag(args, "amount")!) : undefined,
         });
         const path = writeEpochFile(epoch);
-        const publicUrl = (process.env.REVSHARE_PUBLIC_URL ?? "https://api.normies.art/revshare/epochs").replace(/\/$/, "");
+        const dataURI = epochUrl(epoch.epochId);
         console.log(`epoch ${epoch.epochId}: ${epoch.leaves.length} payouts, ${epoch.total} wei of ${epoch.amount} -> ${path}`);
         console.log(`samples: ${epoch.sampleBlocks.join(", ")}`);
         console.log(`next, on a second, independent RPC (it must print "verified" and "postable"):`);
         console.log(`  RPC_URL=<second rpc> pnpm revshare verify ${path}`);
         console.log(`then, and only then:`);
         console.log(
-            `  cast send ${epoch.addresses.pool} "postEpoch(bytes32,uint256,uint64,uint64,bytes32,string)" ${epoch.root} ${epoch.total} ${epoch.fromBlock} ${epoch.toBlock} ${epoch.configHash} "${publicUrl}/${epoch.epochId}"`,
+            `  cast send ${epoch.addresses.pool} "postEpoch(bytes32,uint256,uint64,uint64,bytes32,string)" ${epoch.root} ${epoch.total} ${epoch.fromBlock} ${epoch.toBlock} ${epoch.configHash} "${dataURI}"`,
         );
         return;
     }
 
     if (command === "verify") {
         const path = args[0];
-        if (!path) throw new Error("verify needs a path to an epoch file");
-        const file = JSON.parse(readFileSync(path, "utf8")) as EpochFile;
+        if (!path) throw new Error("verify needs a path or URL to an epoch file");
+        // A posted epoch's dataURI works too: anyone can check the published file without a local copy.
+        const file = (
+            /^https?:\/\//.test(path) ? await (await fetch(path)).json() : JSON.parse(readFileSync(path, "utf8"))
+        ) as EpochFile;
         const a = addresses();
         const options = { fromBlock: BigInt(file.fromBlock), toBlock: BigInt(file.toBlock), epochId: BigInt(file.epochId), config: file.config };
         // The amount is recomputed from the pool at toBlock, unless the file was built with a deliberate --amount.
@@ -421,12 +559,27 @@ async function main() {
         return;
     }
 
+    if (command === "approve") {
+        await approveEpoch(args[0] ?? "");
+        return;
+    }
+
+    if (command === "reject") {
+        rejectEpoch(args[0] ?? "");
+        return;
+    }
+
+    if (command === "pending") {
+        await remindIfPending();
+        return;
+    }
+
     if (command === "run") {
         await runEpoch(args.includes("--dry-run"), args.includes("--replace-proposal"));
         return;
     }
 
-    console.error("usage: revshare build --epoch <id> --from <block> --to <block> [--amount <wei>] | verify <epoch.json> | run [--dry-run] [--replace-proposal]");
+    console.error("usage: revshare build --epoch <id> --from <block> --to <block> [--amount <wei>] | verify <epoch.json> | run [--dry-run] [--replace-proposal] | pending | approve <id> | reject <id>");
     process.exit(1);
 }
 

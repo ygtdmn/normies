@@ -370,7 +370,8 @@ By hand (for example when the post goes through a Safe), the same order:
 3. `RPC_URL=<second provider> pnpm revshare verify <file>`. It rebuilds the file (amount included) and checks it
    is postable now; it must print both "verified" and "postable". Every Safe signer runs it on their own RPC
    before signing.
-4. Publish the file (the API serves it from `REVSHARE_DIR`; pin it to IPFS for the `dataURI`), then send the
+4. Copy the file to `/var/lib/normies-revshare/epochs/<id>.json` on the indexer host; the API then serves it at
+   `https://api.normies.art/revshare/files/<id>.json`, which is the `dataURI` to post. Then send the
    printed `postEpoch(...)` call from the POSTER key. Holders claim from the site (or `claimMany`) once it opens,
    24 hours later.
 5. `pnpm revshare verify <file>` once more: for a posted epoch it checks the pool recorded exactly the file.

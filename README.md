@@ -63,6 +63,51 @@ On-chain SVG rendering pipeline that evolved across three versions:
 Pure library mapping trait indices to human-readable names across 8 categories: Type, Gender, Age, Hair Style, Facial
 Feature, Eyes, Expression, and Accessory.
 
+### Canvas (original)
+
+- **NormiesCanvas.sol**: burn-to-edit orchestrator with commit-reveal burns, action points and pixel transforms.
+  Paused since the Pixel Market cutover; its balances and delegations were copied into storage V2 once.
+- **NormiesCanvasStorage.sol**: SSTORE2 storage for transform layer bitmaps. Storage V2 still reads it for any
+  Normie without a V2 overlay.
+- **NormiesRendererV4.sol**: Canvas-aware renderer with composited SVG and extra Canvas traits.
+
+### Zombies and Legendary Canvas
+
+- **NormiesZombie.sol**: Merkle-gated commit-reveal converter that turned 21 eligible Normies into bespoke Zombies.
+  The campaign is complete and sealed.
+- **NormiesZombieStorage.sol**: SSTORE2 storage for the zombie pool assets and conversion records.
+- **NormiesLegendaryCanvas.sol**: owner-managed registry of Legendary Canvas artist traits.
+- **NormiesRendererV5.sol**: V4-compatible renderer with zombie metadata and art.
+
+### Canvas V2 and Pixel Market
+
+Burned Normies become #PIXEL, which can sit on a Normie, in a wallet, or in a market listing.
+
+- **NormiesCanvasStorageV2.sol**: overlay bitmaps of any grid size (40 to 80) plus the pixel accounting: wallet and
+  per-Normie balances, ERC20-style allowances (with a kill switch), a short cooldown on newly arrived pixels, and the
+  delegate copy. Only the canvas role can mint or burn #PIXEL.
+- **NormiesCanvasV2.sol**: burns (commit-reveal, rewarded to a Normie or a wallet), painting, depositing and
+  withdrawing pixels, canvas enlargement and blank canvas.
+- **NormiesPixelMarket.sol**: sell-side order book, ETH priced per pixel, partial or all-or-none fills, optional
+  expiry with a permissionless reclaim. The fee comes out of the seller's proceeds: half to the team, half to the
+  revenue pool.
+- **NormiesRendererV6.sol**: grid-size aware renderer with the Canvas Size and Blank Canvas traits.
+- **NormiesRevenuePool.sol**: holds the holders' half of market fees and royalties and pays it in epochs: a posted
+  Merkle root opens for claims 24 hours later, and can be cancelled until then.
+- **NormiesRoyaltySplitter.sol**: the collection's royalty receiver; splits royalties between the revenue pool and
+  the team.
+- **NormiesAccess.sol**: shared roles (Solady `OwnableRoles`): owner, GUARDIAN (pause and unpause, cancel an
+  unopened epoch), CONFIG (bounded parameters) and POSTER (post epochs only).
+
+## Ownership
+
+Every Normies contract is owned by the Admin Safe
+[`0xAF8e9BDcF6463EA1f50f8f70ECF13d85a092a1Aa`](https://etherscan.io/address/0xAF8e9BDcF6463EA1f50f8f70ECF13d85a092a1Aa)
+(3-of-5, hardware wallets), and the deployer's Lifebuoy rescue access is locked on all of them. The Operations Safe
+[`0x94afe25e744aEC9629cB67F63929fA4603898eB7`](https://etherscan.io/address/0x94afe25e744aEC9629cB67F63929fA4603898eB7)
+(3-of-5, other signers) holds GUARDIAN and CONFIG on the Pixel Market contracts and can never grant roles or withdraw
+ETH or #PIXEL. The revenue share job's key holds POSTER on the pool and nothing else.
+
 ## API Server
 
 Off-chain API (`api-server/`) built with Hono + viem that reads token data directly from the Normies and NormiesStorage
@@ -101,6 +146,15 @@ pnpm dev
 | NormiesZombieStorage   | `0xA331bD22C90D1DA096934Db8bc6b69F0e1491E26` |
 | NormiesLegendaryCanvas | `0xfA55f6592522dA74224a67c7D3Fd1DF759c628e8` |
 | NormiesRendererV5      | `0x7c726f02C5e840e1656b522A5C22caaf87C1C35C` |
+| NormiesCanvasStorageV2 | `0x96F2DA32Bb9D429d59ac13dB469f4950cBe02084` |
+| NormiesCanvasV2        | `0xF14f2852e1fD6A4108156054AF49B3915dc40E2e` |
+| NormiesPixelMarket     | `0x86156A8d6e4B9925F7fEca527ea5D71B0deeDB64` |
+| NormiesRendererV6      | `0xd6747533697878a6a3a29B5cCf815740BA23998D` |
+| NormiesRevenuePool     | `0x481384812e79bf0d11FC0b1704af445D5F06813c` |
+| NormiesRoyaltySplitter | `0xA68A225f62772E6158f2B5f8afC184AdB69c3282` |
+
+The Pixel Market stack was deployed at block 26,122,420 and went live on 5 October 2026. All six are verified on
+Etherscan. The cutover runbook is [PixelMarketUpdate.md](PixelMarketUpdate.md).
 
 ## Security
 

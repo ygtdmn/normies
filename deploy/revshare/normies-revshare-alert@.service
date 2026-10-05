@@ -1,0 +1,16 @@
+# Posts the outcome of a revshare unit's last run to Discord. %i is the unit name without .service
+# (OnFailure=/OnSuccess= in normies-revshare.service and normies-revshare-reminder.service).
+[Unit]
+Description=Normies revenue share alert (%i)
+
+[Service]
+Type=oneshot
+User=normies
+Group=normies
+SupplementaryGroups=systemd-journal
+EnvironmentFile=/etc/normies/revshare-alert.env
+ExecStart=/opt/normies/deploy/revshare/alert.sh %i
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
