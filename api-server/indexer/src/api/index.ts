@@ -924,6 +924,19 @@ app.get("/burned-tokens", async (c) => {
   return c.json(rows.map(serializeBigints));
 });
 
+// Every burned token id in one compact response, ascending. The site's collection wall dims burned
+// tiles from this; paging /burned-tokens 100 at a time took thirty-odd requests. Registered before
+// /burned-tokens/:tokenId so "ids" is not read as a token id.
+app.get("/burned-tokens/ids", async (c) => {
+  const rows = await db
+    .select({ tokenId: schema.burnedToken.tokenId })
+    .from(schema.burnedToken)
+    .orderBy(asc(schema.burnedToken.tokenId));
+
+  const ids = rows.map((r) => Number(r.tokenId));
+  return c.json({ count: ids.length, ids });
+});
+
 app.get("/burned-tokens/:tokenId", async (c) => {
   const tokenId = BigInt(c.req.param("tokenId"));
 

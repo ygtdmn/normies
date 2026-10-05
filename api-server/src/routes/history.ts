@@ -15,6 +15,7 @@ import {
     getBurnsForAddress,
     getBurnsForReceiver,
     getBurnedTokens,
+    getBurnedTokenIds,
     getBurnedToken,
     getPendingLegacyBurns,
     getTransformHistory,
@@ -122,6 +123,12 @@ history.get("/burned-tokens", async (c) => {
     const { limit, offset } = parsePagination(c);
     const tokens = await getBurnedTokens(limit, offset);
     return c.json(tokens);
+});
+
+// Every burned token id in one response: { count, ids } (ascending). The site's collection wall
+// reads it instead of paging /burned-tokens.
+history.get("/burned-ids", async (c) => {
+    return c.json(await getBurnedTokenIds());
 });
 
 history.get("/burned/:tokenId", async (c) => {

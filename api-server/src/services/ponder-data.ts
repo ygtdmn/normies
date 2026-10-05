@@ -448,6 +448,11 @@ export async function getBurnedTokens(limit = 50, offset = 0): Promise<BurnedTok
     return ponderFetch(`/burned-tokens?limit=${limit}&offset=${offset}`);
 }
 
+/** Every burned token id, ascending, in one response. */
+export async function getBurnedTokenIds(): Promise<{ count: number; ids: number[] }> {
+    return ponderFetch(`/burned-tokens/ids`);
+}
+
 export async function getBurnedToken(tokenId: number): Promise<BurnedTokenData[]> {
     return ponderFetch(`/burned-tokens/${tokenId}`);
 }

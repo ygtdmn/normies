@@ -312,6 +312,10 @@ Half of Pixel Market fees and half of collection royalties go to `NormiesRevenue
   - Query: `limit`, `offset`.
   - Cache: `public, max-age=60, s-maxage=300`
 
+- `GET /history/burned-ids`
+  - Every burned token id in one response: `{ count, ids }`, ids ascending.
+  - Cache: `public, max-age=60, s-maxage=300`
+
 - `GET /history/burned/{tokenId}`
   - Burn record for a token.
   - Cache: `public, max-age=60, s-maxage=300`

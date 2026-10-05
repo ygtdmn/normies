@@ -435,6 +435,12 @@
         </div>
 
         <div class="endpoint">
+            <span class="method">GET</span><span class="path">/history/burned-ids</span><span class="response-type">application/json</span>
+            <p class="desc">Every burned token id in one response: <code>{ count, ids }</code>, ids ascending.</p>
+            <p class="meta">Cache: <code>public, max-age=60, s-maxage=300</code></p>
+        </div>
+
+        <div class="endpoint">
             <span class="method">GET</span><span class="path">/history/burned/:tokenId</span><span class="response-type">application/json</span>
             <p class="desc">Burn record for a token.</p>
             <p class="meta">Parameters: <code>tokenId</code> 0-9999. Cache: <code>public, max-age=60, s-maxage=300</code></p>
