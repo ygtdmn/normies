@@ -98,6 +98,8 @@ export interface MarketStatsData {
     volumeWei: string;
     feesWei: string;
     feesCollectedWei: string;
+    /** The revenue pool's half of the market fees, all time. */
+    feesToPoolWei: string;
     pixelsTraded: string;
     fills: number;
     listings: number;

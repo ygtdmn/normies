@@ -96,6 +96,7 @@ async function patchMarketStats(
     volumeWei: bigint;
     feesWei: bigint;
     feesCollectedWei: bigint;
+    feesToPoolWei: bigint;
     pixelsTraded: bigint;
     fills: number;
     listings: number;
@@ -106,6 +107,7 @@ async function patchMarketStats(
     volumeWei: bigint;
     feesWei: bigint;
     feesCollectedWei: bigint;
+    feesToPoolWei: bigint;
     pixelsTraded: bigint;
     fills: number;
     listings: number;
@@ -120,6 +122,7 @@ async function patchMarketStats(
     volumeWei: existing?.volumeWei ?? 0n,
     feesWei: existing?.feesWei ?? 0n,
     feesCollectedWei: existing?.feesCollectedWei ?? 0n,
+    feesToPoolWei: existing?.feesToPoolWei ?? 0n,
     pixelsTraded: existing?.pixelsTraded ?? 0n,
     fills: existing?.fills ?? 0,
     listings: existing?.listings ?? 0,
@@ -132,6 +135,7 @@ async function patchMarketStats(
     volumeWei: next.volumeWei,
     feesWei: next.feesWei,
     feesCollectedWei: next.feesCollectedWei,
+    feesToPoolWei: next.feesToPoolWei,
     pixelsTraded: next.pixelsTraded,
     fills: next.fills,
     listings: next.listings,
@@ -564,7 +568,10 @@ ponder.on("NormiesPixelMarket:FeesPaid", async ({ event, context }) => {
   const { treasuryWei, revenueShareWei } = event.args;
   await patchMarketStats(
     context,
-    (s) => ({ feesCollectedWei: s.feesCollectedWei + treasuryWei + revenueShareWei }),
+    (s) => ({
+      feesCollectedWei: s.feesCollectedWei + treasuryWei + revenueShareWei,
+      feesToPoolWei: s.feesToPoolWei + revenueShareWei,
+    }),
     eventMeta(event),
   );
 });

@@ -269,7 +269,11 @@ Half of Pixel Market fees and half of collection royalties go to `NormiesRevenue
   - The scoring rules (`brackets`, `ladder`, `boost`, `looseWeight100`, factors, sampling) and their `configHash`, which every posted epoch records on chain.
 
 - `GET /revshare/status`
-  - Pool `balanceWei`, `outstandingWei` (promised to posted epochs), `unallocatedWei` (waiting for the next epoch), windows, `nextEpochId`, totals.
+  - Pool `balanceWei`, `outstandingWei` (promised to posted epochs), `unallocatedWei` (in the pool, waiting for the next epoch), `availableWei` (that plus the holders' half of royalties still in the royalty splitter: what the next epoch would split now), windows, `nextEpochId`, totals.
+  - `sources`: `marketFeesWei` (all-time Pixel Market fees paid into the pool on every fill), `royaltiesReleasedWei` (royalties released into the pool) and `royaltiesPendingWei` (the holders' half still in the splitter until `release()`); `splitter`: its `ethWei`, `wethWei` and `poolBps`.
+
+- `GET /revshare/files/{id}.json`
+  - The raw epoch file (every payout with its proof), which is the epoch's on-chain `dataURI`. Check it with `pnpm revshare verify <url>`. 404 until published.
   - Cache: `public, max-age=10, s-maxage=10`
 
 - `GET /revshare/epochs`, `GET /revshare/epochs/{id}`

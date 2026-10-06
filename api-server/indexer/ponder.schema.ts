@@ -327,6 +327,8 @@ export const marketStats = onchainTable(
     volumeWei: t.bigint().notNull().default(0n),
     feesWei: t.bigint().notNull().default(0n),
     feesCollectedWei: t.bigint().notNull().default(0n),
+    // The revenue pool's half of the fees, paid to it on every fill (FeesPaid.revenueShareWei).
+    feesToPoolWei: t.bigint().notNull().default(0n),
     pixelsTraded: t.bigint().notNull().default(0n),
     fills: t.integer().notNull().default(0),
     listings: t.integer().notNull().default(0),

@@ -485,6 +485,7 @@ app.get("/market/stats", async (c) => {
     volumeWei: (stats?.volumeWei ?? 0n).toString(),
     feesWei: (stats?.feesWei ?? 0n).toString(),
     feesCollectedWei: (stats?.feesCollectedWei ?? 0n).toString(),
+    feesToPoolWei: (stats?.feesToPoolWei ?? 0n).toString(),
     pixelsTraded: (stats?.pixelsTraded ?? 0n).toString(),
     fills: stats?.fills ?? 0,
     listings: stats?.listings ?? 0,

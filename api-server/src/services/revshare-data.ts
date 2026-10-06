@@ -28,7 +28,10 @@ const poolAbi = parseAbi([
     "function claimWindow() view returns (uint64)",
     "function paused() view returns (bool)",
     "function nextEpochId() view returns (uint256)",
+    "function weth() view returns (address)",
 ]);
+const splitterAbi = parseAbi(["function poolBps() view returns (uint16)"]);
+const erc20Abi = parseAbi(["function balanceOf(address) view returns (uint256)"]);
 
 export interface IndexedEpoch {
     epochId: string;
@@ -169,24 +172,56 @@ export const getRevshareStats = () => ponderFetch<Record<string, unknown>>("/rev
 
 let statusCache: { at: number; value: Record<string, unknown> } | null = null;
 
-/** Pool balances straight from the chain (a claim depends on them), totals from the indexer. */
+/** The royalty splitter's ETH and WETH, and the holders' part of it (poolBps): royalties not yet released. */
+async function splitterPending(weth: `0x${string}`) {
+    const splitter = ROYALTY_SPLITTER_ADDRESS;
+    if (!splitter) return null;
+    const [eth, wrapped, poolBps] = await Promise.all([
+        publicClient.getBalance({ address: splitter }),
+        publicClient.readContract({ address: weth, abi: erc20Abi, functionName: "balanceOf", args: [splitter] }),
+        publicClient.readContract({ address: splitter, abi: splitterAbi, functionName: "poolBps" }),
+    ]);
+    return { eth, wrapped, poolBps: Number(poolBps), toPool: ((eth + wrapped) * BigInt(poolBps)) / 10_000n };
+}
+
+/**
+ * Pool balances straight from the chain (a claim depends on them), totals from the indexer, and where the money
+ * comes from: market fees arrive in the pool on every fill; royalties wait in the splitter until release(), which
+ * the epoch job calls before it builds. `availableWei` is what the next epoch would split if it were built now.
+ */
 export async function getPoolStatus(): Promise<Record<string, unknown>> {
     if (statusCache && Date.now() - statusCache.at < MARKET_CACHE_TTL_MS) return statusCache.value;
     const address = REVENUE_POOL_ADDRESS!;
-    const [balance, outstanding, claimWindow, paused, nextEpochId, stats] = await Promise.all([
+    const [balance, outstanding, claimWindow, paused, nextEpochId, weth, stats, market] = await Promise.all([
         publicClient.getBalance({ address }),
         publicClient.readContract({ address, abi: poolAbi, functionName: "outstanding" }),
         publicClient.readContract({ address, abi: poolAbi, functionName: "claimWindow" }),
         publicClient.readContract({ address, abi: poolAbi, functionName: "paused" }),
         publicClient.readContract({ address, abi: poolAbi, functionName: "nextEpochId" }),
+        publicClient.readContract({ address, abi: poolAbi, functionName: "weth" }),
         getRevshareStats().catch(() => null),
+        ponderFetch<{ feesToPoolWei?: string }>("/market/stats").catch(() => null),
     ]);
+    const pending = await splitterPending(weth).catch(() => null);
+    const unallocated = balance - outstanding;
+    const royaltiesReleased = BigInt((stats as { royaltiesToPoolWei?: string } | null)?.royaltiesToPoolWei ?? "0");
     const value = {
         poolAddress: address,
         splitterAddress: ROYALTY_SPLITTER_ADDRESS ?? null,
         balanceWei: balance.toString(),
         outstandingWei: outstanding.toString(),
-        unallocatedWei: (balance - outstanding).toString(),
+        unallocatedWei: unallocated.toString(),
+        availableWei: (unallocated + (pending?.toPool ?? 0n)).toString(),
+        sources: {
+            // All time, paid straight into the pool on every market fill.
+            marketFeesWei: market?.feesToPoolWei ?? null,
+            // All time: released into the pool, plus the holders' part still waiting in the splitter.
+            royaltiesReleasedWei: royaltiesReleased.toString(),
+            royaltiesPendingWei: pending ? pending.toPool.toString() : null,
+        },
+        splitter: pending
+            ? { ethWei: pending.eth.toString(), wethWei: pending.wrapped.toString(), poolBps: pending.poolBps }
+            : null,
         // Default for future posts only; use each epoch's sweepableAt for existing payouts.
         claimWindowSeconds: Number(claimWindow),
         paused,
