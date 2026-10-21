@@ -13,20 +13,20 @@
         "cutover:delegations": "tsx src/cutover/migrate-delegations.ts"
     },
     "dependencies": {
-        "@hono/node-server": "^1",
+        "@hono/node-server": "^2.1.5",
         "@openzeppelin/merkle-tree": "^1.0.8",
-        "@resvg/resvg-js": "^2",
-        "dotenv": "^16",
-        "hono": "^4",
-        "lru-cache": "^11",
-        "viem": "^2.45"
+        "@resvg/resvg-js": "^2.6.2",
+        "dotenv": "^18.0.8",
+        "hono": "^4.13.13",
+        "lru-cache": "^11.5.3",
+        "viem": "^2.57.8"
     },
     "devDependencies": {
-        "@types/node": "^22",
-        "tsx": "^4",
-        "typescript": "^5",
-        "undici-types": "~6.21.0",
-        "vitest": "^3.2.7"
+        "@types/node": "^24.19.2",
+        "tsx": "^4.23.15",
+        "typescript": "~6.0.3",
+        "undici-types": ">=7.24.0 <7.24.7",
+        "vitest": "^5.0.5"
     },
-    "packageManager": "pnpm@10.11.1+sha512.e519b9f7639869dc8d5c3c5dfef73b3f091094b0a006d7317353c72b124e80e1afd429732e28705ad6bfa1ee879c1fce46c128ccebd3192101f43dd67c667912"
+    "packageManager": "pnpm@10.34.7"
 }
