@@ -18,8 +18,9 @@ const DEFAULT_BURN_VERSION = process.env.PONDER_CANVAS_V2_ADDRESS ? 2 : 1;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const RARITY_LEGENDARY_CONFIG_ID = "default";
 
-// Admin-editable config (legendary canvas list) must be writable at serve time
-// and survive reindexes. Ponder's `db` (ponder:api) is read-only while serving,
+// The legendary list's curation (its display order and the upcoming entries; which
+// tokens are legendary comes from the chain) must be writable at serve time and
+// survive reindexes. Ponder's `db` (ponder:api) is read-only while serving,
 // and onchain tables get rebuilt on every reindex — both make it the wrong home
 // for this. Instead we keep a plain table in the `public` schema (which Ponder
 // never touches) and read/write it through our own pool.
@@ -57,21 +58,8 @@ function ensureAdminConfigTable(): Promise<void> {
   return adminTableReady;
 }
 
-const RARITY_LEGENDARY_DEFAULT = {
-  current: [
-    { id: 603, artist: "a.c.k." },
-    { id: 45, artist: "Snowfro" },
-    { id: 6576, artist: "Deekay" },
-    { id: 4698, artist: "Jack Butcher" },
-    { id: 5974, artist: "Timpers" },
-    { id: 7409, artist: "PIV" },
-    { id: 4354, artist: "Serc" },
-  ],
-  upcoming: [
-    { id: 0, artist: "" },
-    { id: 9993, artist: "Serc" },
-  ],
-};
+// Nothing curated yet (a new database): the chain's legendaries, newest first, and nothing upcoming.
+const RARITY_LEGENDARY_DEFAULT = { current: [] as unknown[], upcoming: [] as unknown[] };
 
 // ──────────────────────────────────────────────
 //  Helpers
@@ -487,15 +475,30 @@ async function saveRarityLegendaryConfig(
   );
 }
 
-function serializeRarityLegendaryConfig(row: {
-  currentJson: string;
-  upcomingJson: string;
-  updatedAt: bigint;
-  updatedBy: string | null;
-}) {
+function itemId(item: unknown): number {
+  return Number((item as { id?: unknown } | null)?.id);
+}
+
+/**
+ * The legendary list. Which tokens are legendary, and their artists, come from the chain
+ * (NormiesLegendaryCanvas, set by the Admin Safe); the curated row only orders them (its `current`)
+ * and lists the upcoming ones. A token the chain made legendary that the curation doesn't list yet
+ * comes first, newest first; a curated one the chain doesn't mark (any more) is left out, and so is an
+ * upcoming one that is legendary already.
+ */
+async function legendaryList(row: RarityLegendaryConfigRow) {
+  const onchain = await db
+    .select({ tokenId: schema.legendaryCanvasTrait.tokenId, artistName: schema.legendaryCanvasTrait.artistName })
+    .from(schema.legendaryCanvasTrait)
+    .where(eq(schema.legendaryCanvasTrait.isLegendary, true))
+    .orderBy(desc(schema.legendaryCanvasTrait.blockNumber), desc(schema.legendaryCanvasTrait.tokenId));
+  const artists = new Map(onchain.map((r) => [Number(r.tokenId), r.artistName ?? ""]));
+
+  const curated = [...new Set(parseJsonArray(row.currentJson).map(itemId))].filter((id) => artists.has(id));
+  const order = [...artists.keys()].filter((id) => !curated.includes(id)).concat(curated);
   return {
-    current: parseJsonArray(row.currentJson),
-    upcoming: parseJsonArray(row.upcomingJson),
+    current: order.map((id) => ({ id, artist: artists.get(id) })),
+    upcoming: parseJsonArray(row.upcomingJson).filter((item) => !artists.has(itemId(item))),
     updatedAt: row.updatedAt.toString(),
     updatedBy: row.updatedBy,
   };
@@ -805,9 +808,11 @@ app.get("/legendary-canvas", async (c) => {
 });
 
 app.get("/rarity/legendary-config", async (c) => {
-  return c.json(serializeRarityLegendaryConfig(await getRarityLegendaryConfigRow()));
+  return c.json(await legendaryList(await getRarityLegendaryConfigRow()));
 });
 
+// Saves the curation: `current` is the display order (only tokens legendary on chain are shown) and
+// `upcoming` the announced ones. Adding or removing a legendary is an Admin Safe transaction.
 app.put("/rarity/legendary-config", async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     current?: unknown;
@@ -821,7 +826,7 @@ app.put("/rarity/legendary-config", async (c) => {
   const updatedBy = typeof body.updatedBy === "string" ? body.updatedBy.slice(0, 120) : null;
   await saveRarityLegendaryConfig(body.current, body.upcoming, updatedBy);
 
-  return c.json(serializeRarityLegendaryConfig(await getRarityLegendaryConfigRow()));
+  return c.json(await legendaryList(await getRarityLegendaryConfigRow()));
 });
 
 // ──────────────────────────────────────────────
