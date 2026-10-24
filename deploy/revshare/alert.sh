@@ -1,6 +1,7 @@
 #!/bin/bash
 # Discord message for the last run of a revshare unit: alert.sh <unit name without .service>
-# (OnFailure= / OnSuccess= in normies-revshare.service and normies-revshare-reminder.service).
+# (OnFailure= / OnSuccess= in normies-revshare.service and normies-revshare-reminder.service, which live in
+# ygtdmn/normies-infra; its normies-revshare-alert@.service runs this file from the server's checkout).
 # Exit code 2 from the job means "action needed": an epoch waits for approval, or a Safe proposal was written.
 set -u
 unit="${1:-normies-revshare}.service"

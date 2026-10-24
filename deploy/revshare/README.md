@@ -1,7 +1,7 @@
 # Revenue share on a schedule
 
-`pnpm revshare run` is the whole monthly job; the timer here runs it on the first of each month at 03:00 UTC on
-the server that hosts the indexer, which also serves the epoch files publicly (see Install).
+`pnpm revshare run` is the whole monthly job. A timer runs it on the first of each month at 03:00 UTC on the server
+that hosts the indexer, which also serves the epoch files publicly (see On the server).
 
 A posted root opens for claims 24 hours later (`POST_DELAY`) and pays out for good from then on; until then only the
 Operations Safe can cancel it. So a run always goes in this order and stops at the first problem (the rules are in `api-server/src/revshare/guards.ts`):
@@ -28,33 +28,24 @@ Operations Safe can cancel it. So a run always goes in this order and stops at t
 An epoch shorter than `MIN_EPOCH_BLOCKS` is not posted, so running the job twice is harmless. A run that fails
 leaves nothing behind but the epoch file and can simply be run again.
 
-## Install
+## On the server
 
-The job runs on the server that hosts the indexer, from a checkout of the public repo at `/opt/normies`. Epoch
-files go to `/var/lib/normies-revshare/epochs`. Caddy serves that folder on the indexer host at `/revshare-epochs/`
-(behind the same Cloudflare rule as the indexer), and the API, which already holds the indexer secret, serves each
-file publicly at `https://api.normies.art/revshare/files/<id>.json`. That URL is the epoch's on-chain `dataURI`, the
-site reads proofs through it, and a run checks it serves the new file before it posts.
+The server is set up by **ygtdmn/normies-infra** (Ansible), not from this folder:
+- the job's own account (`normies-revshare`), the units and the timers;
+- `/etc/normies/revshare.env` and `/etc/normies/revshare-alert.env`, from its vault. The `.env.example` files here
+  document the settings.
 
-```bash
-# as root, once
-git clone https://github.com/ygtdmn/normies.git /opt/normies && chown -R normies:normies /opt/normies
-sudo -u normies sh -c 'cd /opt/normies/api-server && pnpm install --frozen-lockfile'
-mkdir -p /etc/normies
-cp /opt/normies/deploy/revshare/revshare.env.example /etc/normies/revshare.env
-cp /opt/normies/deploy/revshare/revshare-alert.env.example /etc/normies/revshare-alert.env
-chmod 600 /etc/normies/revshare.env /etc/normies/revshare-alert.env
-$EDITOR /etc/normies/revshare.env /etc/normies/revshare-alert.env   # PRIVATE_KEY, RPC_URL, RPC_URL_VERIFY, webhook
-cd /opt/normies/deploy/revshare && cp normies-revshare.service normies-revshare.timer normies-revshare-alert@.service \
-   normies-revshare-reminder.service normies-revshare-reminder.timer /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now normies-revshare.timer normies-revshare-reminder.timer
-# public epoch files: add Caddyfile.snippet inside indexer.normies.art { }, then
-caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
-```
+Only `alert.sh` here runs on the server: the alert unit runs it from the server's checkout of this repo.
 
-Updating the job is `sudo -u normies git -C /opt/normies pull && sudo -u normies sh -c 'cd /opt/normies/api-server &&
-pnpm install --frozen-lockfile'`; copy the unit files again if they changed.
+- **Epoch files** go to `/var/lib/normies-revshare/epochs`.
+  - nginx serves that folder on the indexer host at `/revshare-epochs/`, behind the same Cloudflare rule as the
+    indexer.
+  - The API, which already holds the indexer secret, serves each file publicly at
+    `https://api.normies.art/revshare/files/<id>.json`. That URL is the epoch's on-chain `dataURI` and the site reads
+    proofs through it.
+  - A run checks that URL serves the new file before it posts.
+- **Updating the job:** merge to `main`. A change under `api-server/` or `deploy/revshare/` deploys itself within a
+  minute, never while a run is going.
 
 ## Approval mode
 
@@ -66,10 +57,10 @@ public at `https://api.normies.art/revshare/files/<id>.json`. Then it stops, wri
 of building another epoch.
 
 ```bash
-sudo /opt/normies/deploy/revshare/revshare.sh pending          # what is waiting, with its totals and the file URL
-sudo /opt/normies/deploy/revshare/revshare.sh verify https://api.normies.art/revshare/files/<id>.json
-sudo /opt/normies/deploy/revshare/revshare.sh approve <id>     # re-checks the pool and the public file, then posts
-sudo /opt/normies/deploy/revshare/revshare.sh reject <id>      # drops it; the next run builds the range again
+sudo normies revshare pending          # what is waiting, with its totals and the file URL
+sudo normies revshare verify https://api.normies.art/revshare/files/<id>.json
+sudo normies revshare approve <id>     # re-checks the pool and the public file, then posts
+sudo normies revshare reject <id>      # drops it; the next run builds the range again
 ```
 
 `approve` refuses if the epoch file changed since it was built, if the pool moved on, or if the public file is not
@@ -88,10 +79,10 @@ the stolen key case in the runbook ("A post nobody expected").
 ## Operate
 
 ```bash
-systemctl list-timers normies-revshare.timer        # next run
-systemctl start normies-revshare.service            # run one now
-journalctl -u normies-revshare.service -n 200       # what the last run did
-sudo /opt/normies/deploy/revshare/revshare.sh run --dry-run
+sudo normies status                              # the next run, among everything else
+sudo systemctl start normies-revshare.service    # run one now
+sudo normies logs revshare 200                   # what the last runs did
+sudo normies revshare run --dry-run
 ```
 
 A dry run does everything except send transactions: it reports the block range, the payout count and the root it
