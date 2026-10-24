@@ -532,7 +532,7 @@ async function readOriginalImage(
 }
 
 ponder.on("NormiesCanvasStorage.setTransformedImageData()", async ({ event, context }) => {
-  if (event.trace.error) return; // reverted call — ignore
+  // Ponder never indexes reverted calls, so there's no error to check.
   if (event.trace.from.toLowerCase() === CANVAS_ADDRESS_LC) return; // canvas-originated → already indexed via PixelsTransformed
 
   const [tokenId, imageData] = event.args;
@@ -554,7 +554,9 @@ ponder.on("NormiesCanvasStorage.setTransformedImageData()", async ({ event, cont
   }
 
   await context.db.insert(pixelTransform).values({
-    id: `${event.transaction.hash}-${event.trace.traceIndex}`,
+    // The call's path in the transaction's call tree; "trace" keeps it apart from the
+    // `${hash}-${tokenId}` ids of storage-event rows.
+    id: `${event.transaction.hash}-trace-${event.trace.traceAddress.join(".")}`,
     tokenId,
     transformer: event.trace.from,
     changeCount,
