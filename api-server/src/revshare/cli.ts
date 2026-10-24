@@ -29,7 +29,7 @@ import {
  * are finalized, build, rebuild on a second independent RPC and compare everything, re-read the pool, post, and
  * read the posted epoch back. The rules live in guards.ts.
  *
- * `run` is that whole sequence, for the systemd timer in deploy/revshare. It refuses to post an epoch shorter
+ * `run` is that whole sequence, for the server's monthly systemd timer (ygtdmn/normies-infra). It refuses to post an epoch shorter
  * than MIN_EPOCH_BLOCKS or while the previous epoch has not opened for claims, so a double run is harmless, and it
  * never posts without RPC_URL_VERIFY. A run that leaves a person something to do (a Safe proposal written or still
  * waiting) exits with code 2, so the timer unit shows as failed and alerts.
@@ -42,7 +42,7 @@ import {
  *
  * Approval mode (REVSHARE_REQUIRE_APPROVAL=true): `run` stops right before postEpoch, leaves REVSHARE_DIR/pending/<id>.json
  * and exits 2 so Discord is paged; `pending` reminds (daily timer), `approve <id>` posts after the same last-moment
- * checks, `reject <id>` drops it. On the server: sudo /opt/normies/deploy/revshare/revshare.sh <command>.
+ * checks, `reject <id>` drops it. On the server: sudo normies revshare <command>.
  *
  * `build` and `verify` are the manual path. `build` needs the epoch id explicitly (the pool's next id can move
  * while a build runs) and writes <REVSHARE_DIR>/epochs/<id>.json. `verify` rebuilds a file from chain state,
@@ -221,7 +221,7 @@ interface PendingApproval {
 const approvalRequired = () => /^(1|true|yes)$/i.test(process.env.REVSHARE_REQUIRE_APPROVAL ?? "");
 const pendingPath = (epochId: string | bigint) => join(REVSHARE_DIR, "pending", `${epochId}.json`);
 const epochFilePath = (epochId: string | bigint) => join(REVSHARE_DIR, "epochs", `${epochId}.json`);
-const ADMIN = "sudo /opt/normies/deploy/revshare/revshare.sh";
+const ADMIN = "sudo normies revshare";
 
 function writePending(epoch: EpochFile, dataURI: string): PendingApproval {
     const pending: PendingApproval = {

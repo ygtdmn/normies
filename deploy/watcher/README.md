@@ -9,7 +9,7 @@ new blocks (3 behind the head) and posts to Discord, one message per transaction
 - **ownership, roles, movers, writers, cooldowns, fee recipients, royalty routes, withdrawals** on the 20 Normies
   contracts: urgent;
 - **`EpochPosted` and `EpochCancelled`**: urgent. In approval mode the only `EpochPosted` you should ever see is
-  right after you ran `revshare.sh approve`; any other is the stolen poster key case (runbook, "A post nobody
+  right after you ran `sudo normies revshare approve`; any other is the stolen poster key case (runbook, "A post nobody
   expected");
 - operating changes (pauses, prices, burn tiers, claim window, Legendary Canvas): notices.
 
@@ -18,17 +18,16 @@ phone. The watcher also says when it starts, when it has failed for 10 minutes (
 it crashes; systemd restarts it after a minute, and it resumes from the last finished block
 (`/var/lib/normies-watcher/state.json`), so nothing is skipped.
 
-```bash
-# as root, once (the repo is already at /opt/normies for the revenue share job)
-cp /opt/normies/deploy/watcher/watcher.env.example /etc/normies/watcher.env && chmod 600 /etc/normies/watcher.env
-$EDITOR /etc/normies/watcher.env
-cp /opt/normies/deploy/watcher/normies-watcher.service /etc/systemd/system/
-systemctl daemon-reload && systemctl enable --now normies-watcher.service
-journalctl -u normies-watcher -f
-```
+The server is set up by **ygtdmn/normies-infra** (Ansible), not from this folder:
+- the watcher's own account (`normies-watcher`) and its unit;
+- `/etc/normies/watcher.env`, from its vault (`watcher.env.example` here documents the settings);
+- auto-deploy: a merge to `main` that changes `api-server/` restarts it onto the new code within a minute.
+
+`sudo normies logs watcher` shows its log, and `sudo normies restart watcher` restarts it. It posts that it started,
+which is a quick test of its Discord channel.
 
 To see what it would have said for a past range, without posting:
-`cd /opt/normies/api-server && RPC_URL=... node_modules/.bin/tsx src/watch/cli.ts replay <from> <to>`.
+`cd api-server && RPC_URL=... pnpm exec tsx src/watch/cli.ts replay <from> <to>`, from any checkout.
 
 Contract addresses and the watched events are in `api-server/src/watch/contracts.ts`; `abi.json` next to it holds the
 write functions and events of every Normies contract and the Safe, generated from `out/`.

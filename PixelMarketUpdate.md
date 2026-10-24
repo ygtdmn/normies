@@ -256,7 +256,7 @@ first epoch does not score the hours before launch.
     `canvasV2.setPaused(false)` (refused until `migrationFinalized()` and `delegationsSeeded()`), then
     `market.setPaused(false)` (refused until `migrationFinalized()`). The first live state is already under the
     Safes.
-12. **Revenue share job.** Install `deploy/revshare/` with `PRIVATE_KEY` = the `REVSHARE_POSTER` key: it holds
+12. **Revenue share job.** Set up by ygtdmn/normies-infra (`deploy/revshare/` documents it), with `PRIVATE_KEY` = the `REVSHARE_POSTER` key: it holds
     the pool's POSTER role and nothing else. See "Running a revenue share epoch".
 13. **Holders.** Announce that the canvas needs a fresh `setApprovalForAll(canvasV2, true)` before
     burning; the site prompts for it.
@@ -336,8 +336,8 @@ taken back. So posting always follows the same order and stops at the first thin
 right: **release, unwrap, wait for finality, build, verify on a second RPC, re-check the pool, post, read back.**
 The tooling enforces the order; the rules are in `api-server/src/revshare/guards.ts`.
 
-On the server this is a monthly systemd timer, `deploy/revshare/` (units, env example, install and operating
-notes). `pnpm revshare run` does the whole sequence and refuses to post without `RPC_URL_VERIFY`, an independent
+On the server this is a monthly systemd timer, set up by ygtdmn/normies-infra; `deploy/revshare/` has the operating
+notes and the env example. `pnpm revshare run` does the whole sequence and refuses to post without `RPC_URL_VERIFY`, an independent
 second provider (not the same endpoint as `RPC_URL`). Its key holds the pool's POSTER role and nothing else:
 
 1. `splitter.release()` and `pool.unwrap()` when they hold anything, so the epoch holds everything earned in it.

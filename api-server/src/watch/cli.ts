@@ -107,7 +107,7 @@ async function describeTransaction(hash: Hex, logs: Log[]): Promise<{ severity: 
         if (RANK[s] > RANK[severity]) severity = s;
         if (name === "EpochPosted") {
             lines.push(
-                "If you did not just run `revshare.sh approve`, treat the poster key as stolen: the Operations Safe sends " +
+                "If you did not just run `sudo normies revshare approve`, treat the poster key as stolen: the Operations Safe sends " +
                     "cancelEpoch(id) + pool.setPaused(true) in one batch NOW, then the Admin Safe revokes the poster role.",
             );
         }
