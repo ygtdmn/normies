@@ -21,14 +21,10 @@ import { bytesToHex, encodePacked, hexToBytes, hexToString, keccak256, parseAbi,
 import {
   ZERO_ADDRESS,
   eventMeta,
-  popcountBytes,
   upsertCanvasState,
   upsertDefaultCanvasState,
 } from "./lib/canvas-state.js";
-// Canvas address — used to skip canvas-originated storage writes (they already
-// emit PixelsTransformed) when indexing direct setTransformedImageData calls.
-const CANVAS_ADDRESS = (process.env.PONDER_CANVAS_ADDRESS ?? "") as `0x${string}`;
-const CANVAS_ADDRESS_LC = CANVAS_ADDRESS.toLowerCase();
+import v1DirectWrites from "../history/v1-storage-direct-writes.json";
 const ZOMBIE_CONFIG_ID = "global";
 const REVEAL_PHRASE =
   "normies-ftw-lividly-pumice-consoling-equator-makeover-scone-speculate-dreamy-murky-zips-unplanted-verbalize";
@@ -48,12 +44,6 @@ const canvasStorageABI = parseAbi([
 ]);
 const getTransformedImageDataABI = parseAbi([
   "function getTransformedImageData(uint256 tokenId) view returns (bytes)",
-]);
-const normiesStorageAddressABI = parseAbi([
-  "function normiesStorage() view returns (address)",
-]);
-const getTokenRawImageDataABI = parseAbi([
-  "function getTokenRawImageData(uint256 tokenId) view returns (bytes)",
 ]);
 const zombieStorageABI = parseAbi([
   "function getPoolBitmap(uint256 poolIndex) view returns (bytes)",
@@ -497,83 +487,46 @@ ponder.on("NormiesCanvas:PixelsTransformed", async ({ event, context }) => {
 });
 
 // ──────────────────────────────────────────────
-//  NormiesCanvasStorage: direct setTransformedImageData writes (call traces)
+//  NormiesCanvasStorage (V1, retired): the Beeple bot's direct writes
 //
-//  Option B — a writer (e.g. the beeple bot) writes the transform straight to
-//  storage, bypassing NormiesCanvas, which emits no PixelsTransformed event.
-//  We index the CALL so these edits still land in history + canvas_token_state.
-//  Canvas-originated calls are skipped (the event handler above owns those).
+//  The V1 storage emitted no event, so writes that skipped NormiesCanvas (the
+//  Beeple bot's, all on token #0, blocks 25486505..26117066) used to be indexed
+//  from call traces: a debug_traceBlockByNumber per block on every rebuild.
+//  V1 has had no writes since NormiesCanvasStorageV2 (which emits events)
+//  replaced it, so those 78 writes are recorded in
+//  history/v1-storage-direct-writes.json, exported from the index that traced
+//  them, and inserted here with the same rows and canvas-state updates, in
+//  block order. Canvas-originated V1 writes were never part of it: the
+//  PixelsTransformed handler above owns those.
 // ──────────────────────────────────────────────
 
-// Original mint image never changes — cache per token to avoid repeat reads.
-const originalImageCache = new Map<string, Uint8Array>();
-async function readOriginalImage(
-  context: IndexingContext,
-  tokenId: bigint,
-): Promise<Uint8Array> {
-  const key = tokenId.toString();
-  const cached = originalImageCache.get(key);
-  if (cached) return cached;
-  const storage = await context.client.readContract({
-    address: CANVAS_ADDRESS,
-    abi: normiesStorageAddressABI,
-    functionName: "normiesStorage",
-    args: [],
-  });
-  const hex = (await context.client.readContract({
-    address: storage,
-    abi: getTokenRawImageDataABI,
-    functionName: "getTokenRawImageData",
-    args: [tokenId],
-  })) as `0x${string}`;
-  const bytes = hexToBytes(hex);
-  originalImageCache.set(key, bytes);
-  return bytes;
-}
-
-ponder.on("NormiesCanvasStorage.setTransformedImageData()", async ({ event, context }) => {
-  // Ponder never indexes reverted calls, so there's no error to check.
-  if (event.trace.from.toLowerCase() === CANVAS_ADDRESS_LC) return; // canvas-originated → already indexed via PixelsTransformed
-
-  const [tokenId, imageData] = event.args;
-  const bitmap = imageData as `0x${string}`;
-  const transformBytes = hexToBytes(bitmap);
-  const changeCount = popcountBytes(transformBytes);
-
-  // newPixelCount = on-pixels of (original XOR transform), matching how the
-  // canvas computes it for the PixelsTransformed event.
-  let newPixelCount = changeCount;
-  try {
-    const original = await readOriginalImage(context, tokenId);
-    const composite = new Uint8Array(original.length);
-    for (let i = 0; i < composite.length; i++) composite[i] = original[i]! ^ (transformBytes[i] ?? 0);
-    newPixelCount = popcountBytes(composite);
-  } catch {
-    // Fall back to changeCount; the history endpoints recompute newPixelCount
-    // from transformBitmap at serve time anyway.
+ponder.on("NormiesCanvasStorageV2:setup", async ({ context }) => {
+  for (const w of v1DirectWrites) {
+    const tokenId = BigInt(w.tokenId);
+    const bitmap = w.transformBitmap as `0x${string}`;
+    const meta = {
+      blockNumber: BigInt(w.blockNumber),
+      timestamp: BigInt(w.timestamp),
+      txHash: w.txHash as `0x${string}`,
+    };
+    await context.db.insert(pixelTransform).values({
+      id: w.id,
+      tokenId,
+      transformer: w.transformer as `0x${string}`,
+      changeCount: w.changeCount,
+      newPixelCount: w.newPixelCount,
+      transformBitmap: bitmap,
+      gridSize: w.gridSize,
+      cleared: w.cleared,
+      ...meta,
+    });
+    await upsertCanvasState(
+      context,
+      tokenId,
+      { customized: true, latestTransformBitmap: bitmap, lockedPixels: w.changeCount },
+      meta,
+    );
   }
-
-  await context.db.insert(pixelTransform).values({
-    // The call's path in the transaction's call tree; "trace" keeps it apart from the
-    // `${hash}-${tokenId}` ids of storage-event rows.
-    id: `${event.transaction.hash}-trace-${event.trace.traceAddress.join(".")}`,
-    tokenId,
-    transformer: event.trace.from,
-    changeCount,
-    newPixelCount,
-    transformBitmap: bitmap,
-    gridSize: 40,
-    cleared: false,
-    blockNumber: event.block.number,
-    timestamp: event.block.timestamp,
-    txHash: event.transaction.hash,
-  });
-  await upsertCanvasState(
-    context,
-    tokenId,
-    { customized: true, latestTransformBitmap: bitmap, lockedPixels: changeCount },
-    eventMeta(event),
-  );
 });
 
 // ──────────────────────────────────────────────
