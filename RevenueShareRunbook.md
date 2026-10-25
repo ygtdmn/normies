@@ -101,8 +101,8 @@ chain.
       Top it up from any wallet.
 - [ ] The pool is not paused, and the previous epoch's claims are open
       ([api.normies.art/revshare/epochs](https://api.normies.art/revshare/epochs)).
-- [ ] Discord alerts ping your phone: `DISCORD_MENTION` is set in the vault's `revshare-alert.env` and
-      `watcher.env` (normies-infra), and Discord notifications are on.
+- [ ] Discord reaches your phone: the alert channels notify on all messages. (`DISCORD_MENTION` adds a ping on
+      top, only needed if a channel is shared with people who mute it.)
 - [ ] Nothing else is scheduled on the server from the 31st to the 2nd. The monthly reboot window is the 15th.
 - Optional: `sudo normies revshare run --dry-run` builds the epoch without sending anything. It skips `release` and
   `unwrap`, so its amount can be slightly lower than the real run's.
@@ -267,7 +267,7 @@ commit that matches. An epoch that was waiting for approval is simply built agai
 | --- | --- | --- |
 | Scoring rules | Edit `api-server/src/revshare/config.ts`, merge to main. The server's checkout moves forward within a minute (never during a run) and Railway redeploys the API. | A product decision: update the site copy and announce it before the epoch it applies to. The new `configHash` is recorded with every epoch. |
 | Approval mode off | `REVSHARE_REQUIRE_APPROVAL=false` in the vault's `revshare.env`, apply `--tags api`. | The job then posts by itself; the watcher still pages every `EpochPosted`. |
-| Discord pings | `DISCORD_MENTION` in `revshare-alert.env` (the job's alerts) and `watcher.env` (on-chain alerts), apply `--tags api`. | `<@your user id>`. |
+| Discord pings | `DISCORD_MENTION` in `revshare-alert.env` (the job's alerts) and `watcher.env` (on-chain alerts), apply `--tags api`. | `<@your user id>`. Optional: not set today, since the alert channels notify on all messages. |
 | RPC keys | `scripts/rotate-alchemy-key` in normies-infra swaps the Alchemy key everywhere; `RPC_URL_VERIFY` is edited in the vault. | The verifier must stay an independent provider. |
 | Claim window | Operations Safe, `setClaimWindow(<seconds>)`. | At least 30 days; future epochs only. |
 | Holders' share of royalties | Admin Safe, `splitter.setPoolBps(<bps>)`. | `release()` first, so past royalties are split at the old rate. |
