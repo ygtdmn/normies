@@ -30,5 +30,5 @@ export async function confirmPublished(epoch: EpochFile): Promise<string> {
         }
         await new Promise((r) => setTimeout(r, 3_000));
     }
-    throw new Error(`${url} does not serve epoch ${epoch.epochId} (root ${epoch.root}); check REVSHARE_DIR, the Caddy path and the API`);
+    throw new Error(`${url} does not serve epoch ${epoch.epochId} (root ${epoch.root}); check REVSHARE_DIR, the web server's /revshare-epochs/ path and the API`);
 }
