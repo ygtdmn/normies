@@ -6,8 +6,11 @@
 set -u
 unit="${1:-normies-revshare}.service"
 status=$(systemctl show -p ExecMainStatus --value "$unit")
-logs=$(journalctl -u "$unit" -n 30 --no-pager -o cat _SYSTEMD_INVOCATION_ID="$(systemctl show -p InvocationID --value "$unit")" 2>/dev/null | tail -c 1500)
-[ -n "$logs" ] || logs=$(journalctl -u "$unit" -n 30 --no-pager -o cat 2>&1 | tail -c 1500)
+# RPC errors print the provider's URL, and its path or query holds the API key: those never reach Discord.
+# Redacted before the excerpt is cut, so a cut can't leave a key without its URL in front of it.
+redact='s#(https?://[^[:space:]"]*/)[A-Za-z0-9_-]{20,}#\1<redacted>#g; s#([?&](api[-_]?key|key|token)=)[^&[:space:]"]+#\1<redacted>#gI'
+logs=$(journalctl -u "$unit" -n 30 --no-pager -o cat _SYSTEMD_INVOCATION_ID="$(systemctl show -p InvocationID --value "$unit")" 2>/dev/null | sed -E "$redact" | tail -c 1500)
+[ -n "$logs" ] || logs=$(journalctl -u "$unit" -n 30 --no-pager -o cat 2>&1 | sed -E "$redact" | tail -c 1500)
 case "$status" in
     0)
         # The daily reminder only speaks when something is waiting.

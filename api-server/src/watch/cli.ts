@@ -37,6 +37,13 @@ const addresses = [...Object.keys(CONTRACTS), ...Object.keys(SAFES)] as Hex[];
 //  Discord
 // ──────────────────────────────────────────────
 
+/** RPC errors carry the provider's URL, and its path or query holds the API key: none of that goes to Discord. */
+function redactKeys(text: string): string {
+    return text
+        .replace(/(https?:\/\/[^\s"]*\/)[A-Za-z0-9_-]{20,}/g, "$1<redacted>")
+        .replace(/([?&](?:api[-_]?key|key|token)=)[^&\s"]+/gi, "$1<redacted>");
+}
+
 async function discord(content: string): Promise<void> {
     if (!WEBHOOK) {
         console.log(`[discord disabled] ${content}`);
@@ -213,6 +220,6 @@ if (process.argv[2] === "replay") {
     });
 } else main().catch(async (err) => {
     console.error(err);
-    await discord(`${MENTION ? `${MENTION} ` : ""}**Normies watcher crashed** and will restart: ${String(err?.message ?? err).slice(0, 300)}`).catch(() => {});
+    await discord(`${MENTION ? `${MENTION} ` : ""}**Normies watcher crashed** and will restart: ${redactKeys(String(err?.message ?? err)).slice(0, 300)}`).catch(() => {});
     process.exit(1);
 });
