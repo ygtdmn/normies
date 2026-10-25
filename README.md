@@ -154,7 +154,8 @@ pnpm dev
 | NormiesRoyaltySplitter | `0xA68A225f62772E6158f2B5f8afC184AdB69c3282` |
 
 The Pixel Market stack was deployed at block 26,122,420 and went live on 5 October 2026. All six are verified on
-Etherscan. The cutover runbook is [PixelMarketUpdate.md](PixelMarketUpdate.md).
+Etherscan. The cutover runbook is [PixelMarketUpdate.md](PixelMarketUpdate.md); running the revenue share every month, and its
+incidents, is [RevenueShareRunbook.md](RevenueShareRunbook.md).
 
 ## Security
 

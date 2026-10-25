@@ -277,8 +277,8 @@ use Solady `Ownable`. Later ownership moves use the two-step handover (`requestO
 | Holder | Who | Holds | What it can do |
 | --- | --- | --- | --- |
 | Admin Safe | 3-of-5, hardware wallets, at least 3 people | owner of storage V2, canvas V2, market, renderer V6, revenue pool, royalty splitter, and the Normies NFT (step 10). Also receives the team's half of fees and royalties | Mover roles, overlay writers, cooldowns, role grants, fee recipients, contract pointers, ownership; on the pool: withdraw ETH no epoch has reserved; on the splitter: the royalty split and the team address; on the NFT: renderer, royalties, minters |
-| Operations Safe | 2-of-3, different people | GUARDIAN on storage V2, canvas, market, pool; CONFIG on canvas, market, pool | Pause and unpause anything at once, the allowance kill switch (both ways), cancel an epoch before it opens. Config: prices, burn tiers, fee (at most 10%), listing floor, claim window (at least 30 days). Can never grant roles or withdraw ETH or #PIXEL, but can still cost holders: see below |
-| Revshare job key | EOA on the API host, gas only | POSTER on the pool | `postEpoch` only. Claims open 24 h later, so a bad root can be cancelled by the Operations Safe |
+| Operations Safe | 3-of-5, different people | GUARDIAN on storage V2, canvas, market, pool; CONFIG on canvas, market, pool | Pause and unpause anything at once, the allowance kill switch (both ways), cancel an epoch before it opens. Config: prices, burn tiers, fee (at most 10%), listing floor, claim window (at least 30 days). Can never grant roles or withdraw ETH or #PIXEL, but can still cost holders: see below |
+| Revshare job key | EOA on the indexer server, gas only | POSTER on the pool | `postEpoch` only. Claims open 24 h later, so a bad root can be cancelled by the Operations Safe |
 | Overlay bot key | EOA | an `authorizedWriters` slot | Overlays only; it cannot move pixels |
 | Deployer | hardware wallet | nothing after step 5 | Retired; no roles, Lifebuoy rescue locked |
 
@@ -310,85 +310,13 @@ Safes: every executed transaction and every owner or threshold change. On the V2
 `EpochPosted` pages someone (a phone, not only a channel), and so does a failed `normies-revshare.service` run;
 see the next section.
 
-**A post nobody expected (stolen POSTER key).** A cancel alone does not stop a stolen poster key: the cancelled
-range comes back, and the key can post it again in the next block, reserving everything unreserved once more. The
-24 hours before claims open are the whole defence, so:
-
-1. Any `EpochPosted` that the revshare job's journal does not show it posting is treated as a stolen key.
-2. The Operations Safe sends one MultiSend: `pool.cancelEpoch(id)` and `pool.setPaused(true)`. Pausing stops
-   posting; claims on already open epochs are never paused.
-3. The Admin Safe (the pool's owner) revokes the role: `pool.revokeRoles(<poster>, 4)`. Stop the timer on the API host and
-   rotate the key: a new gas-only key, `grantRoles(<new key>, 4)` from the Admin Safe, the new key in
-   `/etc/normies/revshare.env`.
-4. The Operations Safe unpauses the pool; the next run posts the cancelled range again under a new id.
-
-At least two Operations signers must be able to sign within a day, weekends included. Practise steps 2 and 3 once
-on a fork before launch.
+**A post nobody expected (stolen POSTER key).** The procedure is in the revenue share runbook:
+[RevenueShareRunbook.md, "A post nobody expected"](RevenueShareRunbook.md#a-post-nobody-expected-stolen-poster-key).
 
 ## Running a revenue share epoch
 
-The pool pays in epochs. Scores need what every wallet held over time, which no contract can see, so
-`api-server/src/revshare` computes them from RPC state and the pool stores only a Merkle root.
-
-A posted root opens for claims `POST_DELAY` (24 hours) later; until then the Operations Safe can `cancelEpoch`,
-which returns its reservation and, for the latest epoch, its block range. Once open it pays out and cannot be
-taken back. So posting always follows the same order and stops at the first thing that is not
-right: **release, unwrap, wait for finality, build, verify on a second RPC, re-check the pool, post, read back.**
-The tooling enforces the order; the rules are in `api-server/src/revshare/guards.ts`.
-
-On the server this is a monthly systemd timer, set up by ygtdmn/normies-infra; `deploy/revshare/` has the operating
-notes and the env example. `pnpm revshare run` does the whole sequence and refuses to post without `RPC_URL_VERIFY`, an independent
-second provider (not the same endpoint as `RPC_URL`). Its key holds the pool's POSTER role and nothing else:
-
-1. `splitter.release()` and `pool.unwrap()` when they hold anything, so the epoch holds everything earned in it.
-   Market fees need no step: every fill pays its half into the pool.
-2. The epoch ends at the chain's finalized block, and at least `EPOCH_FINALITY_BLOCKS` below the head, after the
-   release and unwrap blocks. ETH that arrives after the epoch's end belongs to the next epoch.
-3. Builds the epoch: four unpredictable sample blocks per UTC day, every wallet scored at each; the amount is
-   what the pool held unpromised at the end block, the posted `total` is the sum of the leaves (dust stays).
-4. Rebuilds it from scratch on the second RPC (its own amount, samples and scores) after checking both
-   providers return the same hash for the end block. Any difference in id, range, amount, total, config,
-   samples or root stops the run.
-5. Re-reads the pool right before posting: not paused, the epoch id is still `nextEpochId`, the range starts
-   right after the last posted epoch, and the total still fits what is unreserved.
-6. Posts only once the previous epoch's claims are open. A cancel hands back only the latest range, so with two
-   unopened epochs, cancelling both would strand the older range for good; an early run just stops. Then it
-   posts, reads `getEpoch(id)` back and prints when claims open. In the 24 hours before that, anyone can run
-   `pnpm revshare verify <file>` (the file is public at its `dataURI`) on their own RPC; the Operations Safe
-   cancels with `cancelEpoch(id)` if anything is off, and the next run posts the range again under a new id.
-7. A key without the POSTER role (or a pool not yet handed off) gets `REVSHARE_DIR/proposals/<id>.safe.json`
-   instead, a Safe Transaction Builder batch for the pool owner; later runs leave a pending proposal alone until
-   the pool shows it posted (`--replace-proposal` rebuilds it). Both cases exit with code 2 (`ACTION NEEDED` in
-   the journal), so the unit fails and pages: after the handoff the job should never be waiting on a Safe.
-
-By hand (for example when the post goes through a Safe), the same order:
-
-1. `splitter.release()` and `pool.unwrap()` (both permissionless). Wait until both blocks are finalized.
-2. `pnpm revshare build --epoch <pool.nextEpochId()> --from <pool.cursorToBlock() + 1> --to <finalized block>` in
-   `api-server` (archive `RPC_URL`, `CHAIN_ID` and the contract addresses in env, see `src/revshare/cli.ts`).
-   `--epoch` is required: the leaves embed it, and an id that moves before the post makes every leaf unclaimable.
-3. `RPC_URL=<second provider> pnpm revshare verify <file>`. It rebuilds the file (amount included) and checks it
-   is postable now; it must print both "verified" and "postable". Every Safe signer runs it on their own RPC
-   before signing.
-4. Copy the file to `/var/lib/normies-revshare/epochs/<id>.json` on the indexer host; the API then serves it at
-   `https://api.normies.art/revshare/files/<id>.json`, which is the `dataURI` to post. Then send the
-   printed `postEpoch(...)` call from the POSTER key. Holders claim from the site (or `claimMany`) once it opens,
-   24 hours later.
-5. `pnpm revshare verify <file>` once more: for a posted epoch it checks the pool recorded exactly the file.
-
-At that epoch's fixed `getEpoch(id).sweepableAt` anyone can `sweep(id)`: unclaimed ETH returns to the pool for later
-epochs. Each epoch snapshots the default window when posted (365 days at launch), counted from its opening.
-`setClaimWindow` (CONFIG) affects future epochs only and requires at least `MIN_CLAIM_WINDOW = 30 days`; it cannot
-shorten or extend existing deadlines. Claims remain open until the epoch is actually swept. Only the Treasury
-Safe can take ETH no epoch has reserved (`withdrawUnallocated`); what a posted root owes cannot be touched.
-
-Scoring rules live in `api-server/src/revshare/config.ts`; every epoch records their `configHash`.
-Changing them is a product decision: update the site copy and announce it before the epoch it applies to.
-
-The pool's `EpochPosted` event and `getEpoch` return value include `sweepableAt`. Use the matching indexer
-schema/event ABI and reindex the revised pool from its deployment block. The API exposes the stored deadline
-on epoch and wallet-claim records; `claimWindowSeconds` describes future posts only. This source change requires
-a revised pool deployment and does not modify any previously deployed pool.
+Everything about the monthly epochs (how one is built and posted, approving it, the failures, the incidents and
+the settings) is in [RevenueShareRunbook.md](RevenueShareRunbook.md).
 
 ## Rollback
 

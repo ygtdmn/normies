@@ -9,8 +9,8 @@ new blocks (3 behind the head) and posts to Discord, one message per transaction
 - **ownership, roles, movers, writers, cooldowns, fee recipients, royalty routes, withdrawals** on the 20 Normies
   contracts: urgent;
 - **`EpochPosted` and `EpochCancelled`**: urgent. In approval mode the only `EpochPosted` you should ever see is
-  right after you ran `sudo normies revshare approve`; any other is the stolen poster key case (runbook, "A post nobody
-  expected");
+  right after you ran `sudo normies revshare approve`; any other is the stolen poster key case
+  ([revenue share runbook, "A post nobody expected"](../../RevenueShareRunbook.md#a-post-nobody-expected-stolen-poster-key));
 - operating changes (pauses, prices, burn tiers, claim window, Legendary Canvas): notices.
 
 Urgent messages start with `DISCORD_MENTION`, so set it to your user id and enable Discord notifications on your
