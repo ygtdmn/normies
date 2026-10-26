@@ -75,7 +75,7 @@ waiting.
 
 **How the file reaches the public.** The job writes it on the indexer server. nginx serves that folder at
 `indexer.normies.art/revshare-epochs/`, behind the same Cloudflare rule as the indexer (requests need the
-indexer's secret). The API on Railway fetches it with the secret and republishes it at
+indexer's secret). The API (on Vercel) fetches it with the secret and republishes it at
 `api.normies.art/revshare/files/<id>.json`. The API keeps a found file for 10 minutes and a missing one for 1
 minute.
 
@@ -265,7 +265,7 @@ commit that matches. An epoch that was waiting for approval is simply built agai
 
 | Change | How | Notes |
 | --- | --- | --- |
-| Scoring rules | Edit `api-server/src/revshare/config.ts`, merge to main. The server's checkout moves forward within a minute (never during a run) and Railway redeploys the API. | A product decision: update the site copy and announce it before the epoch it applies to. The new `configHash` is recorded with every epoch. |
+| Scoring rules | Edit `api-server/src/revshare/config.ts`, merge to main. The server's checkout moves forward within a minute (never during a run) and Vercel redeploys the API. | A product decision: update the site copy and announce it before the epoch it applies to. The new `configHash` is recorded with every epoch. |
 | Approval mode off | `REVSHARE_REQUIRE_APPROVAL=false` in the vault's `revshare.env`, apply `--tags api`. | The job then posts by itself; the watcher still pages every `EpochPosted`. |
 | Discord pings | `DISCORD_MENTION` in `revshare-alert.env` (the job's alerts) and `watcher.env` (on-chain alerts), apply `--tags api`. | `<@your user id>`. Optional: not set today, since the alert channels notify on all messages. |
 | RPC keys | `scripts/rotate-alchemy-key` in normies-infra swaps the Alchemy key everywhere; `RPC_URL_VERIFY` is edited in the vault. | The verifier must stay an independent provider. |
