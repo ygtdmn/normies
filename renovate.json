@@ -1,0 +1,100 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Weekly dependency PRs: each is reviewed and merged by hand, and merging to main deploys.",
+  "extends": [
+    "config:recommended"
+  ],
+  "enabledManagers": [
+    "npm",
+    "github-actions"
+  ],
+  "includePaths": [
+    "api-server/**",
+    ".github/**"
+  ],
+  "timezone": "Europe/Lisbon",
+  "schedule": [
+    "* 0-5 * * 1"
+  ],
+  "minimumReleaseAge": "3 days",
+  "internalChecksFilter": "strict",
+  "labels": [
+    "dependencies"
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "* 0-5 1 * *"
+    ]
+  },
+  "vulnerabilityAlerts": {
+    "labels": [
+      "dependencies",
+      "security"
+    ]
+  },
+  "osvVulnerabilityAlerts": true,
+  "packageRules": [
+    {
+      "description": "Majors one at a time, only when asked for in the Dependency Dashboard issue",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "The API (api-server: Vercel, plus the watcher and revenue-share job on the Normies server): its minor and patch updates in one weekly PR",
+      "matchFileNames": [
+        "api-server/package.json"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "groupName": "api-server minor and patch updates"
+    },
+    {
+      "description": "The indexer (on the Normies server; a merge deploys a new release): its minor and patch updates in one weekly PR",
+      "matchFileNames": [
+        "api-server/indexer/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "groupName": "indexer minor and patch updates"
+    },
+    {
+      "description": "GitHub Actions in the CI workflows, together",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "groupName": "CI actions"
+    },
+    {
+      "description": "Held: @types/node 24 for the API, the Node version Vercel builds it with",
+      "matchFileNames": [
+        "api-server/package.json"
+      ],
+      "matchPackageNames": [
+        "@types/node"
+      ],
+      "allowedVersions": "<25"
+    },
+    {
+      "description": "Held: @types/node 22 for the indexer, the Node version the Normies server runs",
+      "matchFileNames": [
+        "api-server/indexer/**"
+      ],
+      "matchPackageNames": [
+        "@types/node"
+      ],
+      "allowedVersions": "<23"
+    }
+  ]
+}

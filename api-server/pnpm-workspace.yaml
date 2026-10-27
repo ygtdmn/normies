@@ -1,0 +1,15 @@
+# Only package versions published at least three days ago: the supply-chain rule every Normies
+# project shares (Renovate waits the same three days).
+minimumReleaseAge: 4320
+# Moved from the package.json "pnpm" field: pnpm 11+ reads these settings from here.
+# The musl builds of native packages stay installed next to the glibc ones: Vercel's cached
+# node_modules has @resvg/resvg-js pointing at its musl package, and without it the function trace
+# fails with ENOENT.
+supportedArchitectures:
+  os: [current]
+  cpu: [current]
+  libc: [current, musl]
+# Dependency build scripts, each one decided: false skips it, as pnpm 10 did (the package works
+# without it). pnpm 12 stops an install on any build script that isn't listed here.
+allowBuilds:
+  esbuild: false

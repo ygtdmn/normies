@@ -1,3 +1,6 @@
+# Only package versions published at least three days ago: the supply-chain rule every Normies
+# project shares (Renovate waits the same three days).
+minimumReleaseAge: 4320
 overrides:
   '@fastify/busboy@<3.2.2': '^3.2.2'
   '@graphql-tools/utils@<12.0.2': '^12.0.2'
