@@ -1,0 +1,40 @@
+# Checks every pull request (Renovate's too) the way the API and the indexer install: the pnpm
+# version each package.json names (through corepack) and the exact lockfile, then the checks each
+# project has. The API builds on Vercel (Node 24) and its watcher and revenue-share job run on the
+# Normies server (Node 22), so it is checked on both; the indexer runs on the Normies server.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: ${{ matrix.project }} (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {project: api-server, node: 24}
+          - {project: api-server, node: 22}
+          - {project: api-server/indexer, node: 22}
+    defaults:
+      run:
+        working-directory: ${{ matrix.project }}
+    env:
+      CI: true
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
+      # api-server's config refuses to load without it; no test calls it.
+      PONDER_API_URL: http://127.0.0.1:42069
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      - run: pnpm run --if-present lint
+      - run: pnpm run --if-present test
+      - run: pnpm run --if-present build
