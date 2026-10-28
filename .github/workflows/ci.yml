@@ -29,7 +29,7 @@ jobs:
       PONDER_API_URL: http://127.0.0.1:42069
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
       - run: corepack enable
