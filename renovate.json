@@ -95,6 +95,16 @@
         "@types/node"
       ],
       "allowedVersions": "<23"
+    },
+    {
+      "description": "Overrides written as name@range, the security floors pnpm audit --fix adds, stay as written: Renovate misreads them (in ygtdmn/panorama it proposed brace-expansion 5 for a 2.x floor). Plain pins (name: version) still get updates. New advisories still show in Dependabot alerts and deps-check.",
+      "matchDepTypes": [
+        "pnpm-workspace.overrides"
+      ],
+      "matchDepNames": [
+        "/^.+@/"
+      ],
+      "enabled": false
     }
   ]
 }
