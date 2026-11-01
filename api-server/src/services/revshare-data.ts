@@ -50,6 +50,11 @@ export interface IndexedEpoch {
     blockNumber: string;
     timestamp: string;
     txHash: string;
+    /** Money that came in over [fromBlock, toBlock]. Missing on an indexer that predates it. */
+    sources?: {
+        market: { fills: number; volumeWei: string; feesWei: string; toPoolWei: string };
+        royalties: { releases: number; toPoolWei: string; toTeamWei: string };
+    };
 }
 
 export interface IndexedClaim {

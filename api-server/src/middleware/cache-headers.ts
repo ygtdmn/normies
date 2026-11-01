@@ -16,6 +16,9 @@ export const cacheHeaders: MiddlewareHandler = async (c, next) => {
     const path = c.req.path;
     if (path.startsWith("/canvas/status")) {
         c.header("Cache-Control", `public, max-age=${canvasStatusMaxAge}, s-maxage=${canvasStatusMaxAge}`);
+    } else if (path === "/revshare/epochs" || /^\/revshare\/epochs\/\d+$/.test(path)) {
+        // Epochs carry OpenSea and price lookups: let the CDN absorb the site's polling and refresh in the background.
+        c.header("Cache-Control", "public, max-age=30, s-maxage=60, stale-while-revalidate=3600");
     } else if (path.startsWith("/market/") || path.startsWith("/revshare/") || path.startsWith("/pixels/") || path.startsWith("/canvas/sinks") || path.startsWith("/canvas/token/")) {
         // Order book and balances: near-realtime, short shared cache
         c.header("Cache-Control", `public, max-age=${marketMaxAge}, s-maxage=${marketMaxAge}`);

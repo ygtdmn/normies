@@ -10,6 +10,7 @@ import {
     getPoolStatus,
     loadEpochFile,
 } from "../services/revshare-data.js";
+import { epochContext } from "../services/revshare-sources.js";
 
 const revshare = new Hono();
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
@@ -32,8 +33,13 @@ revshare.get("/status", async (c) => {
 
 revshare.get("/epochs", async (c) => {
     const { epochs } = await getEpochs();
-    const files = await Promise.all(epochs.map((e) => loadEpochFile(e.epochId)));
-    return c.json({ epochs: epochs.map((e, i) => ({ ...e, published: files[i] !== null })) });
+    const [files, contexts] = await Promise.all([
+        Promise.all(epochs.map((e) => loadEpochFile(e.epochId))),
+        Promise.all(epochs.map((e) => epochContext(e))),
+    ]);
+    // `sources` (Pixel Market fills and royalty releases in the range) comes from the indexer; `opensea` is the
+    // collection's OpenSea sales over the same range and `ethUsdAtPost` the ETH price on the day it was posted.
+    return c.json({ epochs: epochs.map((e, i) => ({ ...e, ...contexts[i], published: files[i] !== null })) });
 });
 
 revshare.get("/epochs/:id", async (c) => {
@@ -45,9 +51,10 @@ revshare.get("/epochs/:id", async (c) => {
     } catch {
         return c.json({ error: "Epoch not found" }, 404);
     }
-    const file = await loadEpochFile(id);
+    const [file, context] = await Promise.all([loadEpochFile(id), epochContext(epoch)]);
     return c.json({
         ...epoch,
+        ...context,
         published: file !== null,
         // The payout table can be large; proofs are served per address.
         file: file

@@ -1,7 +1,7 @@
 import { db } from "ponder:api";
 import schema from "ponder:schema";
 import { Hono } from "hono";
-import { and, asc, desc, eq, gt } from "ponder";
+import { and, asc, between, count, desc, eq, gt, sql } from "ponder";
 
 // ──────────────────────────────────────────────
 //  Revenue share read API: epochs, claims, totals, and the state snapshot the
@@ -10,6 +10,7 @@ import { and, asc, desc, eq, gt } from "ponder";
 
 const app = new Hono();
 const GLOBAL_ID = "global";
+const DEFAULT_REVENUE_SHARE_BPS = 5000;
 
 function serializeBigints<T extends Record<string, unknown>>(row: T): Record<string, unknown> {
   const result: Record<string, unknown> = {};
@@ -23,9 +24,62 @@ function isAddress(value: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(value);
 }
 
+/** A Postgres numeric sum as a whole-number string (bigint columns are numeric, so sums can come back as "12.0"). */
+function whole(value: unknown): string {
+  const [int] = String(value ?? "0").split(".");
+  return int || "0";
+}
+
+/**
+ * Where an epoch's money came from, over its own block range [fromBlock, toBlock]: Pixel Market fills (volume, fees
+ * and the pool's part of them) and royalties the splitter released. The epoch job releases the splitter just before
+ * it picks toBlock, so each release lands in exactly one epoch. These are flows, not the posted amount: rounding dust
+ * and swept or cancelled epochs carried from earlier ranges make up the rest of `amount`.
+ */
+async function epochSources(fromBlock: bigint, toBlock: bigint, revenueShareBps: number) {
+  const [[fills], [releases]] = await Promise.all([
+    db
+      .select({
+        fills: count(),
+        volumeWei: sql<string>`coalesce(sum(${schema.marketFill.grossWei}), 0)`,
+        feesWei: sql<string>`coalesce(sum(${schema.marketFill.feeWei}), 0)`,
+      })
+      .from(schema.marketFill)
+      .where(between(schema.marketFill.blockNumber, fromBlock, toBlock)),
+    db
+      .select({
+        releases: count(),
+        toPoolWei: sql<string>`coalesce(sum(${schema.revshareRelease.toPool}), 0)`,
+        toTeamWei: sql<string>`coalesce(sum(${schema.revshareRelease.toTeam}), 0)`,
+      })
+      .from(schema.revshareRelease)
+      .where(between(schema.revshareRelease.blockNumber, fromBlock, toBlock)),
+  ]);
+  const feesWei = BigInt(whole(fills?.feesWei));
+  return {
+    market: {
+      fills: Number(fills?.fills ?? 0),
+      volumeWei: whole(fills?.volumeWei),
+      feesWei: feesWei.toString(),
+      // Per fill the contract floors fee x revenueShareBps; summed first, this can differ by under one wei a fill.
+      toPoolWei: ((feesWei * BigInt(revenueShareBps)) / 10_000n).toString(),
+    },
+    royalties: {
+      releases: Number(releases?.releases ?? 0),
+      toPoolWei: whole(releases?.toPoolWei),
+      toTeamWei: whole(releases?.toTeamWei),
+    },
+  };
+}
+
 app.get("/revshare/epochs", async (c) => {
-  const rows = await db.select().from(schema.revshareEpoch).orderBy(desc(schema.revshareEpoch.epochId)).limit(100);
-  return c.json({ epochs: rows.map(serializeBigints) });
+  const [rows, [market]] = await Promise.all([
+    db.select().from(schema.revshareEpoch).orderBy(desc(schema.revshareEpoch.epochId)).limit(100),
+    db.select({ revenueShareBps: schema.marketStats.revenueShareBps }).from(schema.marketStats).where(eq(schema.marketStats.id, GLOBAL_ID)).limit(1),
+  ]);
+  const bps = market?.revenueShareBps ?? DEFAULT_REVENUE_SHARE_BPS;
+  const sources = await Promise.all(rows.map((row) => epochSources(row.fromBlock, row.toBlock, bps)));
+  return c.json({ epochs: rows.map((row, i) => ({ ...serializeBigints(row), sources: sources[i] })) });
 });
 
 app.get("/revshare/epochs/:id", async (c) => {
@@ -37,7 +91,13 @@ app.get("/revshare/epochs/:id", async (c) => {
   }
   const [row] = await db.select().from(schema.revshareEpoch).where(eq(schema.revshareEpoch.epochId, epochId)).limit(1);
   if (!row) return c.json({ error: "Epoch not found" }, 404);
-  return c.json(serializeBigints(row));
+  const [market] = await db
+    .select({ revenueShareBps: schema.marketStats.revenueShareBps })
+    .from(schema.marketStats)
+    .where(eq(schema.marketStats.id, GLOBAL_ID))
+    .limit(1);
+  const sources = await epochSources(row.fromBlock, row.toBlock, market?.revenueShareBps ?? DEFAULT_REVENUE_SHARE_BPS);
+  return c.json({ ...serializeBigints(row), sources });
 });
 
 app.get("/revshare/claims/:address", async (c) => {
