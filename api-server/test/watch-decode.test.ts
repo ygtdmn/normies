@@ -35,3 +35,12 @@ describe("watcher decoding", () => {
         expect(safeCalls(pause)).toBeNull();
     });
 });
+
+describe("watcher severities", () => {
+    it("pages for an ownership change but not for a handover request anyone can make", async () => {
+        const { WATCHED_EVENTS } = await import("../src/watch/contracts.js");
+        expect(WATCHED_EVENTS.OwnershipTransferred).toBe("urgent");
+        expect(WATCHED_EVENTS.OwnershipHandoverRequested).toBe("notice");
+        expect(WATCHED_EVENTS.ExecutionSuccess).toBe("notice"); // upgraded to urgent for the Admin Safe in cli.ts
+    });
+});

@@ -60,7 +60,9 @@ export type Severity = "urgent" | "notice";
 export const WATCHED_EVENTS: Record<string, Severity> = {
     // ownership and access
     OwnershipTransferred: "urgent",
-    OwnershipHandoverRequested: "urgent",
+    // Anyone can request a handover for their own address (Solady Ownable); it expires in 48 hours and changes nothing
+    // unless the owner completes it, which is an Admin Safe execution (urgent) and then OwnershipTransferred (urgent).
+    OwnershipHandoverRequested: "notice",
     OwnershipHandoverCanceled: "notice",
     RolesUpdated: "urgent",
     MoverRolesSet: "urgent",
