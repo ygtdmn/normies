@@ -28,7 +28,7 @@ jobs:
       # api-server's config refuses to load without it; no test calls it.
       PONDER_API_URL: http://127.0.0.1:42069
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
