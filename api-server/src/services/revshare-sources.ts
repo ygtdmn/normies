@@ -150,6 +150,17 @@ async function openSeaVolume(epochId: string, from: number, to: number): Promise
     });
 }
 
+/** How long a request waits for the outside lookups before answering without them (they keep running and fill the cache). */
+const CONTEXT_BUDGET_MS = 8_000;
+
+function within<T>(p: Promise<T>, fallback: T): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), CONTEXT_BUDGET_MS);
+    });
+    return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
+
 export async function epochContext(epoch: {
     epochId: string;
     fromBlock: string;
@@ -158,8 +169,10 @@ export async function epochContext(epoch: {
 }): Promise<EpochContext> {
     const [fromTimestamp, toTimestamp] = await Promise.all([blockTime(epoch.fromBlock), blockTime(epoch.toBlock)]);
     const [ethUsdAtPost, opensea] = await Promise.all([
-        ethUsdOn(Number(epoch.timestamp)),
-        fromTimestamp !== null && toTimestamp !== null ? openSeaVolume(epoch.epochId, fromTimestamp, toTimestamp) : null,
+        within(ethUsdOn(Number(epoch.timestamp)), null),
+        fromTimestamp !== null && toTimestamp !== null
+            ? within(openSeaVolume(epoch.epochId, fromTimestamp, toTimestamp), null)
+            : null,
     ]);
     return { fromTimestamp, toTimestamp, ethUsdAtPost, opensea };
 }
