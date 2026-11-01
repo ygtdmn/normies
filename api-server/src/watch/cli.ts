@@ -112,6 +112,12 @@ async function describeTransaction(hash: Hex, logs: Log[]): Promise<{ severity: 
             lines.push(`${nameOf(emitter)}.${name}(${decoded ? args.map(([k, v]) => `${k}=${formatValue(v)}`).join(", ") : "undecoded"})`);
         }
         if (RANK[s] > RANK[severity]) severity = s;
+        if (name === "OwnershipHandoverRequested") {
+            lines.push(
+                "Anyone can request this for their own address: it expires in 48 hours and does nothing unless the Admin Safe " +
+                    "signs completeOwnershipHandover for it. Never sign that for an address you did not set up yourself.",
+            );
+        }
         if (name === "EpochPosted") {
             lines.push(
                 "If you did not just run `sudo normies revshare approve`, treat the poster key as stolen: the Operations Safe sends " +
