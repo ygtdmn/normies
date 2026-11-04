@@ -12,6 +12,8 @@ import { IWETH } from "../src/interfaces/IWETH.sol";
 /// @notice Rehearses pointing the royalty splitter's `team` at the deployed team splitter, against live mainnet state:
 ///         the Admin Safe's `setTeam`, then `release()` on both splitters from an unrelated wallet. Skipped when
 ///         API_KEY_ALCHEMY is not configured. FORK_BLOCK pins a block; by default the latest one is used.
+///         TEAM_SPLITTER points at a deployed team splitter (checked against this repo's code); without it, one is
+///         deployed on the fork, so the whole switch can be rehearsed before the real deploy.
 ///
 ///         forge test --match-path test/NormiesTeamSplitterForkTest.t.sol -vv
 contract NormiesTeamSplitterForkTest is Test {
@@ -20,12 +22,13 @@ contract NormiesTeamSplitterForkTest is Test {
     address constant POOL = 0x481384812e79bf0d11FC0b1704af445D5F06813c;
     address constant ADMIN_SAFE = 0xAF8e9BDcF6463EA1f50f8f70ECF13d85a092a1Aa;
     address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-    address constant TEAM_SPLITTER = 0x5b4E255c7AA8d5a726D2D24CDc1CcF7213b1EC02;
     address constant PRIMARY = 0x0391AbD7969D494a671F14ed01C85411A596BAEa;
     address constant SECONDARY = 0x20edb6cfA307495CFD2e10ca400346b0A15baA0A;
 
     NormiesRoyaltySplitter royalties = NormiesRoyaltySplitter(payable(ROYALTY_SPLITTER));
-    NormiesTeamSplitter team = NormiesTeamSplitter(payable(TEAM_SPLITTER));
+    NormiesTeamSplitter team;
+    address TEAM_SPLITTER;
+    bool deployedOnFork;
     NormiesRevenuePool pool = NormiesRevenuePool(payable(POOL));
     address anyone = makeAddr("anyone");
 
@@ -38,6 +41,14 @@ contract NormiesTeamSplitterForkTest is Test {
         if (forkBlock == 0) vm.createSelectFork("mainnet");
         else vm.createSelectFork("mainnet", forkBlock);
         console.log("fork block", block.number);
+
+        TEAM_SPLITTER = vm.envOr("TEAM_SPLITTER", address(0));
+        if (TEAM_SPLITTER == address(0)) {
+            TEAM_SPLITTER = address(new NormiesTeamSplitter(IWETH(WETH), PRIMARY, SECONDARY, 9000));
+            deployedOnFork = true;
+        }
+        team = NormiesTeamSplitter(payable(TEAM_SPLITTER));
+        console.log("team splitter", TEAM_SPLITTER, deployedOnFork ? "(deployed on the fork)" : "(live)");
     }
 
     /// The deployed contract is the code in this repo, with the agreed payees, and the live wiring is what we expect.
@@ -47,6 +58,7 @@ contract NormiesTeamSplitterForkTest is Test {
         assertEq(team.primary(), PRIMARY);
         assertEq(team.secondary(), SECONDARY);
         assertEq(team.primaryBps(), 9000);
+        assertEq(address(team.weth()), WETH);
 
         assertEq(royalties.owner(), ADMIN_SAFE, "royalty splitter owner");
         assertEq(royalties.pool(), POOL, "royalty splitter pool");
@@ -113,8 +125,18 @@ contract NormiesTeamSplitterForkTest is Test {
         console.log("  to pool             ", toPool);
         console.log("  to team splitter    ", toTeam);
 
+        // Optional: WETH sent to the team splitter directly is unwrapped and split by the same release().
+        uint256 directWeth = offerWeth > 0 ? 0.01 ether : 0;
+        if (directWeth > 0) {
+            vm.deal(anyone, directWeth);
+            vm.startPrank(anyone);
+            IWETH(WETH).deposit{ value: directWeth }();
+            IWETH(WETH).transfer(TEAM_SPLITTER, directWeth);
+            vm.stopPrank();
+        }
+
         // 3. Anyone: release on the team splitter.
-        uint256 teamTotal = TEAM_SPLITTER.balance;
+        uint256 teamTotal = TEAM_SPLITTER.balance + IWETH(WETH).balanceOf(TEAM_SPLITTER);
         uint256 toPrimary = (teamTotal * 9000) / 10_000;
         uint256 toSecondary = teamTotal - toPrimary;
         uint256 primaryBefore = PRIMARY.balance;
@@ -122,6 +144,7 @@ contract NormiesTeamSplitterForkTest is Test {
         vm.prank(anyone);
         team.release();
         assertEq(TEAM_SPLITTER.balance, 0);
+        assertEq(IWETH(WETH).balanceOf(TEAM_SPLITTER), 0);
         assertEq(PRIMARY.balance - primaryBefore, toPrimary, "primary 90%");
         assertEq(SECONDARY.balance - secondaryBefore, toSecondary, "secondary 10%");
         console.log("team splitter paid    ", teamTotal);
@@ -130,6 +153,6 @@ contract NormiesTeamSplitterForkTest is Test {
     }
 
     function _expectedRuntime() internal returns (bytes memory) {
-        return address(new NormiesTeamSplitter(PRIMARY, SECONDARY, 9000)).code;
+        return address(new NormiesTeamSplitter(IWETH(WETH), PRIMARY, SECONDARY, 9000)).code;
     }
 }
