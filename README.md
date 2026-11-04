@@ -96,6 +96,8 @@ Burned Normies become #PIXEL, which can sit on a Normie, in a wallet, or in a ma
   Merkle root opens for claims 24 hours later, and can be cancelled until then.
 - **NormiesRoyaltySplitter.sol**: the collection's royalty receiver; splits royalties between the revenue pool and
   the team.
+- **NormiesTeamSplitter.sol**: an optional `team` for the royalty splitter; splits the team's half between two fixed
+  payees (90% / 10% in `script/DeployTeamSplitter.s.sol`). No owner; anyone calls `release()`.
 - **NormiesAccess.sol**: shared roles (Solady `OwnableRoles`): owner, GUARDIAN (pause and unpause, cancel an
   unopened epoch), CONFIG (bounded parameters) and POSTER (post epochs only).
 

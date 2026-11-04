@@ -271,6 +271,7 @@ commit that matches. An epoch that was waiting for approval is simply built agai
 | RPC keys | `scripts/rotate-alchemy-key` in normies-infra swaps the Alchemy key everywhere; `RPC_URL_VERIFY` is edited in the vault. | The verifier must stay an independent provider. |
 | Claim window | Operations Safe, `setClaimWindow(<seconds>)`. | At least 30 days; future epochs only. |
 | Holders' share of royalties | Admin Safe, `splitter.setPoolBps(<bps>)`. | `release()` first, so past royalties are split at the old rate. |
+| The team's royalty wallet | Admin Safe, `splitter.setTeam(<wallet>)`. To split the team's half, deploy `NormiesTeamSplitter` (`script/DeployTeamSplitter.s.sol`) and use its address. | `release()` first, so past royalties go to the old wallet. Holders' half and epochs are unaffected; the watcher pages `TeamSet`. Anyone calls `release()` on the team splitter to pay its payees. |
 | Taking out ETH no epoch owes | Admin Safe, `pool.withdrawUnallocated(<to>, <wei>)`. | Not in the days before the 1st: the epoch is built from what is unreserved. |
 | Royalties in another token | `splitter.releaseToken(<token>)` sends it all to the team. | The team converts the holders' share (`poolBps`) to ETH and sends it to the pool address. |
 
