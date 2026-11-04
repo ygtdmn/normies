@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
+import { IWETH } from "./interfaces/IWETH.sol";
 import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
 
 /**
@@ -9,7 +10,8 @@ import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
  * @author Smart Contract by Yigit Duman (https://x.com/yigitduman)
  * @notice The team's wallet for its half of royalties (the royalty splitter's `team`). It splits whatever arrives
  *         between two fixed payees. Nothing happens on receipt, so the payers (the royalty splitter, the market) pay
- *         no extra gas: anyone can call release() or releaseToken() to pay both payees out.
+ *         no extra gas: anyone can call release() to unwrap any WETH and pay both payees in ETH, or releaseToken()
+ *         for any other token.
  *
  *         There is no owner and nothing can be changed. To change the payees or the split, deploy a new one and point
  *         the royalty splitter at it with `setTeam`.
@@ -18,12 +20,14 @@ contract NormiesTeamSplitter {
     error ZeroAddress();
     error SamePayee();
     error InvalidBps();
+    error UseRelease();
 
     event Released(uint256 toPrimary, uint256 toSecondary);
     event TokenReleased(address indexed token, uint256 toPrimary, uint256 toSecondary);
 
     uint256 internal constant BPS = 10_000;
 
+    IWETH public immutable weth;
     /// @notice Receives `primaryBps` of everything.
     address public immutable primary;
     /// @notice Receives the rest, including rounding dust.
@@ -31,10 +35,11 @@ contract NormiesTeamSplitter {
     /// @notice The primary payee's share, in basis points.
     uint256 public immutable primaryBps;
 
-    constructor(address _primary, address _secondary, uint256 _primaryBps) {
-        require(_primary != address(0) && _secondary != address(0), ZeroAddress());
+    constructor(IWETH _weth, address _primary, address _secondary, uint256 _primaryBps) {
+        require(address(_weth) != address(0) && _primary != address(0) && _secondary != address(0), ZeroAddress());
         require(_primary != _secondary, SamePayee());
         require(_primaryBps > 0 && _primaryBps < BPS, InvalidBps());
+        weth = _weth;
         primary = _primary;
         secondary = _secondary;
         primaryBps = _primaryBps;
@@ -43,9 +48,12 @@ contract NormiesTeamSplitter {
     /// @dev Empty on purpose, see the contract notice.
     receive() external payable { }
 
-    /// @notice Splits the whole ETH balance. Both transfers are forced, so a payee that rejects ETH can never hold the
-    ///         other payee's share back.
+    /// @notice Unwraps any WETH, then splits the whole ETH balance. Both transfers are forced, so a payee that rejects
+    ///         ETH can never hold the other payee's share back.
     function release() external {
+        uint256 wrapped = weth.balanceOf(address(this));
+        if (wrapped > 0) weth.withdraw(wrapped);
+
         uint256 balance = address(this).balance;
         if (balance == 0) return;
         uint256 toPrimary = (balance * primaryBps) / BPS;
@@ -55,8 +63,9 @@ contract NormiesTeamSplitter {
         emit Released(toPrimary, toSecondary);
     }
 
-    /// @notice Splits the whole balance of an ERC20 (WETH included) the same way.
+    /// @notice Splits the whole balance of any other ERC20 the same way. WETH goes through release().
     function releaseToken(address token) external {
+        require(token != address(weth), UseRelease());
         uint256 balance = SafeTransferLib.balanceOf(token, address(this));
         if (balance == 0) return;
         uint256 toPrimary = (balance * primaryBps) / BPS;
