@@ -29,6 +29,7 @@ const poolAbi = parseAbi([
     "function paused() view returns (bool)",
     "function nextEpochId() view returns (uint256)",
     "function weth() view returns (address)",
+    "function cursorToBlock() view returns (uint64)",
 ]);
 const splitterAbi = parseAbi(["function poolBps() view returns (uint16)"]);
 const erc20Abi = parseAbi(["function balanceOf(address) view returns (uint256)"]);
@@ -174,6 +175,29 @@ export const getEpochs = () => ponderFetch<{ epochs: IndexedEpoch[] }>("/revshar
 export const getEpoch = (id: string) => ponderFetch<IndexedEpoch>(`/revshare/epochs/${id}`);
 export const getClaims = (address: string) => ponderFetch<{ claims: IndexedClaim[] }>(`/revshare/claims/${address.toLowerCase()}`);
 export const getRevshareStats = () => ponderFetch<Record<string, unknown>>("/revshare/stats");
+export const getSourcesSince = (fromBlock: bigint) =>
+    ponderFetch<{ fromBlock: string; sources: NonNullable<IndexedEpoch["sources"]> }>(`/revshare/sources?fromBlock=${fromBlock}`);
+
+/**
+ * What the pool holds for the next epoch, by where it came from: Pixel Market fees and royalties released since the
+ * last posted range, the holders' half of royalties still in the splitter, and the rest (unclaimed payouts swept back,
+ * a cancelled epoch's money, rounding dust). Market fees are summed before the bps floor, so they can run a few wei
+ * over what arrived; the rest is clamped at zero for that.
+ */
+export function currentSplit(available: bigint, pending: bigint, since: { fromBlock: string; sources: NonNullable<IndexedEpoch["sources"]> }) {
+    const marketWei = BigInt(since.sources.market.toPoolWei);
+    const releasedWei = BigInt(since.sources.royalties.toPoolWei);
+    const otherWei = available - marketWei - releasedWei - pending;
+    return {
+        fromBlock: since.fromBlock,
+        marketFeesWei: marketWei.toString(),
+        marketFills: since.sources.market.fills,
+        royaltiesReleasedWei: releasedWei.toString(),
+        royaltiesPendingWei: pending.toString(),
+        royaltiesWei: (releasedWei + pending).toString(),
+        otherWei: (otherWei > 0n ? otherWei : 0n).toString(),
+    };
+}
 
 let statusCache: { at: number; value: Record<string, unknown> } | null = null;
 
@@ -197,18 +221,24 @@ async function splitterPending(weth: `0x${string}`) {
 export async function getPoolStatus(): Promise<Record<string, unknown>> {
     if (statusCache && Date.now() - statusCache.at < MARKET_CACHE_TTL_MS) return statusCache.value;
     const address = REVENUE_POOL_ADDRESS!;
-    const [balance, outstanding, claimWindow, paused, nextEpochId, weth, stats, market] = await Promise.all([
+    const [balance, outstanding, claimWindow, paused, nextEpochId, weth, cursor, stats, market] = await Promise.all([
         publicClient.getBalance({ address }),
         publicClient.readContract({ address, abi: poolAbi, functionName: "outstanding" }),
         publicClient.readContract({ address, abi: poolAbi, functionName: "claimWindow" }),
         publicClient.readContract({ address, abi: poolAbi, functionName: "paused" }),
         publicClient.readContract({ address, abi: poolAbi, functionName: "nextEpochId" }),
         publicClient.readContract({ address, abi: poolAbi, functionName: "weth" }),
+        publicClient.readContract({ address, abi: poolAbi, functionName: "cursorToBlock" }),
         getRevshareStats().catch(() => null),
         ponderFetch<{ feesToPoolWei?: string }>("/market/stats").catch(() => null),
     ]);
-    const pending = await splitterPending(weth).catch(() => null);
+    // The next epoch starts right after the pool's cursor (a cancelled epoch moves it back); before the first one, at 0.
+    const [pending, since] = await Promise.all([
+        splitterPending(weth).catch(() => null),
+        getSourcesSince(cursor > 0n ? cursor + 1n : 0n).catch(() => null),
+    ]);
     const unallocated = balance - outstanding;
+    const available = unallocated + (pending?.toPool ?? 0n);
     const royaltiesReleased = BigInt((stats as { royaltiesToPoolWei?: string } | null)?.royaltiesToPoolWei ?? "0");
     const value = {
         poolAddress: address,
@@ -216,7 +246,7 @@ export async function getPoolStatus(): Promise<Record<string, unknown>> {
         balanceWei: balance.toString(),
         outstandingWei: outstanding.toString(),
         unallocatedWei: unallocated.toString(),
-        availableWei: (unallocated + (pending?.toPool ?? 0n)).toString(),
+        availableWei: available.toString(),
         sources: {
             // All time, paid straight into the pool on every market fill.
             marketFeesWei: market?.feesToPoolWei ?? null,
@@ -224,6 +254,9 @@ export async function getPoolStatus(): Promise<Record<string, unknown>> {
             royaltiesReleasedWei: royaltiesReleased.toString(),
             royaltiesPendingWei: pending ? pending.toPool.toString() : null,
         },
+        // What availableWei is made of: the money that came in since the last posted epoch's range. Null when the
+        // indexer is unreachable (or predates /revshare/sources).
+        current: since ? currentSplit(available, pending?.toPool ?? 0n, since) : null,
         splitter: pending
             ? { ethWei: pending.eth.toString(), wethWei: pending.wrapped.toString(), poolBps: pending.poolBps }
             : null,
