@@ -100,6 +100,24 @@ app.get("/revshare/epochs/:id", async (c) => {
   return c.json({ ...serializeBigints(row), sources });
 });
 
+/**
+ * The same flows from `fromBlock` to the indexed head: the money that came in since the last posted range (the
+ * pool's cursorToBlock + 1), i.e. what the next epoch is made of so far. The API server picks fromBlock.
+ */
+app.get("/revshare/sources", async (c) => {
+  const raw = c.req.query("fromBlock") ?? "";
+  if (!/^\d{1,18}$/.test(raw)) return c.json({ error: "Invalid fromBlock" }, 400);
+  const fromBlock = BigInt(raw);
+  const [market] = await db
+    .select({ revenueShareBps: schema.marketStats.revenueShareBps })
+    .from(schema.marketStats)
+    .where(eq(schema.marketStats.id, GLOBAL_ID))
+    .limit(1);
+  const toBlock = 2n ** 63n - 1n;
+  const sources = await epochSources(fromBlock, toBlock, market?.revenueShareBps ?? DEFAULT_REVENUE_SHARE_BPS);
+  return c.json({ fromBlock: fromBlock.toString(), sources });
+});
+
 app.get("/revshare/claims/:address", async (c) => {
   const address = c.req.param("address").toLowerCase();
   if (!isAddress(address)) return c.json({ error: "Invalid address" }, 400);
