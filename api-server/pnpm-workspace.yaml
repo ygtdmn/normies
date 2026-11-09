@@ -13,3 +13,7 @@ supportedArchitectures:
 # without it). pnpm 12 stops an install on any build script that isn't listed here.
 allowBuilds:
   esbuild: false
+# vite comes in through vitest. Keep it on the patched 7.x line (7.3.7 fixes the launch-editor
+# advisory) instead of letting a fresh resolve jump to a brand new 8.x major.
+overrides:
+  vite: ^7.3.7
