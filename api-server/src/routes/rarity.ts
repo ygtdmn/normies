@@ -1,3 +1,4 @@
+import { listingEventStream } from "../lib/listing-stream.js";
 import { Hono } from "hono";
 import { parseTokenId } from "../lib/validation.js";
 import { getRarityLegendaryConfig, putRarityLegendaryConfig } from "../services/ponder-data.js";
@@ -154,26 +155,12 @@ rarity.get("/historical/:blockNumber/recursive-burn-holders", async (c) => {
 });
 
 rarity.get("/listings/stream", (c) => {
-    const encoder = new TextEncoder();
-    const stream = new TransformStream<Uint8Array>();
-    const writer = stream.writable.getWriter();
-
-    void writer.write(encoder.encode(":ok\n\n"));
-    const unsubscribe = subscribeListingEvents((event) => {
-        void writer.write(encoder.encode(`data: ${JSON.stringify(event)}\n\n`)).catch(() => unsubscribe());
-    });
-
-    c.req.raw.signal.addEventListener("abort", () => {
-        unsubscribe();
-        void writer.close().catch(() => undefined);
-    }, { once: true });
-
-    return new Response(stream.readable, {
+    return new Response(listingEventStream(c.req.raw.signal, subscribeListingEvents), {
         status: 200,
         headers: {
             "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            Connection: "keep-alive",
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
             "Access-Control-Allow-Origin": "*",
         },
     });

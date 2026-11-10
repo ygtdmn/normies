@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+export const HOST = process.env.HOST || undefined;
 export const PORT = Number(process.env.PORT ?? 3000);
 
 export const RPC_URLS: string[] = [
