@@ -1,0 +1,22 @@
+name: Arena contracts
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  arena:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.5"
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+      - run: bun install --frozen-lockfile
+      - run: forge fmt --check src/arena src/NormiesArena.sol src/NormiesArenaStorage.sol src/NormiesArenaQueue.sol src/NormiesArenaSkins.sol test/NormiesArenaTest.t.sol test/NormiesArenaConfigTest.t.sol test/NormiesArenaLedgerTest.t.sol test/NormiesArenaEdgesTest.t.sol test/NormiesArenaForkTest.t.sol script/DeployArena.s.sol
+      - run: forge test --match-contract 'NormiesArena.*Test' -vv
+        env:
+          FOUNDRY_PROFILE: ci
