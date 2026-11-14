@@ -635,9 +635,7 @@ contract ArenaInvariantTest is ArenaAuditBase {
         assertEq(handler.violation(), "", "a handler check failed");
         // Custody: ledger balance = Normie balances + open pools + (pixels sent directly - swept).
         uint256 surplus = handler.donated() - handler.swept();
-        assertEq(
-            ledger.balanceOf(address(store)), store.totalAllocated() + store.totalPooled() + surplus, "custody"
-        );
+        assertEq(ledger.balanceOf(address(store)), store.totalAllocated() + store.totalPooled() + surplus, "custody");
         assertEq(store.surplus(), surplus, "surplus view");
         // totalAllocated = sum of balances.
         uint256 n = handler.idCount();

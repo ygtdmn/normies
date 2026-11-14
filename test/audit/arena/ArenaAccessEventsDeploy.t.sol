@@ -267,7 +267,9 @@ contract ArenaAccessEventsDeployTest is ArenaAuditBase {
         assertEq(address(s.delegateRegistry()), address(regV2));
         assertEq(address(s.delegateRegistryV1()), address(regV1));
         assertEq(k.treasury(), treasury);
-        assertFalse(s.authorizedWriters(address(a)) || s.authorizedWriters(address(q)) || s.authorizedWriters(address(k)));
+        assertFalse(
+            s.authorizedWriters(address(a)) || s.authorizedWriters(address(q)) || s.authorizedWriters(address(k))
+        );
         // The broadcaster (and this test, and the script) hold no role and no ownership.
         address[3] memory others = [tx.origin, address(this), address(script)];
         for (uint256 i; i < 3; ++i) {

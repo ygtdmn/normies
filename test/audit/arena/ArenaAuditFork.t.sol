@@ -269,9 +269,8 @@ contract ArenaAuditForkTest is Test {
         uint256 id = _takeNormie(holder);
         // A stranger cannot register an agent for someone else's Normie.
         vm.prank(address(0xBEEF));
-        (bool strangerOk,) = ADAPTER.call(
-            abi.encodeCall(IForkAdapter.register, (0, COLLECTION, id, "https://example.invalid/audit"))
-        );
+        (bool strangerOk,) =
+            ADAPTER.call(abi.encodeCall(IForkAdapter.register, (0, COLLECTION, id, "https://example.invalid/audit")));
         emit log_named_string("stranger can register an agent for the Normie", strangerOk ? "YES" : "no");
         // The holder registers one agent, then tries a second for the same Normie.
         vm.prank(holder);
@@ -303,7 +302,8 @@ contract ArenaAuditForkTest is Test {
         IForkNormies(COLLECTION).transferFrom(holder, _fresh(4), id);
         (, address c3, uint256 t3) = IForkAdapter(ADAPTER).bindingOf(a1);
         emit log_named_string(
-            "after a sale the first agent's binding still points at the Normie", (c3 == COLLECTION && t3 == id) ? "YES" : "no"
+            "after a sale the first agent's binding still points at the Normie",
+            (c3 == COLLECTION && t3 == id) ? "YES" : "no"
         );
         // A stranger cannot link an agent that is bound to another Normie.
         uint256 other = _takeNormie(_fresh(5));

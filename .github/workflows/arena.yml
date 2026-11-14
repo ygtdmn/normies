@@ -2,6 +2,19 @@ name: Arena contracts
 on:
   pull_request:
     branches: [main]
+    paths:
+      - ".github/workflows/arena.yml"
+      - "foundry.toml"
+      - "remappings.txt"
+      - "package.json"
+      - "bun.lockb"
+      - "src/arena/**"
+      - "src/NormiesArena*.sol"
+      - "src/NormiesCanvasStorageV2.sol"
+      - "script/DeployArena.s.sol"
+      - "script/ArenaLocal.s.sol"
+      - "test/arena/**"
+      - "test/audit/arena/**"
 permissions:
   contents: read
 jobs:
@@ -16,7 +29,14 @@ jobs:
         with:
           version: v1.5.1
       - run: bun install --frozen-lockfile
-      - run: forge fmt --check src/arena src/NormiesArena.sol src/NormiesArenaStorage.sol src/NormiesArenaQueue.sol src/NormiesArenaSkins.sol test/NormiesArenaTest.t.sol test/NormiesArenaConfigTest.t.sol test/NormiesArenaLedgerTest.t.sol test/NormiesArenaEdgesTest.t.sol test/NormiesArenaForkTest.t.sol script/DeployArena.s.sol
-      - run: forge test --match-contract 'NormiesArena.*Test' -vv
+      - run: >-
+          forge fmt --check src/arena src/NormiesArena.sol src/NormiesArenaStorage.sol src/NormiesArenaQueue.sol
+          src/NormiesArenaSkins.sol script/DeployArena.s.sol script/ArenaLocal.s.sol test/arena test/audit/arena
+      - run: forge build
+      # Fork tests skip without an RPC URL.
+      - run: forge test --match-path 'test/arena/*' -vv
+        env:
+          FOUNDRY_PROFILE: ci
+      - run: forge test --match-path 'test/audit/arena/*' -vv
         env:
           FOUNDRY_PROFILE: ci

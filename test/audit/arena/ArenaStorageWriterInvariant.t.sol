@@ -79,19 +79,55 @@ contract RawWriterHandler is Test {
     function flags(uint256 round, uint256 what) external {
         uint256 r = _r(round);
         what %= 5;
-        if (what == 0) try store.setStarted(r) { ++ok; } catch { }
-        if (what == 1) try store.setClosed(r) { ++ok; } catch { }
-        if (what == 2) try store.setFinished(r) { ++ok; } catch { }
-        if (what == 3) try store.setSettled(r) { ++ok; } catch { }
-        if (what == 4) try store.setCancelled(r, r + 1) { ++ok; } catch { }
+        if (what == 0) {
+            try store.setStarted(r) {
+                ++ok;
+            } catch { }
+        }
+        if (what == 1) {
+            try store.setClosed(r) {
+                ++ok;
+            } catch { }
+        }
+        if (what == 2) {
+            try store.setFinished(r) {
+                ++ok;
+            } catch { }
+        }
+        if (what == 3) {
+            try store.setSettled(r) {
+                ++ok;
+            } catch { }
+        }
+        if (what == 4) {
+            try store.setCancelled(r, r + 1) {
+                ++ok;
+            } catch { }
+        }
     }
 
     function line(uint256 id, uint256 what, bool flag) external {
         what %= 4;
-        if (what == 0) try store.pushTicket(id % IDS) { ++ok; } catch { }
-        if (what == 1) try store.popTicket(_r(id)) { ++ok; } catch { }
-        if (what == 2) try store.deactivate(id % IDS, flag) { ++ok; } catch { }
-        if (what == 3) try store.addPlayer(_r(id / 7), id % IDS) { ++ok; } catch { }
+        if (what == 0) {
+            try store.pushTicket(id % IDS) {
+                ++ok;
+            } catch { }
+        }
+        if (what == 1) {
+            try store.popTicket(_r(id)) {
+                ++ok;
+            } catch { }
+        }
+        if (what == 2) {
+            try store.deactivate(id % IDS, flag) {
+                ++ok;
+            } catch { }
+        }
+        if (what == 3) {
+            try store.addPlayer(_r(id / 7), id % IDS) {
+                ++ok;
+            } catch { }
+        }
     }
 
     function holderWithdraws(uint256 id, uint256 amount) external {

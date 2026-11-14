@@ -132,7 +132,9 @@ contract ArenaGasTest is ArenaAuditBase {
         _line80(2);
         vm.prank(operator);
         arena.startRound(1);
-        _measure("admit(80): all seated in a paid round", operator, address(arena), abi.encodeCall(arena.admit, (1, 80)));
+        _measure(
+            "admit(80): all seated in a paid round", operator, address(arena), abi.encodeCall(arena.admit, (1, 80))
+        );
         vm.prank(operator);
         arena.admit(1, 80);
         assertEq(store.playerCount(1), 80);
