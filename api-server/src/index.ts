@@ -21,6 +21,7 @@ import { rarity } from "./routes/rarity.js";
 import { pixels } from "./routes/pixels.js";
 import { market } from "./routes/market.js";
 import { revshare } from "./routes/revshare.js";
+import { arena } from "./routes/arena.js";
 
 import { closeListingStreams } from "./lib/listing-stream.js";
 
@@ -60,6 +61,7 @@ app.use("/canvas/*", cacheHeaders);
 app.use("/pixels/*", cacheHeaders);
 app.use("/market/*", cacheHeaders);
 app.use("/revshare/*", cacheHeaders);
+app.use("/arena/*", cacheHeaders);
 app.use("/history/*", cacheHeaders);
 app.use("/holders/*", cacheHeaders);
 app.use("/delegations/*", cacheHeaders);
@@ -83,6 +85,7 @@ app.route("/rarity", rarity);
 app.route("/pixels", pixels);
 app.route("/market", market);
 app.route("/revshare", revshare);
+app.route("/arena", arena);
 
 const server = serve({ fetch: app.fetch, hostname: HOST, port: PORT }, ({ address, port }) => {
     console.log("Normies API listening on", address, port);

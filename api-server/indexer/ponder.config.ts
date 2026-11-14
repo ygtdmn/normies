@@ -1,5 +1,5 @@
 import { createConfig } from "ponder";
-import { http, parseAbiItem } from "viem";
+import { http, parseAbi, parseAbiItem } from "viem";
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
@@ -135,6 +135,46 @@ const RoyaltiesReleasedEvent = parseAbiItem(
   "event Released(uint256 toPool, uint256 toTeam)",
 );
 
+// ──────────────────────────────────────────────
+//  Normies Arena: NormiesArenaStorage holds the state and emits every Arena event. The logic contracts
+//  (rounds, queue, skins) are replaceable writers and are not indexed.
+// ──────────────────────────────────────────────
+
+const ArenaStorageEvents = parseAbi([
+  "event Deposited(uint256 indexed id, address indexed from, uint256 amount)",
+  "event Withdrawn(uint256 indexed id, address indexed to, uint256 amount)",
+  "event Rescued(uint256 indexed id, address indexed to, uint256 amount)",
+  "event Charged(uint256 indexed round, uint256 indexed id, uint256 amount)",
+  "event Credited(uint256 indexed round, uint256 indexed id, uint256 amount)",
+  "event Sponsored(uint256 indexed round, address indexed from, uint256 amount)",
+  "event SponsorshipMoved(uint256 indexed from, uint256 indexed to, uint256 amount)",
+  "event SponsorshipReleased(uint256 indexed round, address indexed to, uint256 amount)",
+  "event Enrolled(uint256 indexed id, uint64 ticket)",
+  "event EnrollmentPaused(uint256 indexed id, bool needsFunds)",
+  "event AgentLinked(uint256 indexed id, uint256 indexed agentId)",
+  "event RulesFixed(uint256 indexed round, uint256 capacity, uint256 price, uint256 winnerBps, bool free)",
+  "event RoundStarted(uint256 indexed round, uint64 ticketCutoff, uint256 at)",
+  "event Admitted(uint256 indexed round, uint256 indexed id)",
+  "event AdmissionsClosed(uint256 indexed round, uint256 participants)",
+  "event RoundFinished(uint256 indexed round, uint256 players, uint256 at)",
+  "event ResultsPosted(uint256 indexed round, bytes32 indexed resultHash)",
+  "event Settled(uint256 indexed round, bytes32 indexed resultHash, uint256 pool)",
+  "event Cancelled(uint256 indexed round, uint256 refunded, uint256 carriedTo)",
+  "event SkinPurchased(uint256 indexed purchaseId, uint256 indexed id, address indexed buyer, uint256 price)",
+]);
+
+// OPTIONAL: with no address the contract is left out and src/arena.ts registers no
+// handlers, so the indexer runs as before and the Arena tables stay empty.
+const arenaStorageAddress = process.env.PONDER_ARENA_STORAGE_ADDRESS as `0x${string}` | undefined;
+const arenaContracts = {
+  NormiesArenaStorage: {
+    abi: ArenaStorageEvents,
+    chain: chainName,
+    address: arenaStorageAddress,
+    startBlock: Number(process.env.PONDER_ARENA_START_BLOCK ?? startBlock),
+  },
+};
+
 const pixelMarketStartBlock = Number(
   process.env.PONDER_PIXEL_MARKET_START_BLOCK ?? startBlock,
 );
@@ -260,5 +300,7 @@ export default createConfig({
       address: requiredEnv("PONDER_ROYALTY_SPLITTER_ADDRESS") as `0x${string}`,
       startBlock: pixelMarketStartBlock,
     },
+    // The cast keeps the handler types when the contract is left out.
+    ...(arenaStorageAddress ? arenaContracts : ({} as typeof arenaContracts)),
   },
 });

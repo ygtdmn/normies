@@ -41,6 +41,11 @@ export const REVSHARE_ENABLED = !!(PIXEL_MARKET_ENABLED && REVENUE_POOL_ADDRESS)
 export const REVSHARE_DIR = process.env.REVSHARE_DIR ?? "data/revshare";
 /** First block to scan for ledger BalanceMoved logs (the ledger's deploy block). */
 export const REVSHARE_LEDGER_START_BLOCK = BigInt(process.env.REVSHARE_LEDGER_START_BLOCK ?? process.env.PIXEL_MARKET_START_BLOCK ?? 0);
+
+// Normies Arena (unset = /arena routes off). The storage contract holds the Arena's state and emits every event;
+// the indexer reads it under PONDER_ARENA_STORAGE_ADDRESS.
+export const ARENA_STORAGE_ADDRESS = process.env.ARENA_STORAGE_ADDRESS as `0x${string}` | undefined;
+export const ARENA_ENABLED = !!ARENA_STORAGE_ADDRESS;
 export const MARKET_CACHE_TTL_MS = Number(process.env.MARKET_CACHE_TTL_MS ?? 10_000); // 10 seconds
 
 // Cache settings

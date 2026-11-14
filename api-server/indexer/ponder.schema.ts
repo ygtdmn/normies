@@ -516,3 +516,191 @@ export const agentBinding = onchainTable(
     registeredByIdx: index().on(table.registeredBy),
   }),
 );
+
+// ──────────────────────────────────────────────
+//  Normies Arena (NormiesArenaStorage)
+//
+//  The storage contract emits every Arena event and is never replaced, so it is the only Arena contract indexed.
+//  Settings that live in the replaceable logic contracts (capacity, entry price, skin price) are not indexed:
+//  each round's rules arrive with RulesFixed when it starts, and each skin purchase carries its own price.
+// ──────────────────────────────────────────────
+
+/** One row per round that has been sponsored or started. Mirrors NormiesArenaStorage.Round and Rules. */
+export const arenaRound = onchainTable(
+  "arena_round",
+  (t) => ({
+    round: t.integer().primaryKey(),
+    sponsorship: t.bigint().notNull().default(0n),
+    fees: t.bigint().notNull().default(0n),
+    // Pixels of the pool not yet credited, moved or released.
+    unpaid: t.bigint().notNull().default(0n),
+    resultHash: t.hex(),
+    started: t.boolean().notNull().default(false),
+    closed: t.boolean().notNull().default(false),
+    finished: t.boolean().notNull().default(false),
+    settled: t.boolean().notNull().default(false),
+    cancelled: t.boolean().notNull().default(false),
+    ticketCutoff: t.bigint(),
+    // Rules, null until the round starts.
+    capacity: t.integer(),
+    price: t.bigint(),
+    winnerBps: t.integer(),
+    free: t.boolean(),
+    players: t.integer().notNull().default(0),
+    winners: t.integer().notNull().default(0),
+    // Pixels credited to winners (settled) or back to players (cancelled).
+    paid: t.bigint().notNull().default(0n),
+    refunded: t.bigint().notNull().default(0n),
+    // Sponsorship that left this round for a later one, and where it went when the round was cancelled.
+    movedOut: t.bigint().notNull().default(0n),
+    carriedTo: t.integer(),
+    // Credited events seen since the last Settled or Cancelled: [{ id, amount }] in log order. The event does not
+    // say whether a credit is a prize or a refund; the round's ending decides, and winner rank is the log order.
+    pendingCredits: t.json().$type<Array<{ id: number; amount: string }>>(),
+    startedAt: t.bigint(),
+    startedBlock: t.bigint(),
+    startedTxHash: t.hex(),
+    finishedAt: t.bigint(),
+    finishedTxHash: t.hex(),
+    // Settled or cancelled.
+    endedAt: t.bigint(),
+    endedTxHash: t.hex(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+  }),
+  (table) => ({
+    startedIdx: index().on(table.started),
+  }),
+);
+
+/** A Normie admitted to a round. */
+export const arenaRoundPlayer = onchainTable(
+  "arena_round_player",
+  (t) => ({
+    // <round>-<tokenId>
+    id: t.text().primaryKey(),
+    round: t.integer().notNull(),
+    tokenId: t.bigint().notNull(),
+    // Admission order, from 1.
+    seat: t.integer().notNull().default(0),
+    charged: t.bigint().notNull().default(0n),
+    // Winner rank from 1 (order in the settle call, best first). Null for everyone else.
+    rank: t.integer(),
+    prize: t.bigint(),
+    refund: t.bigint(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+    txHash: t.hex().notNull(),
+  }),
+  (table) => ({
+    roundSeatIdx: index().on(table.round, table.seat),
+    roundRankIdx: index().on(table.round, table.rank),
+    tokenIdx: index().on(table.tokenId, table.round),
+  }),
+);
+
+/** A Normie's Arena state: balance, place in the line, agent link and lifetime totals. */
+export const arenaNormie = onchainTable(
+  "arena_normie",
+  (t) => ({
+    tokenId: t.bigint().primaryKey(),
+    balance: t.bigint().notNull().default(0n),
+    // Current ticket; 0 before the first one. Only counts while `active`.
+    ticket: t.bigint().notNull().default(0n),
+    active: t.boolean().notNull().default(false),
+    needsFunds: t.boolean().notNull().default(false),
+    agentId: t.bigint(),
+    skins: t.integer().notNull().default(0),
+    roundsPlayed: t.integer().notNull().default(0),
+    wins: t.integer().notNull().default(0),
+    pixelsWon: t.bigint().notNull().default(0n),
+    pixelsRefunded: t.bigint().notNull().default(0n),
+    pixelsCharged: t.bigint().notNull().default(0n),
+    deposited: t.bigint().notNull().default(0n),
+    withdrawn: t.bigint().notNull().default(0n),
+    lastRound: t.integer(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+  }),
+  (table) => ({
+    lineIdx: index().on(table.active, table.ticket),
+    pixelsWonIdx: index().on(table.pixelsWon),
+    winsIdx: index().on(table.wins),
+    roundsIdx: index().on(table.roundsPlayed),
+  }),
+);
+
+export const arenaSkinPurchase = onchainTable(
+  "arena_skin_purchase",
+  (t) => ({
+    purchaseId: t.bigint().primaryKey(),
+    tokenId: t.bigint().notNull(),
+    buyer: t.hex().notNull(),
+    price: t.bigint().notNull(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+    txHash: t.hex().notNull(),
+    logIndex: t.integer().notNull(),
+  }),
+  (table) => ({
+    tokenIdx: index().on(table.tokenId),
+    buyerIdx: index().on(table.buyer),
+  }),
+);
+
+/**
+ * Arena activity log. kind: "deposit" | "withdraw" | "rescue" | "entry" | "credit" | "sponsor" |
+ * "sponsorship-moved" | "sponsorship-released" | "enrolled" | "left" | "agent-linked" | "skin".
+ */
+export const arenaEvent = onchainTable(
+  "arena_event",
+  (t) => ({
+    id: t.text().primaryKey(),
+    kind: t.text().notNull(),
+    round: t.integer(),
+    tokenId: t.bigint(),
+    // The wallet in the event: depositor, payee, sponsor, skin buyer.
+    account: t.hex(),
+    amount: t.bigint(),
+    // Kind-specific number: the ticket (enrolled), target round (sponsorship-moved), agent id (agent-linked) or
+    // purchase id (skin).
+    ref: t.bigint(),
+    // left: whether the Normie left only for lack of funds.
+    needsFunds: t.boolean(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.bigint().notNull(),
+    txHash: t.hex().notNull(),
+    logIndex: t.integer().notNull(),
+  }),
+  (table) => ({
+    tokenIdx: index().on(table.tokenId, table.blockNumber),
+    roundIdx: index().on(table.round),
+    kindIdx: index().on(table.kind),
+    accountIdx: index().on(table.account),
+    blockIdx: index().on(table.blockNumber),
+  }),
+);
+
+export const arenaStats = onchainTable("arena_stats", (t) => ({
+  id: t.text().primaryKey(),
+  currentRound: t.integer().notNull().default(0),
+  // Newest ticket issued (the storage's `tail`).
+  newestTicket: t.bigint().notNull().default(0n),
+  // Normies waiting in the line.
+  inLine: t.integer().notNull().default(0),
+  // Sum of Normie balances and of unpaid pools (the storage's totalAllocated and totalPooled).
+  totalAllocated: t.bigint().notNull().default(0n),
+  totalPooled: t.bigint().notNull().default(0n),
+  roundsStarted: t.integer().notNull().default(0),
+  roundsSettled: t.integer().notNull().default(0),
+  roundsCancelled: t.integer().notNull().default(0),
+  admissions: t.integer().notNull().default(0),
+  pixelsPaid: t.bigint().notNull().default(0n),
+  pixelsSponsored: t.bigint().notNull().default(0n),
+  pixelsDeposited: t.bigint().notNull().default(0n),
+  pixelsWithdrawn: t.bigint().notNull().default(0n),
+  skinPurchases: t.integer().notNull().default(0),
+  skinPixels: t.bigint().notNull().default(0n),
+  blockNumber: t.bigint().notNull(),
+  timestamp: t.bigint().notNull(),
+}));

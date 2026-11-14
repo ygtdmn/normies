@@ -6,12 +6,15 @@ import { eq, desc, count, asc, and, gt, lt, lte, inArray } from "ponder";
 import pg from "pg";
 import pixelMarketApi from "./pixel-market.js";
 import revshareApi from "./revshare.js";
+import arenaApi from "./arena.js";
 
 const app = new Hono();
 // Pixel Market routes (/pixels/*, /market/*, /canvas/sinks, /burns/pending/legacy)
 app.route("/", pixelMarketApi);
 // Revenue share routes (/revshare/*)
 app.route("/", revshareApi);
+// Normies Arena routes (/arena/*)
+app.route("/", arenaApi);
 // Burn commitment ids restart at 0 on the V2 canvas; `?version=` picks the
 // generation and defaults to the newest one configured.
 const DEFAULT_BURN_VERSION = process.env.PONDER_CANVAS_V2_ADDRESS ? 2 : 1;
