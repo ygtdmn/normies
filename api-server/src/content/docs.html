@@ -411,22 +411,27 @@
         <h3>Arena</h3>
 
         <div class="note">
-            Normies pay #PIXEL from their Arena balance to play numbered rounds, and each round's pool goes to its
-            winners. Read from NormiesArenaStorage events; amounts are #PIXEL strings. Balances, tickets and results
-            belong to the Normie, not to a wallet. Scores inside a round and the skin catalogue are kept by the Arena
-            app, not on chain. 404 until the Arena is configured.
+            A Normie is registered once, keeps an Arena balance of #PIXEL and plays numbered rounds. A paid round charges
+            its price to every active registered Normie whose balance covers it at the start; the others sit out
+            (state <code>short</code>). A short Normie stays out of paid rounds until a top-up or a credit, even if
+            its leftover would cover a lower price. A free round is played by every registered Normie. Each round's
+            pool first refunds the price to paid players that never took a seat, then goes to its winners; whatever
+            is left rolls into the next round. Read from NormiesArenaStorage (v3)
+            events; amounts are #PIXEL strings. Balances and results belong to the Normie, not to a wallet. Scores
+            inside a round and the skin catalogue are kept by the Arena app, not on chain. Rows with source
+            <code>v2</code> are history from the retired v2 storage. 404 until the Arena is configured.
         </div>
 
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/arena/status</span><span class="response-type">application/json</span>
-            <p class="desc">Current round, upcoming and unsettled rounds, the line, and all-time totals.</p>
+            <p class="desc">Current and open round, upcoming rounds, registered, active, short and cleared Normie counts, and all-time totals.</p>
             <p class="meta">Cache: <code>public, max-age=10, s-maxage=10</code></p>
         </div>
 
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/arena/rounds</span><span class="response-type">application/json</span>
-            <p class="desc">Rounds, newest first: status, pool, rules, players, winners, results hash and times.</p>
-            <p class="meta">Query: <code>status</code> (all, upcoming, open, finished, settled, cancelled), <code>sort</code> (asc, desc), <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+            <p class="desc">Rounds, newest first: status, pool, price, players, prizes, refunds, rolled pool and times.</p>
+            <p class="meta">Query: <code>status</code> (all, upcoming, open, ended, cancelled), <code>sort</code> (asc, desc), <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
         </div>
 
         <div class="endpoint">
@@ -437,31 +442,37 @@
 
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/arena/rounds/:round/players</span><span class="response-type">application/json</span>
-            <p class="desc">Normies admitted to the round in admission order, with seat, entry charged, rank, prize and refund.</p>
-            <p class="meta">Query: <code>limit</code> 1-300, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+            <p class="desc">Normies that played the round, by token id, with the entry charged, prize and refund.</p>
+            <p class="meta">Query: <code>limit</code> 1-1000, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
         </div>
 
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/arena/rounds/:round/winners</span><span class="response-type">application/json</span>
-            <p class="desc">Winners of a settled round, rank 1 first, with each prize.</p>
-            <p class="meta">Query: <code>limit</code> 1-300, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+            <p class="desc">Normies credited a prize, in payout order, with each prize.</p>
+            <p class="meta">Query: <code>limit</code> 1-1000, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span><span class="path">/arena/queue</span><span class="response-type">application/json</span>
-            <p class="desc">Normies waiting in the line, oldest ticket first, with position, balance, owner and whether the open round can admit them.</p>
-            <p class="meta">Query: <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+            <span class="method">GET</span><span class="path">/arena/rounds/:round/refunds</span><span class="response-type">application/json</span>
+            <p class="desc">Normies credited the round's price back.</p>
+            <p class="meta">Query: <code>limit</code> 1-1000, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+        </div>
+
+        <div class="endpoint">
+            <span class="method">GET</span><span class="path">/arena/registered</span><span class="response-type">application/json</span>
+            <p class="desc">Registered Normies by token id, with state (active or short), balance, agent and owner.</p>
+            <p class="meta">Query: <code>state</code> (all, active, short), <code>limit</code> 1-1000, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
         </div>
 
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/arena/normie/:id</span><span class="response-type">application/json</span>
-            <p class="desc">A Normie's Arena state: balance, place in the line, agent, skins, rounds played, wins and pixels won.</p>
+            <p class="desc">A Normie's Arena state: state, balance, whether it plays the current round, agent, skins, rounds played, wins and pixels won.</p>
             <p class="meta">Cache: <code>public, max-age=10, s-maxage=10</code></p>
         </div>
 
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/arena/normie/:id/rounds</span><span class="response-type">application/json</span>
-            <p class="desc">Rounds the Normie played, newest first.</p>
+            <p class="desc">Rounds the Normie played or was credited from, newest first.</p>
             <p class="meta">Query: <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
         </div>
 
@@ -479,13 +490,13 @@
 
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/arena/activity</span><span class="response-type">application/json</span>
-            <p class="desc">Arena events, newest first: deposits, withdrawals, entries, credits, sponsorship, line changes, skins.</p>
-            <p class="meta">Query: <code>kind</code>, <code>round</code>, <code>tokenId</code>, <code>address</code>, <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
+            <p class="desc">Arena events, newest first: deposits, withdrawals, prizes, refunds, sponsorship, registrations, rounds, skins and the v2 to v3 migration.</p>
+            <p class="meta">Query: <code>kind</code>, <code>source</code> (v2, v3), <code>round</code>, <code>tokenId</code>, <code>address</code>, <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
         </div>
 
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/arena/skins</span><span class="response-type">application/json</span>
-            <p class="desc">Skin purchases, newest first, with all-time totals.</p>
+            <p class="desc">Skin purchases, newest first, v2 history included, with all-time totals.</p>
             <p class="meta">Query: <code>buyer</code>, <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
         </div>
 
@@ -496,8 +507,8 @@
         </div>
 
         <div class="endpoint">
-            <span class="method">GET</span><span class="path">/arena/leaderboard</span><span class="response-type">application/json</span>
-            <p class="desc">Normies by their round results on chain: pixels won, wins or rounds played.</p>
+            <span class="method">GET</span><span class="path">/arena/records</span><span class="response-type">application/json</span>
+            <p class="desc">Normies by what the chain records of their rounds: pixels won, wins or rounds played.</p>
             <p class="meta">Query: <code>sort</code> (pixels, wins, rounds), <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=10, s-maxage=10</code></p>
         </div>
 
@@ -1005,10 +1016,11 @@ pixel     = (data[byteIndex] >> bitPos) & 1</code></pre>
             <tr><td>NormiesRendererV6</td><td><code>0xd6747533697878a6a3a29B5cCf815740BA23998D</code></td><td>Grid-size aware renderer with Canvas Size and Blank Canvas traits</td></tr>
             <tr><td>NormiesRevenuePool</td><td><code>0x481384812e79bf0d11FC0b1704af445D5F06813c</code></td><td>Holds the holders' half of market fees and royalties and pays it out in epochs with Merkle proofs</td></tr>
             <tr><td>NormiesRoyaltySplitter</td><td><code>0xA68A225f62772E6158f2B5f8afC184AdB69c3282</code></td><td>Royalty receiver: splits royalties between the revenue pool and the team</td></tr>
-            <tr><td>NormiesArenaStorage</td><td><code>0x980D97E7B77Cd204707daedA6C9E51FbcAE84E1e</code></td><td>Holds every Arena pixel and all Arena state: per-Normie balances, the line, agent links, rounds and skin purchases</td></tr>
-            <tr><td>NormiesArena</td><td><code>0x6A80F157BFC981098132c344Ee4879f8E8CF1d22</code></td><td>Rounds: start, admit from the line, finish, results, settle and cancel</td></tr>
-            <tr><td>NormiesArenaQueue</td><td><code>0xEAB672382b3d717F84352C0A63ae264C6A31b903</code></td><td>Top-ups, joining and leaving the line, agent links and sponsorship</td></tr>
-            <tr><td>NormiesArenaSkins</td><td><code>0xaF3060dBdb4E789163Babf4AFc3CE1ddAD82a0cB</code></td><td>Skin purchases, paid in #PIXEL</td></tr>
+            <tr><td>NormiesArenaStorage</td><td>Added at the v3 launch</td><td>Holds every Arena pixel and all Arena state: per-Normie balances and states, agent links, rounds, pools and skin purchases</td></tr>
+            <tr><td>NormiesArena</td><td>Added at the v3 launch</td><td>Rounds: start, pay out, end and cancel</td></tr>
+            <tr><td>NormiesArenaQueue</td><td>Added at the v3 launch</td><td>Registering, top-ups, agent links and sponsorship</td></tr>
+            <tr><td>NormiesArenaSkins</td><td>Added at the v3 launch</td><td>Skin purchases, paid in #PIXEL</td></tr>
+            <tr><td>NormiesArenaStorage (v2, retired)</td><td><code>0x980D97E7B77Cd204707daedA6C9E51FbcAE84E1e</code></td><td>The first Arena storage, a ticket line; everything in it moved to v3. History only</td></tr>
         </table>
 
         <div class="footer">

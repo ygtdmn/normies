@@ -40,19 +40,20 @@ const ponder: Record<string, unknown> = {
         gridSize: 60, baseCleared: false, migrated: true, lockedPixels: 10, blockNumber: "90", timestamp: "1", txHash: "0x01",
     },
     "/canvas/sinks": { events: [], hasMore: false },
-    "/arena/status": { indexed: true, currentRound: 3, round: { round: 3, status: "open" }, line: { waiting: 12, newestTicket: "40" } },
+    "/arena/status": { indexed: true, currentRound: 3, round: { round: 3, status: "open" }, normies: { registered: 12, active: 10, short: 2, cleared: 0 } },
     "/arena/rounds": { rounds: [{ round: 3, status: "open", pool: "250", players: 20 }], hasMore: false },
     "/arena/rounds/3": { round: 3, status: "open", pool: "250", players: 20 },
-    "/arena/rounds/3/players": { round: 3, status: "open", total: 1, players: [{ tokenId: "7", seat: 1 }], hasMore: false },
-    "/arena/rounds/2/winners": { round: 2, status: "settled", total: 1, winners: [{ tokenId: "9", rank: 1, prize: "100" }], hasMore: false },
-    "/arena/queue": { total: 12, queue: [{ position: 1, tokenId: "7", ticket: "29" }], hasMore: false },
-    "/arena/normie/7": { tokenId: "7", balance: "5", inLine: true, position: 1 },
+    "/arena/rounds/3/players": { round: 3, status: "open", total: 1, players: [{ tokenId: "7", played: true, charged: "1" }], hasMore: false },
+    "/arena/rounds/2/winners": { round: 2, status: "ended", total: 1, winners: [{ tokenId: "9", payoutOrder: 1, prize: "100" }], hasMore: false },
+    "/arena/rounds/2/refunds": { round: 2, status: "ended", price: "1", total: 1, refundees: [{ tokenId: "7", refund: "1" }], hasMore: false },
+    "/arena/registered": { state: "all", total: 12, normies: [{ tokenId: "7", state: "active", balance: "5" }], hasMore: false },
+    "/arena/normie/7": { tokenId: "7", balance: "5", state: "active", registered: true, inCurrentRound: true },
     "/arena/normie/7/rounds": { tokenId: "7", rounds: [], hasMore: false },
-    [`/arena/holder/${HOLDER}`]: { address: HOLDER, balance: "5", normies: [{ tokenId: "7" }] },
+    [`/arena/holder/${HOLDER}`]: { address: HOLDER, balance: "5", registered: 1, active: 1, short: 0, normies: [{ tokenId: "7" }] },
     "/arena/activity": { events: [], hasMore: false },
-    "/arena/skins": { total: 1, pixels: "5", purchases: [{ purchaseId: "1", tokenId: "7", price: "5" }], hasMore: false },
+    "/arena/skins": { total: 1, pixels: "5", purchases: [{ id: "v3-1", source: "v3", purchaseId: "1", tokenId: "7", price: "5" }], hasMore: false },
     "/arena/skins/normie/7": { tokenId: "7", count: 1, purchases: [] },
-    "/arena/leaderboard": { sort: "wins", leaderboard: [{ position: 1, tokenId: "9", wins: 2 }], hasMore: false },
+    "/arena/records": { sort: "wins", normies: [{ tokenId: "9", wins: 2 }], hasMore: false },
 };
 
 const calls: string[] = [];
@@ -135,57 +136,77 @@ describe("/canvas/token/:id/pixels", () => {
 });
 
 describe("/arena", () => {
-    it("proxies status, rounds, the queue and Normie state", async () => {
+    it("proxies status, rounds, registered Normies and Normie state", async () => {
         const app = await buildApp();
-        expect((await (await app.request("/arena/status")).json()).currentRound).toBe(3);
+        expect((await (await app.request("/arena/status")).json()).normies.registered).toBe(12);
         expect((await (await app.request("/arena/rounds/3")).json()).pool).toBe("250");
-        expect((await (await app.request("/arena/rounds/3/players")).json()).players[0].seat).toBe(1);
-        expect((await (await app.request("/arena/rounds/2/winners")).json()).winners[0].rank).toBe(1);
-        expect((await (await app.request("/arena/queue")).json()).queue[0].tokenId).toBe("7");
-        expect((await (await app.request("/arena/normie/7")).json()).position).toBe(1);
+        expect((await (await app.request("/arena/rounds/3/players")).json()).players[0].played).toBe(true);
+        expect((await (await app.request("/arena/rounds/2/winners")).json()).winners[0].payoutOrder).toBe(1);
+        expect((await (await app.request("/arena/rounds/2/refunds")).json()).refundees[0].refund).toBe("1");
+        expect((await (await app.request("/arena/registered")).json()).normies[0].state).toBe("active");
+        expect((await (await app.request("/arena/normie/7")).json()).inCurrentRound).toBe(true);
         expect((await (await app.request("/arena/normie/7/rounds")).json()).rounds).toEqual([]);
-        expect((await (await app.request(`/arena/holder/${HOLDER.toUpperCase().replace("0X", "0x")}`)).json()).balance).toBe("5");
+        expect((await (await app.request(`/arena/holder/${HOLDER.toUpperCase().replace("0X", "0x")}`)).json()).active).toBe(1);
         expect((await (await app.request("/arena/skins/normie/7")).json()).count).toBe(1);
+        expect((await (await app.request("/arena/records?sort=wins")).json()).normies[0].wins).toBe(2);
     });
 
     it("forwards filters and paging to the indexer", async () => {
         const app = await buildApp();
         calls.length = 0;
-        await app.request("/arena/rounds?status=settled&sort=asc&limit=5");
-        expect(calls[0]).toBe("/arena/rounds?limit=5&offset=0&status=settled&sort=asc");
-        await app.request("/arena/leaderboard?sort=wins&offset=10");
-        expect(calls[1]).toBe("/arena/leaderboard?limit=50&offset=10&sort=wins");
-        await app.request(`/arena/activity?kind=deposit&round=3&tokenId=7&address=${HOLDER}`);
-        expect(calls[2]).toBe(`/arena/activity?limit=50&offset=0&kind=deposit&round=3&tokenId=7&address=${HOLDER}`);
+        await app.request("/arena/rounds?status=ended&sort=asc&limit=5");
+        expect(calls[0]).toBe("/arena/rounds?limit=5&offset=0&status=ended&sort=asc");
+        await app.request("/arena/records?sort=wins&offset=10");
+        expect(calls[1]).toBe("/arena/records?limit=50&offset=10&sort=wins");
+        await app.request(`/arena/activity?kind=refund&source=v3&round=3&tokenId=7&address=${HOLDER}`);
+        expect(calls[2]).toBe(`/arena/activity?limit=50&offset=0&kind=refund&source=v3&round=3&tokenId=7&address=${HOLDER}`);
         await app.request("/arena/normie/7/activity?limit=2");
         expect(calls[3]).toBe("/arena/activity?limit=2&offset=0&tokenId=7");
         await app.request(`/arena/skins?buyer=${SELLER}`);
         expect(calls[4]).toBe(`/arena/skins?limit=50&offset=0&buyer=${SELLER}`);
         await app.request("/arena/rounds/3/players");
-        expect(calls[5]).toBe("/arena/rounds/3/players?limit=300&offset=0");
+        expect(calls[5]).toBe("/arena/rounds/3/players?limit=500&offset=0");
+        await app.request("/arena/rounds/3/players?limit=5000&offset=1000");
+        expect(calls[6]).toBe("/arena/rounds/3/players?limit=1000&offset=1000");
+        await app.request("/arena/registered?state=short&limit=20");
+        expect(calls[7]).toBe("/arena/registered?limit=20&offset=0&state=short");
+        await app.request("/arena/rounds/2/refunds");
+        expect(calls[8]).toBe("/arena/rounds/2/refunds?limit=500&offset=0");
     });
 
     it("validates parameters", async () => {
         const app = await buildApp();
         for (const path of [
             "/arena/rounds?status=weird",
+            "/arena/rounds?status=settled",
+            "/arena/rounds?status=finished",
             "/arena/rounds/0",
             "/arena/rounds/abc",
             "/arena/rounds/abc/players",
             "/arena/rounds/-1/winners",
+            "/arena/rounds/x/refunds",
+            "/arena/registered?state=waiting",
             "/arena/normie/10000",
             "/arena/normie/x/rounds",
             "/arena/holder/nope",
             "/arena/activity?kind=weird",
+            "/arena/activity?kind=entry",
+            "/arena/activity?source=v1",
             "/arena/activity?round=0",
             "/arena/activity?tokenId=99999",
             "/arena/activity?address=nope",
             "/arena/skins?buyer=nope",
             "/arena/skins/normie/abc",
-            "/arena/leaderboard?sort=score",
+            "/arena/records?sort=score",
         ]) {
             expect((await app.request(path)).status, path).toBe(400);
         }
+    });
+
+    it("no longer serves the v2 line routes", async () => {
+        const app = await buildApp();
+        expect((await app.request("/arena/queue")).status).toBe(404);
+        expect((await app.request("/arena/leaderboard")).status).toBe(404);
     });
 
     it("answers 404 for a round the indexer has no record of", async () => {
@@ -193,5 +214,6 @@ describe("/arena", () => {
         expect((await app.request("/arena/rounds/99")).status).toBe(404);
         expect((await app.request("/arena/rounds/99/players")).status).toBe(404);
         expect((await app.request("/arena/rounds/99/winners")).status).toBe(404);
+        expect((await app.request("/arena/rounds/99/refunds")).status).toBe(404);
     });
 });

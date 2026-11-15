@@ -263,17 +263,21 @@ Sell-side order book of the NormiesPixelMarket, ETH priced per pixel. Prices and
 
 ## Arena
 
-Normies Arena: Normies pay #PIXEL from their Arena balance to play numbered rounds, and each round's pool goes to its winners. Everything here is read from `NormiesArenaStorage` events. Amounts are #PIXEL as strings. Balances, tickets and results belong to the Normie, not to a wallet. Scores inside a round and the skin catalogue are kept by the Arena app, not on chain. 404 until the Arena is configured.
+Normies Arena: a Normie is registered once, keeps an Arena balance of #PIXEL, and plays numbered rounds. A paid round charges its price to every active registered Normie whose balance covers it when the round starts; the others sit out that round and become `short`. A short Normie stays out of paid rounds until a top-up or a credit, even if its leftover would cover a lower price. A free round is played by every registered Normie and charges nothing. Each round's pool first refunds the price to paid players that never took a seat, and the rest goes to its winners, decided by the Arena app and paid on chain. Everything here is read from `NormiesArenaStorage` events. Amounts are #PIXEL as strings. Balances and results belong to the Normie, not to a wallet. Scores inside a round and the skin catalogue are kept by the Arena app, not on chain. 404 until the Arena is configured.
 
-Round `status`: `upcoming` (sponsored, not started), `open`, `finished` (waiting to be settled), `settled`, `cancelled`.
+Normie `state`: `unregistered` (may hold a credited balance until it registers), `active` (plays every free round and every paid round its balance covers), `short` (sat out a paid round it could not cover and keeps its leftover; plays free rounds always, and paid rounds only after a top-up or a credit makes it active again), `cleared` (burned and taken out of the game). There is no pause: a holder stops paying by withdrawing below the price. A Normie registered while a round is open plays from the next round.
+
+Round `status`: `upcoming` (sponsored, not started), `open`, `ended`, `cancelled`. A round's players are fixed when it starts. Payouts credit refunds (the round's price back) first, then prizes. When a round ends or is cancelled, whatever is left of its pool rolls into the next round. A cancel refunds nobody.
+
+The Arena moved from its first storage (v2, a ticket line) to v3 on cutover day. Every v2 balance, pool, agent link and skin purchase count moved to v3; those moves show as `migrated` activity. Rows with `source: "v2"` are history from the retired storage.
 
 - `GET /arena/status`
-  - `currentRound`, its `round` record, `upcoming` rounds, `unsettledRounds`, the `line` (`waiting`, `newestTicket`) and all-time `totals` (balances, pools, rounds, admissions, pixels paid, sponsored, deposited and withdrawn, skin purchases).
+  - `currentRound`, `currentFree`, `cumulative` (the sum of every started round's price), `openRound` (the current round while open, else null), the current `round` record, `upcoming` rounds, `normies` (`registered`, `active`, `short`, `cleared`) and all-time `totals` (balances, pools, rounds started, ended and cancelled, `playerEntries`, pixels charged, `prizes`, `refunds`, pixels sponsored, deposited, withdrawn and rescued, balances and pools migrated from v2, skin purchases). `storage` is the v3 storage, `legacyStorage` the retired v2 one.
   - Cache: `public, max-age=10, s-maxage=10`
 
 - `GET /arena/rounds`
-  - Rounds, newest first. Each has `status`, `admissionsOpen`, `pool` (`sponsorship` + `fees`), `unpaid`, the rules fixed at its start (`capacity`, `price`, `winnerBps`, `free`), `players`, `winners`, `winnerCount`, `paid`, `refunded`, `resultHash`, `ticketCutoff` and start, finish and end times.
-  - Query: `status=all|upcoming|open|finished|settled|cancelled` (default `all`), `sort=asc|desc`, `limit`, `offset`.
+  - Rounds, newest first. Each has `status`, `pool` (`sponsorship` + `fees`), `unpaid`, `paid` (`prizes` + `refunds`), `winners`, `refundees`, `rolled` (left over and moved to the next round), `rolledIn`, `migrated`, the `price`, `free` and `cumulative` fixed at its start, `players`, and start and end times.
+  - Query: `status=all|upcoming|open|ended|cancelled` (default `all`), `sort=asc|desc`, `limit`, `offset`.
   - Cache: `public, max-age=10, s-maxage=10`
 
 - `GET /arena/rounds/{round}`
@@ -281,26 +285,31 @@ Round `status`: `upcoming` (sponsored, not started), `open`, `finished` (waiting
   - Cache: `public, max-age=10, s-maxage=10`
 
 - `GET /arena/rounds/{round}/players`
-  - Normies admitted to the round in admission order: `tokenId`, `seat`, `charged`, `rank`, `prize`, `refund`, `owner`.
-  - Query: `limit` 1-300 (default 300), `offset`.
+  - Normies that played the round, by token id: `tokenId`, `charged`, `payoutOrder`, `prize`, `refund`, `owner`. A round can hold every registered Normie, so page through it.
+  - Query: `limit` 1-1000 (default 500), `offset`.
   - Cache: `public, max-age=10, s-maxage=10`
 
 - `GET /arena/rounds/{round}/winners`
-  - Winners of a settled round, `rank` 1 first, with each `prize`, plus the round's `resultHash` and `pool`.
-  - Query: `limit` 1-300 (default 300), `offset`.
+  - Normies credited a prize, in payout order (`payoutOrder` 1 first), with each `prize`, plus the round's `pool` and `prizes`.
+  - Query: `limit` 1-1000 (default 500), `offset`.
   - Cache: `public, max-age=10, s-maxage=10`
 
-- `GET /arena/queue`
-  - Normies waiting in the line, oldest ticket first: `position`, `tokenId`, `ticket`, `balance`, `agentId`, `owner`, `burned`. While a round takes admissions, `admittingRound` and `ticketCutoff` are set and `eligible` tells whether the ticket is old enough for it.
-  - Query: `limit`, `offset`.
+- `GET /arena/rounds/{round}/refunds`
+  - Normies credited the round's price back, by token id, plus the round's `price` and `refunds`.
+  - Query: `limit` 1-1000 (default 500), `offset`.
+  - Cache: `public, max-age=10, s-maxage=10`
+
+- `GET /arena/registered`
+  - Registered Normies by token id: `tokenId`, `state`, `balance`, `agentId`, `registeredRound`, `roundsPlayed`, `lastRound`, `owner`, `burned`, plus the `total` for the filter.
+  - Query: `state=all|active|short` (default `all`), `limit` 1-1000 (default 100), `offset`.
   - Cache: `public, max-age=10, s-maxage=10`
 
 - `GET /arena/normie/{id}`
-  - A Normie's Arena state: `balance`, `inLine`, `ticket`, `position`, `needsFunds` (left the line only for lack of funds), `agentId`, `skins`, `roundsPlayed`, `wins`, `pixelsWon`, `pixelsRefunded`, `pixelsCharged`, `deposited`, `withdrawn`, `lastRound`, `owner`, `burned`. All zero for a Normie that never used the Arena.
+  - A Normie's Arena state: `state`, `stateCode` (0-3), `registered`, `balance`, `level` (the storage's internal level), `registeredRound` (the latest round started when it registered, 0 before round 1; it plays from the next one), `inCurrentRound` (plays or played the current round), `agentId`, `skins`, `roundsPlayed`, `lastRound`, `wins`, `pixelsWon`, `pixelsRefunded`, `pixelsCharged`, `deposited`, `withdrawn`, `migrated`, `owner`, `burned`. All zero (null for `registeredRound`, `agentId` and `lastRound`) for a Normie that never used the Arena.
   - Cache: `public, max-age=10, s-maxage=10`
 
 - `GET /arena/normie/{id}/rounds`
-  - Rounds the Normie played, newest first, with its `seat`, `charged`, `rank`, `prize` and `refund`.
+  - Rounds the Normie played or was credited from, newest first, with `played`, `charged`, `payoutOrder`, `prize` and `refund`.
   - Query: `limit`, `offset`.
   - Cache: `public, max-age=10, s-maxage=10`
 
@@ -310,25 +319,25 @@ Round `status`: `upcoming` (sponsored, not started), `open`, `finished` (waiting
   - Cache: `public, max-age=10, s-maxage=10`
 
 - `GET /arena/holder/{address}`
-  - Every Normie the wallet holds that has Arena state, with the wallet's total `balance`, `pixelsWon`, and how many are `inLine` or `needsFunds`. Normies it only has a delegation for are not listed.
+  - Every Normie the wallet holds that has Arena state, with the wallet's total `balance`, `pixelsWon`, and how many are `registered`, `active` or `short`. Normies it only has a delegation for are not listed.
   - Cache: `public, max-age=10, s-maxage=10`
 
 - `GET /arena/activity`
-  - Arena events, newest first. `kind`: `deposit`, `withdraw`, `rescue`, `entry`, `credit` (a prize or a refund), `sponsor`, `sponsorship-moved`, `sponsorship-released`, `enrolled`, `left`, `agent-linked`, `skin`. `ref` is the ticket (`enrolled`), target round (`sponsorship-moved`), agent id (`agent-linked`) or purchase id (`skin`).
-  - Query: `kind`, `round`, `tokenId`, `address`, `limit`, `offset`.
+  - Arena events, newest first. `kind`: `deposit`, `withdraw`, `rescue`, `prize`, `refund`, `sponsor`, `sponsorship-moved`, `sponsorship-released`, `registered`, `cleared`, `agent-linked`, `skin`, `purchases-imported`, `migrated` (a v2 balance or pool moved to v3), `round-started`, `round-ended`, `round-cancelled`. `amount` is the pixels moved, the fees (`round-started`) or the total paid (`round-ended`, `round-cancelled`). `ref` is the target round (`sponsorship-moved`), agent id (`agent-linked`), purchase id (`skin`), count (`purchases-imported`), players (`round-started`) or pixels rolled to the next round (`round-ended`, `round-cancelled`). `source` is `v3`, or `v2` for history.
+  - Query: `kind`, `source=v2|v3`, `round`, `tokenId`, `address`, `limit`, `offset`.
   - Cache: `public, max-age=10, s-maxage=10`
 
 - `GET /arena/skins`
-  - Skin purchases, newest first: `purchaseId`, `tokenId`, `buyer`, `price`, plus all-time `total` and `pixels`.
+  - Skin purchases, newest first, v2 history included: `source`, `purchaseId`, `tokenId`, `buyer`, `price`, plus all-time `total` (counts carried over from v2 plus new purchases) and `pixels`.
   - Query: `buyer`, `limit`, `offset`.
   - Cache: `public, max-age=10, s-maxage=10`
 
 - `GET /arena/skins/normie/{id}`
-  - A Normie's skin purchases and their `count`.
+  - A Normie's skin purchases and their `count` (v2 purchases included).
   - Cache: `public, max-age=10, s-maxage=10`
 
-- `GET /arena/leaderboard`
-  - Normies by their round results on chain: `pixelsWon`, `wins`, `roundsPlayed`, `lastRound`, `agentId`, `owner`.
+- `GET /arena/records`
+  - Normies by what the chain records of their rounds: `pixelsWon`, `wins`, `roundsPlayed`, `lastRound`, `agentId`, `owner`.
   - Query: `sort=pixels|wins|rounds` (default `pixels`), `limit`, `offset`.
   - Cache: `public, max-age=10, s-maxage=10`
 
@@ -674,14 +683,15 @@ Pixel Market stack:
   - Holds the holders' half of market fees and royalties and pays it out in epochs with Merkle proofs.
 - NormiesRoyaltySplitter: `0xA68A225f62772E6158f2B5f8afC184AdB69c3282`
   - Royalty receiver: splits royalties between the revenue pool and the team.
-- NormiesArenaStorage: `0x980D97E7B77Cd204707daedA6C9E51FbcAE84E1e`
-  - Holds every Arena pixel and all Arena state: per-Normie balances, the line, agent links, rounds and skin purchases. Emits every Arena event.
-- NormiesArena: `0x6A80F157BFC981098132c344Ee4879f8E8CF1d22`
-  - Rounds: start, admit from the line, finish, results, settle and cancel.
-- NormiesArenaQueue: `0xEAB672382b3d717F84352C0A63ae264C6A31b903`
-  - Top-ups, joining and leaving the line, agent links and sponsorship.
-- NormiesArenaSkins: `0xaF3060dBdb4E789163Babf4AFc3CE1ddAD82a0cB`
+- NormiesArenaStorage: (address added at the v3 launch)
+  - Holds every Arena pixel and all Arena state: per-Normie balances and states, agent links, rounds, pools and skin purchases. Emits every Arena event.
+- NormiesArena: (address added at the v3 launch)
+  - Rounds: start, pay out, end and cancel.
+- NormiesArenaQueue: (address added at the v3 launch)
+  - Registering, top-ups, agent links and sponsorship. Withdrawals go straight to the storage.
+- NormiesArenaSkins: (address added at the v3 launch)
   - Skin purchases, paid in #PIXEL.
+- Arena v2 (retired, history only): NormiesArenaStorage `0x980D97E7B77Cd204707daedA6C9E51FbcAE84E1e`, NormiesArena `0x6A80F157BFC981098132c344Ee4879f8E8CF1d22`, NormiesArenaQueue `0xEAB672382b3d717F84352C0A63ae264C6A31b903`, NormiesArenaSkins `0xaF3060dBdb4E789163Babf4AFc3CE1ddAD82a0cB`.
 
 ## Status Codes
 
