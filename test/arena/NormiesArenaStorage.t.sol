@@ -3,352 +3,405 @@ pragma solidity 0.8.33;
 
 import { ArenaTestBase } from "./ArenaTestBase.sol";
 import { NormiesArenaStorage } from "../../src/NormiesArenaStorage.sol";
-import { Ownable } from "solady/auth/Ownable.sol";
 
-/// @notice The storage on its own: writer gating, bookkeeping invariants, withdraw, rescue and sweep.
+/// @notice The lazy accounting: who plays, what each Normie pays, and what it keeps.
 contract NormiesArenaStorageTest is ArenaTestBase {
-    function testEveryWriterSetterIsWriterOnly() public {
-        NormiesArenaStorage.Rules memory r;
-        bytes[] memory calls = new bytes[](19);
-        calls[0] = abi.encodeCall(store.addBalance, (1, alice, 1));
-        calls[1] = abi.encodeCall(store.chargeEntry, (1, 1, 1));
-        calls[2] = abi.encodeCall(store.creditFromPool, (1, ids1(1), ids1(1)));
-        calls[3] = abi.encodeCall(store.addSponsorship, (1, alice, 1));
-        calls[4] = abi.encodeCall(store.moveSponsorship, (1, 2, 1));
-        calls[5] = abi.encodeCall(store.releaseSponsorship, (1, alice, 1));
-        calls[6] = abi.encodeCall(store.recordPurchase, (1, alice, 5));
-        calls[7] = abi.encodeCall(store.setRules, (1, r));
-        calls[8] = abi.encodeCall(store.setStarted, (1));
-        calls[9] = abi.encodeCall(store.addPlayer, (1, 1));
-        calls[10] = abi.encodeCall(store.setClosed, (1));
-        calls[11] = abi.encodeCall(store.setFinished, (1));
-        calls[12] = abi.encodeCall(store.setResultHash, (1, bytes32(uint256(1))));
-        calls[13] = abi.encodeCall(store.setSettled, (1));
-        calls[14] = abi.encodeCall(store.setCancelled, (1, 2));
-        calls[15] = abi.encodeCall(store.pushTicket, (1));
-        calls[16] = abi.encodeCall(store.popTicket, (1));
-        calls[17] = abi.encodeCall(store.deactivate, (1, false));
-        calls[18] = abi.encodeCall(store.linkAgent, (1, 1));
-        // The owner is not a writer either.
-        address[2] memory callers = [alice, address(this)];
-        for (uint256 c; c < 2; ++c) {
-            for (uint256 i; i < calls.length; ++i) {
-                vm.prank(callers[c]);
-                (bool ok, bytes memory ret) = address(store).call(calls[i]);
-                assertFalse(ok);
-                assertEq(bytes4(ret), NormiesArenaStorage.NotAuthorized.selector);
-            }
-        }
-        vm.prank(alice);
-        vm.expectRevert(NormiesArenaStorage.NotAuthorized.selector);
-        store.recordPurchase(1, alice, 5);
+    uint8 constant UNREGISTERED = 0;
+    uint8 constant ACTIVE = 1;
+    uint8 constant SHORT = 2;
+    uint8 constant CLEARED = 3;
+
+    function testFreeRoundsAreForEveryRegisteredNormie() public {
+        join(1, alice, 3);
+        join(2, bob, 0);
+        give(3, carol); // never registered
+        next(0);
+        assertEq(store.roundOf(1).players, 2);
+        assertTrue(store.isPlayer(1));
+        assertTrue(store.isPlayer(2));
+        assertFalse(store.isPlayer(3));
+        assertEq(store.balanceOf(1), 3);
+        assertEq(store.roundOf(1).fees, 0);
     }
 
-    function testOwnerFunctionsAreOwnerOnly() public {
-        vm.startPrank(alice);
-        vm.expectRevert(Ownable.Unauthorized.selector);
-        store.setAuthorizedWriter(alice, true);
-        vm.expectRevert(Ownable.Unauthorized.selector);
-        store.setAdapter(alice);
-        vm.expectRevert(Ownable.Unauthorized.selector);
-        store.sweep(alice, 1);
-        vm.expectRevert(Ownable.Unauthorized.selector);
-        store.rescue(1, alice);
-        vm.stopPrank();
-    }
-
-    /// @notice The storage holds no game rules: a writer can set rounds in any order, and the game functions of a
-    ///         logic contract do not exist here.
-    function testStorageHoldsNoGameLogic() public {
-        store.setAuthorizedWriter(address(this), true);
-        store.setStarted(7);
-        assertEq(store.currentRound(), 7);
-        store.setFinished(7);
-        store.setSettled(7);
-        assertTrue(store.roundOf(7).settled);
-        string[8] memory gone = [
-            "startRound(uint256)",
-            "finishRound(uint256)",
-            "admit(uint256,uint256)",
-            "settle(uint256,bytes32,uint256[])",
-            "cancel(uint256)",
-            "settleRound(uint256,uint256[],uint256[])",
-            "cancelRound(uint256)",
-            "admitPlayer(uint256,uint256,address)"
-        ];
-        for (uint256 i; i < gone.length; ++i) {
-            (bool ok,) = address(store).call(abi.encodeWithSignature(gone[i], 1, 1));
-            assertFalse(ok);
-        }
-    }
-
-    function testBackingIsCheckedOnEveryInflow() public {
-        store.setAuthorizedWriter(address(this), true);
-        vm.expectRevert(abi.encodeWithSelector(NormiesArenaStorage.BackingShortfall.selector, 200, 201));
-        store.addBalance(1, alice, 1);
-        vm.expectRevert(abi.encodeWithSelector(NormiesArenaStorage.BackingShortfall.selector, 200, 201));
-        store.addSponsorship(3, alice, 1);
-        ledger.mint(address(store), 2);
-        store.addBalance(1, alice, 1);
-        store.addSponsorship(3, alice, 1);
-        assertBacked();
-    }
-
-    function testPoolBookkeeping() public {
-        store.setAuthorizedWriter(address(this), true);
-        ledger.mint(address(store), 10);
-        store.addBalance(1, alice, 10);
-        // Charging needs a started round and enough balance.
-        vm.expectRevert(NormiesArenaStorage.InvalidState.selector);
-        store.chargeEntry(1, 1, 1);
-        store.setStarted(1);
-        vm.expectRevert(NormiesArenaStorage.InvalidState.selector);
-        store.chargeEntry(1, 1, 11);
-        store.chargeEntry(1, 1, 4);
-        assertEq(store.roundOf(1).unpaid, 104);
-        // Credits cannot exceed the unpaid pool.
-        vm.expectRevert(NormiesArenaStorage.InvalidState.selector);
-        store.creditFromPool(1, ids1(2), ids1(105));
-        store.creditFromPool(1, ids2(2, 3), ids2(50, 50));
-        // Settled needs the whole pool paid.
-        vm.expectRevert(NormiesArenaStorage.InvalidState.selector);
-        store.setSettled(1);
-        store.creditFromPool(1, ids1(2), ids1(4));
-        store.setSettled(1);
-        // A settled round's money is locked.
-        vm.expectRevert(NormiesArenaStorage.InvalidState.selector);
-        store.creditFromPool(1, ids1(2), ids1(0));
-        vm.expectRevert(NormiesArenaStorage.InvalidState.selector);
-        store.addSponsorship(1, alice, 1);
-        assertEq(store.balanceOf(2), 54);
-        assertEq(store.totalPooled(), 100);
-        assertBacked();
-    }
-
-    function testSponsorshipMovesOnlyIntoRoundsNotStarted() public {
-        store.setAuthorizedWriter(address(this), true);
-        store.setStarted(1);
-        vm.expectRevert(NormiesArenaStorage.InvalidState.selector);
-        store.moveSponsorship(2, 1, 1);
-        vm.expectRevert(NormiesArenaStorage.InvalidState.selector);
-        store.moveSponsorship(1, 2, 101);
-        store.moveSponsorship(1, 2, 100);
-        assertEq(store.roundOf(1).unpaid, 0);
-        assertEq(store.roundOf(1).sponsorship, 100);
-        assertEq(store.roundOf(2).sponsorship, 200);
-        assertEq(store.roundOf(2).unpaid, 200);
-        vm.expectRevert(NormiesArenaStorage.InvalidInput.selector);
-        store.releaseSponsorship(2, alice, 201);
-        store.releaseSponsorship(2, alice, 200);
-        assertEq(ledger.balanceOf(alice), 100_200);
-        assertBacked();
-    }
-
-    function testWithdrawPaysTheHolderAndNothingElse() public {
-        join(1, alice, 30);
-        vm.prank(bob);
-        vm.expectRevert(NormiesArenaStorage.Forbidden.selector);
-        store.withdraw(1, 1);
-        vm.prank(alice);
-        vm.expectRevert(NormiesArenaStorage.InvalidInput.selector);
-        store.withdraw(1, 31);
-        vm.prank(alice);
-        vm.expectRevert(NormiesArenaStorage.InvalidInput.selector);
-        store.withdraw(1, 0);
-        vm.prank(alice);
-        store.withdraw(1, 10);
-        assertEq(store.balanceOf(1), 20);
-        assertEq(ledger.balanceOf(alice), 100_000 - 20);
-        assertBacked();
-    }
-
-    function testDelegateWithdrawPaysTheVault() public {
-        join(1, alice, 30);
-        vm.prank(hot);
-        vm.expectRevert(NormiesArenaStorage.Forbidden.selector);
-        store.withdraw(1, 5);
-        registry.delegateERC721(hot, alice, address(identity), 1, true);
-        uint256 hotBefore = ledger.balanceOf(hot);
-        vm.prank(hot);
-        store.withdraw(1, 5);
-        assertEq(ledger.balanceOf(hot), hotBefore);
-        assertEq(ledger.balanceOf(alice), 100_000 - 25);
-        // A v1 delegation works the same way.
-        registry.delegateERC721(hot, alice, address(identity), 1, false);
-        registryV1.delegateForAll(carol, alice, true);
-        vm.prank(carol);
-        store.withdraw(1, 5);
-        assertEq(ledger.balanceOf(alice), 100_000 - 20);
-        assertEq(ledger.balanceOf(carol), 100_000);
-    }
-
-    function testWithdrawWorksWithEveryLogicPausedOrRevoked() public {
-        join(1, alice, 30);
-        arena.setPaused(true);
-        queue.setPaused(true);
-        skins.setPaused(true);
-        store.setAuthorizedWriter(address(arena), false);
-        store.setAuthorizedWriter(address(queue), false);
-        store.setAuthorizedWriter(address(skins), false);
-        vm.prank(alice);
-        store.withdraw(1, 30);
-        assertEq(store.balanceOf(1), 0);
-    }
-
-    function testWithdrawBatch() public {
-        join(1, alice, 10);
-        join(2, alice, 10);
-        vm.prank(alice);
-        vm.expectRevert(NormiesArenaStorage.InvalidInput.selector);
-        store.withdrawBatch(ids2(1, 2), ids1(1));
-        vm.prank(alice);
-        store.withdrawBatch(ids2(1, 2), ids2(4, 10));
-        assertEq(store.balanceOf(1), 6);
+    function testPaidRoundChargesOnlyNormiesThatCoverThePrice() public {
+        join(1, alice, 3);
+        join(2, bob, 1);
+        join(3, carol, 0);
+        next(0);
+        next(0);
+        next(1); // round 3, price 1
+        NormiesArenaStorage.Round memory r = store.roundOf(3);
+        assertEq(r.players, 2);
+        assertEq(r.fees, 2);
+        assertEq(store.balanceOf(1), 2);
         assertEq(store.balanceOf(2), 0);
-        // One failure reverts the batch.
-        give(3, bob);
-        vm.prank(alice);
-        vm.expectRevert(NormiesArenaStorage.Forbidden.selector);
-        store.withdrawBatch(ids2(1, 3), ids2(1, 1));
-        assertEq(store.balanceOf(1), 6);
+        assertEq(store.balanceOf(3), 0);
+        assertEq(store.stateOf(2), ACTIVE); // paid its last pixel, still in until the next paid round
+        assertEq(store.stateOf(3), SHORT);
+        assertTrue(store.isPlayer(1) && store.isPlayer(2));
+        assertFalse(store.isPlayer(3));
+        assertEq(store.activeCount(), 2);
+        assertBacked();
     }
 
-    function testBurnedNormieCanOnlyBeRescuedByTheOwner() public {
-        join(1, alice, 30);
-        vm.expectRevert(NormiesArenaStorage.NotBurned.selector);
-        store.rescue(1, carol);
+    function testShortNormieKeepsLeftoverAndIgnoresAPriceDrop() public {
+        join(1, alice, 3);
+        next(0);
+        next(0);
+        next(1); // balance 2
+        next(5); // cannot cover 5: sits out with 2
+        assertEq(store.roundOf(4).players, 0);
+        assertEq(store.balanceOf(1), 2);
+        assertEq(store.stateOf(1), SHORT);
+        next(1); // 2 would cover 1, but a price drop does not bring it back
+        assertFalse(store.isPlayer(1));
+        assertEq(store.balanceOf(1), 2);
+        assertEq(store.roundOf(5).players, 0);
+        topUp(1, 1); // back in from the next round
+        assertEq(store.stateOf(1), ACTIVE);
+        assertEq(store.balanceOf(1), 3);
+        assertFalse(store.isPlayer(1)); // joined round 5 mid-way
+        next(1);
+        assertTrue(store.isPlayer(1));
+        assertEq(store.balanceOf(1), 2);
+        assertBacked();
+    }
+
+    function testDepositDuringAnOpenRoundWaitsForTheNext() public {
+        join(1, alice, 5);
+        next(0);
+        next(0);
+        next(2); // round 3
+        join(2, bob, 5); // mid-round
+        assertEq(store.balanceOf(2), 5);
+        assertFalse(store.isPlayer(2));
+        assertEq(store.roundOf(3).players, 1);
+        assertEq(store.roundOf(3).fees, 2);
+        next(2); // round 4
+        assertTrue(store.isPlayer(2));
+        assertEq(store.balanceOf(2), 3);
+        assertEq(store.balanceOf(1), 1);
+        assertBacked();
+    }
+
+    function testRefundsThenWinnersAndTheRestRollsForward() public {
+        join(1, alice, 5);
+        join(2, bob, 5);
+        next(0);
+        next(0);
+        next(2); // round 3: 200 rolled from rounds 1 and 2, plus 4 in fees
+        assertEq(store.poolOf(3), 204);
+        vm.prank(operator);
+        arena.endRound(3, ids1(1), ids1(150), ids1(2));
+        assertEq(store.balanceOf(2), 5); // refunded its 2
+        assertEq(store.balanceOf(1), 153);
+        NormiesArenaStorage.Round memory r = store.roundOf(3);
+        assertEq(r.paid, 152);
+        assertEq(r.unpaid, 0);
+        assertTrue(r.ended);
+        assertEq(store.roundOf(4).sponsorship, 52);
+        assertBacked();
+    }
+
+    function testPayoutCannotExceedThePool() public {
+        join(1, alice, 5);
+        next(0);
+        vm.prank(operator);
+        vm.expectRevert(NormiesArenaStorage.InvalidState.selector);
+        arena.endRound(1, ids1(1), ids1(101), none);
+        vm.prank(operator);
+        arena.endRound(1, ids1(1), ids1(100), none);
+        assertEq(store.balanceOf(1), 105);
+        assertEq(store.roundOf(2).sponsorship, 100);
+    }
+
+    function testFreeRoundRefundsAndZeroAmountsAreSkipped() public {
+        join(1, alice, 0);
+        next(0);
+        next(0);
+        next(1); // drops: balance 0
+        assertEq(store.stateOf(1), SHORT);
+        uint256[] memory zero = ids1(0);
+        vm.prank(operator);
+        arena.endRound(3, ids1(1), zero, none); // a zero prize does not bring it back
+        assertEq(store.stateOf(1), SHORT);
+    }
+
+    function testCreditToAShortNormieBringsItBack() public {
+        join(1, alice, 1);
+        next(0);
+        next(0);
+        next(5); // round 3: short with 1
+        vm.prank(operator);
+        arena.endRound(3, ids1(1), ids1(9), none);
+        assertEq(store.stateOf(1), ACTIVE);
+        assertEq(store.balanceOf(1), 10);
+        next(5);
+        assertTrue(store.isPlayer(1));
+        assertEq(store.balanceOf(1), 5);
+    }
+
+    function testCreditToAnUnregisteredNormieWaitsForItsHolder() public {
+        join(1, alice, 1);
+        give(7, carol);
+        next(0);
+        uint256 registered = store.registeredCount();
+        vm.prank(operator);
+        arena.endRound(1, ids1(7), ids1(10), none);
+        assertEq(store.balanceOf(7), 10);
+        assertEq(store.stateOf(7), UNREGISTERED);
+        assertFalse(store.isRegistered(7));
+        assertEq(store.registeredCount(), registered);
+        next(0);
+        assertFalse(store.isPlayer(7));
+        vm.prank(carol);
+        queue.bindAgent(7, 7);
+        vm.prank(carol);
+        queue.join(7);
+        assertEq(store.stateOf(7), ACTIVE);
+        assertEq(store.balanceOf(7), 10);
+        next(4);
+        assertTrue(store.isPlayer(7));
+        assertEq(store.balanceOf(7), 6);
+        // The holder can also take it out before ever joining.
+        give(8, carol);
+        vm.prank(operator);
+        arena.endRound(3, ids1(8), ids1(3), none);
+        vm.prank(carol);
+        store.withdraw(8, 3);
+        assertEq(store.balanceOf(8), 0);
+        assertBacked();
+    }
+
+    function testCancelRollsThePoolAndKeepsCharges() public {
+        join(1, alice, 5);
+        next(0);
+        next(0);
+        next(2);
+        uint256 c = store.cumulative();
+        vm.prank(operator);
+        vm.expectRevert();
+        arena.cancel(3);
+        arena.setPaused(true);
+        vm.prank(guardian);
+        arena.cancel(3);
+        assertTrue(store.roundOf(3).cancelled);
+        assertEq(store.cumulative(), c);
+        assertEq(store.balanceOf(1), 3);
+        assertEq(store.roundOf(4).sponsorship, 202);
+        assertBacked();
+    }
+
+    function testCancelAfterAPartialPayoutKeepsTheCredits() public {
+        join(1, alice, 5);
+        next(0);
+        vm.prank(operator);
+        arena.payout(1, ids1(1), ids1(30), none);
+        arena.cancel(1);
+        assertEq(store.balanceOf(1), 35);
+        assertEq(store.roundOf(1).paid, 30);
+        assertEq(store.roundOf(2).sponsorship, 170);
+    }
+
+    function testClearAndRescueABurnedNormie() public {
+        join(1, alice, 5);
+        join(2, bob, 1);
+        next(0);
+        next(0);
+        next(1); // 1 has 4, 2 has 0
+        next(1); // 2 drops
+        assertEq(store.stateOf(2), SHORT);
         identity.burn(1);
-        assertTrue(store.isBurned(1));
+        identity.burn(2);
         vm.prank(alice);
         vm.expectRevert(NormiesArenaStorage.Burned.selector);
         store.withdraw(1, 1);
-        vm.expectRevert(NormiesArenaStorage.InvalidInput.selector);
-        store.rescue(1, address(0));
-        store.rescue(1, carol);
+        uint256 registered = store.registeredCount();
+        uint256 active = store.activeCount();
+        store.clear(1);
+        store.clear(2);
+        assertTrue(store.isPlayer(1)); // it played the round it was cleared in
+        assertEq(store.stateOf(1), CLEARED);
+        assertEq(store.balanceOf(1), 3);
+        assertEq(store.registeredCount(), registered - 2);
+        assertEq(store.activeCount(), active - 1);
+        vm.expectRevert(NormiesArenaStorage.InvalidState.selector);
+        store.clear(1);
+        give(3, carol);
+        vm.expectRevert(NormiesArenaStorage.NotBurned.selector);
+        store.clear(3);
+        next(1);
+        assertEq(store.roundOf(5).players, 0);
+        assertEq(store.balanceOf(1), 3); // frozen
+        vm.prank(alice);
+        vm.expectRevert();
+        store.rescue(1, alice);
+        store.rescue(1, treasury);
+        assertEq(ledger.balanceOf(treasury), 3);
         assertEq(store.balanceOf(1), 0);
-        assertEq(ledger.balanceOf(carol), 100_030);
-        vm.expectRevert(NormiesArenaStorage.InvalidInput.selector);
-        store.rescue(1, carol);
         assertBacked();
     }
 
-    function testIsBurnedIsFalseOutOfRange() public view {
-        assertFalse(store.isBurned(10_000));
-        assertTrue(store.isBurned(9999));
+    function testRescueClearsFirstAndRefusesLiveOrEmptyNormies() public {
+        join(1, alice, 5);
+        join(2, bob, 0);
+        vm.expectRevert(NormiesArenaStorage.NotBurned.selector);
+        store.rescue(1, treasury);
+        identity.burn(1);
+        identity.burn(2);
+        store.rescue(1, treasury);
+        assertEq(store.stateOf(1), CLEARED);
+        assertEq(ledger.balanceOf(treasury), 5);
+        vm.expectRevert(NormiesArenaStorage.InvalidInput.selector);
+        store.rescue(2, treasury);
+        assertEq(store.registeredCount(), 1);
     }
 
-    function testSweepTakesOnlySurplus() public {
+    function testWithdrawDuringARoundCannotTakeItsCharge() public {
+        join(1, alice, 5);
+        next(0);
+        next(0);
+        next(2);
+        vm.prank(alice);
+        vm.expectRevert(NormiesArenaStorage.InvalidInput.selector);
+        store.withdraw(1, 4);
+        vm.prank(alice);
+        store.withdraw(1, 3);
+        assertEq(store.balanceOf(1), 0);
+        assertEq(store.stateOf(1), ACTIVE);
+        next(2);
+        assertEq(store.stateOf(1), SHORT);
+        assertBacked();
+    }
+
+    function testWithdrawWhileShort() public {
+        join(1, alice, 3);
+        next(0);
+        next(0);
+        next(5);
+        vm.prank(alice);
+        store.withdraw(1, 2);
+        assertEq(store.balanceOf(1), 1);
+        assertEq(store.stateOf(1), SHORT);
+        next(1);
+        assertFalse(store.isPlayer(1));
+        assertEq(store.balanceOf(1), 1);
+        assertBacked();
+    }
+
+    function testLeftoverIsFoundAfterManyRounds() public {
         join(1, alice, 10);
-        ledger.mint(address(store), 3);
-        assertEq(store.surplus(), 3);
-        vm.expectRevert(NormiesArenaStorage.InvalidInput.selector);
-        store.sweep(carol, 4);
-        store.sweep(carol, 3);
-        assertEq(store.surplus(), 0);
+        join(2, bob, 7);
+        next(0);
+        next(0);
+        uint256[7] memory prices = [uint256(1), 0, 2, 0, 3, 1, 5];
+        for (uint256 i; i < prices.length; ++i) {
+            next(prices[i]);
+        }
+        // 1: 10 -> 9 -> 9 -> 7 -> 7 -> 4 -> 3, then 5 > 3: out with 3. 2: 7 -> 6 -> 6 -> 4 -> 4 -> 1, then 1 > 1? no:
+        // pays 1 -> 0, then 5 > 0: out with 0.
+        for (uint256 i; i < 40; ++i) {
+            next(1);
+        }
+        assertEq(store.balanceOf(1), 3);
+        assertEq(store.balanceOf(2), 0);
+        assertEq(store.stateOf(1), SHORT);
+        assertEq(store.normieOf(1).checkpoint, 0); // still lazy: nothing touched it
+        vm.prank(alice);
+        store.withdraw(1, 1);
+        assertEq(store.balanceOf(1), 2);
+        assertEq(store.normieOf(1).checkpoint, store.currentRound());
         assertBacked();
     }
 
-    function testAdapterIsOwnerSettable() public {
-        vm.expectRevert(NormiesArenaStorage.InvalidInput.selector);
-        store.setAdapter(address(0));
-        store.setAdapter(carol);
-        assertEq(address(store.adapter()), carol);
+    function testLevelsAcrossLaneSlots() public {
+        // Levels 1..40 cross slot boundaries at 16 and 32.
+        for (uint256 i = 1; i <= 40; ++i) {
+            join(i, alice, i);
+        }
+        next(0);
+        next(0);
+        assertEq(store.countCovering(16), 25);
+        assertEq(store.countCovering(17), 24);
+        assertEq(store.countCovering(33), 8);
+        next(17);
+        assertEq(store.roundOf(3).players, 24);
+        assertEq(store.countCovering(16), 8); // balances now 0..23 for ids 17..40
+        next(16);
+        assertEq(store.roundOf(4).players, 8);
+        assertEq(store.balanceOf(40), 7);
+        assertEq(store.balanceOf(20), 3); // 20 - 17 = 3 < 16: out with 3
+        assertBacked();
     }
 
-    function testConstructorRejectsZeroAddresses() public {
-        address[6] memory a = [address(1), address(2), address(3), address(4), address(5), address(6)];
-        for (uint256 i; i < 6; ++i) {
-            address[6] memory b = a;
-            b[i] = address(0);
-            vm.expectRevert(NormiesArenaStorage.InvalidInput.selector);
-            new NormiesArenaStorage(b[0], b[1], b[2], b[3], b[4], b[5]);
-        }
+    function testMaxPrice() public {
+        join(1, alice, 10_000);
+        join(2, bob, 9999);
+        next(0);
+        next(0);
+        next(1); // misalign C
+        assertEq(arena.previewPlayers(), 2);
+        arena.setEntryPrice(10_000);
+        assertEq(arena.previewPlayers(), 0);
+        topUp(1, 1);
+        assertEq(arena.previewPlayers(), 1);
+        next(10_000);
+        assertEq(store.roundOf(4).players, 1);
+        assertEq(store.balanceOf(1), 0);
+        assertEq(store.balanceOf(2), 9998);
+        assertBacked();
     }
 
-    /// @notice games(round) returns sponsorship, fees and resultHash as its first three words, then the flags in
-    ///         the order closed, settled, cancelled, started, finished, then ticketCutoff and unpaid.
-    function testGamesGetterFieldOrder() public {
-        join(1, alice, 1);
-        admitAll(1);
-        arena.finishRound(1);
-        arena.postResults(1, bytes32(uint256(7)));
-        (bool ok, bytes memory ret) = address(store).staticcall(abi.encodeWithSignature("games(uint256)", 1));
-        assertTrue(ok);
-        uint256[10] memory w = abi.decode(ret, (uint256[10]));
-        assertEq(w[0], 100);
-        assertEq(w[1], 0);
-        assertEq(w[2], 7);
-        assertEq(w[3], 1);
-        assertEq(w[4], 0);
-        assertEq(w[5], 0);
-        assertEq(w[6], 1);
-        assertEq(w[7], 1);
-        assertEq(w[8], 1);
-        assertEq(w[9], 100);
-    }
-
-    function testHolderForRejectsOutOfRange() public {
-        vm.expectRevert(NormiesArenaStorage.InvalidInput.selector);
-        store.holderFor(10_000, alice);
-    }
-
-    /// @notice The packed line: ids at both ends of the range, across several 16-ticket slots, read back in order,
-    ///         and nothing read outside head..tail.
-    function testPackedLineAcrossSlotBoundaries() public {
-        store.setAuthorizedWriter(address(this), true);
-        uint256 count = 50;
-        for (uint256 t = 1; t <= count; ++t) {
-            store.pushTicket(_idFor(t));
+    /// @dev The lazy balances, states and players match a plain charge loop over random rounds.
+    function testFuzzMatchesAChargeLoop(uint256 seed) public {
+        uint256 n = 24;
+        uint256[] memory bal = new uint256[](n);
+        bool[] memory short_ = new bool[](n);
+        bool[] memory player = new bool[](n);
+        for (uint256 i; i < n; ++i) {
+            bal[i] = uint256(keccak256(abi.encode(seed, "bal", i))) % 60;
+            join(i, alice, bal[i]);
         }
-        assertEq(store.tail(), count);
-        for (uint64 t = 1; t <= count; ++t) {
-            assertEq(store.tickets(t), _idFor(t));
+        for (uint256 round; round < 30; ++round) {
+            uint256 rnd = uint256(keccak256(abi.encode(seed, round)));
+            uint256 price = rnd % 4 == 0 ? 0 : 1 + (rnd >> 8) % 20;
+            // Between rounds: a top-up or a withdraw on a random Normie.
+            uint256 who = (rnd >> 32) % n;
+            uint256 amount = 1 + (rnd >> 64) % 10;
+            if ((rnd >> 96) % 2 == 0) {
+                topUp(who, amount);
+                bal[who] += amount;
+                short_[who] = false;
+            } else if (bal[who] >= amount) {
+                vm.prank(alice);
+                store.withdraw(who, amount);
+                bal[who] -= amount;
+            }
+            next(price);
+            uint256 players;
+            for (uint256 i; i < n; ++i) {
+                if (price == 0) {
+                    player[i] = true;
+                } else if (!short_[i] && bal[i] >= price) {
+                    bal[i] -= price;
+                    player[i] = true;
+                } else {
+                    short_[i] = true;
+                    player[i] = false;
+                }
+                if (player[i]) ++players;
+            }
+            assertEq(store.roundOf(store.currentRound()).players, players);
+            uint256 total;
+            for (uint256 i; i < n; ++i) {
+                assertEq(store.balanceOf(i), bal[i], "balance");
+                assertEq(store.isPlayer(i), player[i], "player");
+                assertEq(store.stateOf(i), short_[i] ? SHORT : ACTIVE, "state");
+                total += bal[i];
+            }
+            assertEq(store.totalAllocated(), total);
+            assertBacked();
         }
-        assertEq(store.tickets(0), 0);
-        assertEq(store.tickets(uint64(count) + 1), 0);
-        arena.startRound(1);
-        // Take tickets 1 to 33, past two slot boundaries (16 and 32).
-        for (uint64 t = 1; t <= 33; ++t) {
-            (bool found, uint64 ticket, uint256 id) = store.popTicket(1);
-            assertTrue(found);
-            assertEq(ticket, t);
-            assertEq(id, _idFor(t));
-            assertEq(store.tickets(t), 0);
-        }
-        assertEq(store.head(), 34);
-        // Tickets issued after the round started wait for the next round, and land in the slot already in use.
-        store.pushTicket(9999);
-        store.pushTicket(0);
-        assertEq(store.tickets(51), 9999);
-        assertEq(store.tickets(52), 0);
-        assertEq(store.tickets(34), _idFor(34));
-        for (uint64 t = 34; t <= count; ++t) {
-            (bool found,, uint256 id) = store.popTicket(1);
-            assertTrue(found);
-            assertEq(id, _idFor(t));
-        }
-        (bool more,,) = store.popTicket(1);
-        assertFalse(more);
-        assertTrue(store.lineExhausted(1));
-        // The next round takes the two later tickets, Normie #9999 then Normie #0.
-        arena.finishRound(1);
-        arena.startRound(2);
-        (, uint64 t51, uint256 a) = store.popTicket(2);
-        (, uint64 t52, uint256 b) = store.popTicket(2);
-        assertEq(t51, 51);
-        assertEq(a, 9999);
-        assertEq(t52, 52);
-        assertEq(b, 0);
-        assertTrue(store.lineExhausted(2));
-        vm.expectRevert(NormiesArenaStorage.InvalidInput.selector);
-        store.pushTicket(10_000);
-    }
-
-    /// @dev Ids that fill every bit of a 16-bit field and include both ends of the range.
-    function _idFor(uint256 t) private pure returns (uint256) {
-        if (t == 1) return 0;
-        if (t == 16) return 9999;
-        if (t == 17) return 8191;
-        return (t * 997) % 10_000;
     }
 }

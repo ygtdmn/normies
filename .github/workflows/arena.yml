@@ -12,7 +12,9 @@ on:
       - "src/NormiesArena*.sol"
       - "src/NormiesCanvasStorageV2.sol"
       - "script/DeployArena.s.sol"
-      - "script/ArenaLocal.s.sol"
+      - "script/arena-cutover.sh"
+      - "script/arena-local.sh"
+      - "script/MigrateArena.s.sol"
       - "test/arena/**"
       - "test/audit/arena/**"
 permissions:
@@ -31,7 +33,8 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: >-
           forge fmt --check src/arena src/NormiesArena.sol src/NormiesArenaStorage.sol src/NormiesArenaQueue.sol
-          src/NormiesArenaSkins.sol script/DeployArena.s.sol script/ArenaLocal.s.sol test/arena test/audit/arena
+          src/NormiesArenaSkins.sol script/DeployArena.s.sol script/MigrateArena.s.sol test/arena
+          test/audit/arena
       - run: forge build
       # Fork tests skip without an RPC URL.
       - run: forge test --match-path 'test/arena/*' -vv

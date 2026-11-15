@@ -518,51 +518,57 @@ export const agentBinding = onchainTable(
 );
 
 // ──────────────────────────────────────────────
-//  Normies Arena (NormiesArenaStorage)
+//  Normies Arena (NormiesArenaStorage v3)
 //
 //  The storage contract emits every Arena event and is never replaced, so it is the only Arena contract indexed.
-//  Settings that live in the replaceable logic contracts (capacity, entry price, skin price) are not indexed:
-//  each round's rules arrive with RulesFixed when it starts, and each skin purchase carries its own price.
+//  Settings that live in the replaceable logic contracts (entry price, free rounds, skin price) are not indexed:
+//  each round's price arrives with RoundStarted, and each skin purchase carries its own price.
+//
+//  v3 has no line. A Normie is registered once; while registered it is active (state 1) or short (state 2: it sat
+//  out a paid round it could not cover). Every per-Normie write emits Leveled with the new balance, level and
+//  state. The only change without a per-Normie event is a paid RoundStarted, which charges every active Normie
+//  that covers the price and turns the rest short; src/arena.ts applies it with one bulk update.
+//
+//  The retired v2 storage is indexed for history only: its rows carry source "v2" and never touch balances,
+//  Normies or rounds.
 // ──────────────────────────────────────────────
 
-/** One row per round that has been sponsored or started. Mirrors NormiesArenaStorage.Round and Rules. */
+/** One row per round that has been sponsored or started. Mirrors NormiesArenaStorage.Round. */
 export const arenaRound = onchainTable(
   "arena_round",
   (t) => ({
     round: t.integer().primaryKey(),
+    // Sponsorship, including pools rolled in from the round before and pools moved from v2.
     sponsorship: t.bigint().notNull().default(0n),
+    // Entry fees: players x price, charged at the start of a paid round.
     fees: t.bigint().notNull().default(0n),
-    // Pixels of the pool not yet credited, moved or released.
+    // Pixels of the pool not yet credited, rolled or released.
     unpaid: t.bigint().notNull().default(0n),
-    resultHash: t.hex(),
-    started: t.boolean().notNull().default(false),
-    closed: t.boolean().notNull().default(false),
-    finished: t.boolean().notNull().default(false),
-    settled: t.boolean().notNull().default(false),
-    cancelled: t.boolean().notNull().default(false),
-    ticketCutoff: t.bigint(),
-    // Rules, null until the round starts.
-    capacity: t.integer(),
-    price: t.bigint(),
-    winnerBps: t.integer(),
-    free: t.boolean(),
-    players: t.integer().notNull().default(0),
-    winners: t.integer().notNull().default(0),
-    // Pixels credited to winners (settled) or back to players (cancelled).
+    // Pixels credited from the pool: prizes plus refunds. RoundEnded / RoundCancelled confirm the total.
     paid: t.bigint().notNull().default(0n),
-    refunded: t.bigint().notNull().default(0n),
-    // Sponsorship that left this round for a later one, and where it went when the round was cancelled.
-    movedOut: t.bigint().notNull().default(0n),
-    carriedTo: t.integer(),
-    // Credited events seen since the last Settled or Cancelled: [{ id, amount }] in log order. The event does not
-    // say whether a credit is a prize or a refund; the round's ending decides, and winner rank is the log order.
-    pendingCredits: t.json().$type<Array<{ id: number; amount: string }>>(),
+    prizes: t.bigint().notNull().default(0n),
+    refunds: t.bigint().notNull().default(0n),
+    // Distinct Normies credited a prize / a refund.
+    winners: t.integer().notNull().default(0),
+    refundees: t.integer().notNull().default(0),
+    // Unpaid pool that rolled to the next round when this one ended or was cancelled, and pool rolled in.
+    rolled: t.bigint().notNull().default(0n),
+    rolledIn: t.bigint().notNull().default(0n),
+    // Sponsorship moved from the v2 storage at the cutover.
+    migrated: t.bigint().notNull().default(0n),
+    started: t.boolean().notNull().default(false),
+    ended: t.boolean().notNull().default(false),
+    cancelled: t.boolean().notNull().default(false),
+    // Null until the round starts.
+    price: t.bigint(),
+    free: t.boolean(),
+    // C after this round started (the sum of every started round's price).
+    cumulative: t.bigint(),
+    players: t.integer().notNull().default(0),
     startedAt: t.bigint(),
     startedBlock: t.bigint(),
     startedTxHash: t.hex(),
-    finishedAt: t.bigint(),
-    finishedTxHash: t.hex(),
-    // Settled or cancelled.
+    // Ended or cancelled.
     endedAt: t.bigint(),
     endedTxHash: t.hex(),
     blockNumber: t.bigint().notNull(),
@@ -573,7 +579,10 @@ export const arenaRound = onchainTable(
   }),
 );
 
-/** A Normie admitted to a round. */
+/**
+ * A Normie in a round: a player (played: it played the round, as fixed at RoundStarted) and/or a Normie credited
+ * from the round's pool. A credit can reach a Normie that did not play, so played can be false.
+ */
 export const arenaRoundPlayer = onchainTable(
   "arena_round_player",
   (t) => ({
@@ -581,11 +590,11 @@ export const arenaRoundPlayer = onchainTable(
     id: t.text().primaryKey(),
     round: t.integer().notNull(),
     tokenId: t.bigint().notNull(),
-    // Admission order, from 1.
-    seat: t.integer().notNull().default(0),
+    played: t.boolean().notNull().default(false),
+    // The price for a paid round, 0 for a free one or a Normie that did not play.
     charged: t.bigint().notNull().default(0n),
-    // Winner rank from 1 (order in the settle call, best first). Null for everyone else.
-    rank: t.integer(),
+    // Order of its first prize credit in the round's payout calls, from 1. Null for everyone else.
+    payoutOrder: t.integer(),
     prize: t.bigint(),
     refund: t.bigint(),
     blockNumber: t.bigint().notNull(),
@@ -593,37 +602,42 @@ export const arenaRoundPlayer = onchainTable(
     txHash: t.hex().notNull(),
   }),
   (table) => ({
-    roundSeatIdx: index().on(table.round, table.seat),
-    roundRankIdx: index().on(table.round, table.rank),
+    roundTokenIdx: index().on(table.round, table.tokenId),
+    roundOrderIdx: index().on(table.round, table.payoutOrder),
     tokenIdx: index().on(table.tokenId, table.round),
   }),
 );
 
-/** A Normie's Arena state: balance, place in the line, agent link and lifetime totals. */
+/** A Normie's Arena state: state, balance, agent link and lifetime totals. */
 export const arenaNormie = onchainTable(
   "arena_normie",
   (t) => ({
     tokenId: t.bigint().primaryKey(),
+    // 0 unregistered (may hold a frozen credited balance), 1 active, 2 short, 3 cleared (burned and cleared).
+    state: t.integer().notNull().default(0),
+    // The storage's level: balance + C while active, the balance itself in every other state.
+    level: t.bigint().notNull().default(0n),
     balance: t.bigint().notNull().default(0n),
-    // Current ticket; 0 before the first one. Only counts while `active`.
-    ticket: t.bigint().notNull().default(0n),
-    active: t.boolean().notNull().default(false),
-    needsFunds: t.boolean().notNull().default(false),
+    // The round open when it registered (0 before round 1); it plays from the next round started.
+    registeredRound: t.integer(),
     agentId: t.bigint(),
     skins: t.integer().notNull().default(0),
     roundsPlayed: t.integer().notNull().default(0),
+    lastRound: t.integer(),
     wins: t.integer().notNull().default(0),
     pixelsWon: t.bigint().notNull().default(0n),
     pixelsRefunded: t.bigint().notNull().default(0n),
     pixelsCharged: t.bigint().notNull().default(0n),
+    // Wallet top-ups and withdrawals on v3.
     deposited: t.bigint().notNull().default(0n),
     withdrawn: t.bigint().notNull().default(0n),
-    lastRound: t.integer(),
+    // Balance moved from the v2 storage at the cutover.
+    migrated: t.bigint().notNull().default(0n),
     blockNumber: t.bigint().notNull(),
     timestamp: t.bigint().notNull(),
   }),
   (table) => ({
-    lineIdx: index().on(table.active, table.ticket),
+    stateLevelIdx: index().on(table.state, table.level),
     pixelsWonIdx: index().on(table.pixelsWon),
     winsIdx: index().on(table.wins),
     roundsIdx: index().on(table.roundsPlayed),
@@ -633,7 +647,11 @@ export const arenaNormie = onchainTable(
 export const arenaSkinPurchase = onchainTable(
   "arena_skin_purchase",
   (t) => ({
-    purchaseId: t.bigint().primaryKey(),
+    // <source>-<purchaseId>. v3 purchase ids continue after the v2 ones, so they never collide; the source keeps
+    // them apart anyway.
+    id: t.text().primaryKey(),
+    source: t.text().notNull(),
+    purchaseId: t.bigint().notNull(),
     tokenId: t.bigint().notNull(),
     buyer: t.hex().notNull(),
     price: t.bigint().notNull(),
@@ -643,30 +661,33 @@ export const arenaSkinPurchase = onchainTable(
     logIndex: t.integer().notNull(),
   }),
   (table) => ({
+    purchaseIdx: index().on(table.purchaseId),
     tokenIdx: index().on(table.tokenId),
     buyerIdx: index().on(table.buyer),
   }),
 );
 
 /**
- * Arena activity log. kind: "deposit" | "withdraw" | "rescue" | "entry" | "credit" | "sponsor" |
- * "sponsorship-moved" | "sponsorship-released" | "enrolled" | "left" | "agent-linked" | "skin".
+ * Arena activity log. kind: "deposit" | "withdraw" | "rescue" | "prize" | "refund" | "sponsor" |
+ * "sponsorship-moved" | "sponsorship-released" | "registered" | "cleared" | "agent-linked" | "skin" |
+ * "purchases-imported" | "migrated" | "round-started" | "round-ended" | "round-cancelled".
+ * source: "v3", or "v2" for history rows from the retired storage.
  */
 export const arenaEvent = onchainTable(
   "arena_event",
   (t) => ({
     id: t.text().primaryKey(),
     kind: t.text().notNull(),
+    source: t.text().notNull(),
     round: t.integer(),
     tokenId: t.bigint(),
     // The wallet in the event: depositor, payee, sponsor, skin buyer.
     account: t.hex(),
+    // Pixels moved; fees (round-started); paid (round-ended, round-cancelled); the frozen balance (cleared).
     amount: t.bigint(),
-    // Kind-specific number: the ticket (enrolled), target round (sponsorship-moved), agent id (agent-linked) or
-    // purchase id (skin).
+    // Kind-specific number: target round (sponsorship-moved), agent id (agent-linked), purchase id (skin), count
+    // (purchases-imported), players (round-started) or rolled pixels (round-ended, round-cancelled).
     ref: t.bigint(),
-    // left: whether the Normie left only for lack of funds.
-    needsFunds: t.boolean(),
     blockNumber: t.bigint().notNull(),
     timestamp: t.bigint().notNull(),
     txHash: t.hex().notNull(),
@@ -684,22 +705,35 @@ export const arenaEvent = onchainTable(
 export const arenaStats = onchainTable("arena_stats", (t) => ({
   id: t.text().primaryKey(),
   currentRound: t.integer().notNull().default(0),
-  // Newest ticket issued (the storage's `tail`).
-  newestTicket: t.bigint().notNull().default(0n),
-  // Normies waiting in the line.
-  inLine: t.integer().notNull().default(0),
+  currentFree: t.boolean().notNull().default(false),
+  // C: the sum of every started round's price.
+  cumulative: t.bigint().notNull().default(0n),
+  // Normies by state. Registered = active + short.
+  activeCount: t.integer().notNull().default(0),
+  shortCount: t.integer().notNull().default(0),
+  clearedCount: t.integer().notNull().default(0),
   // Sum of Normie balances and of unpaid pools (the storage's totalAllocated and totalPooled).
   totalAllocated: t.bigint().notNull().default(0n),
   totalPooled: t.bigint().notNull().default(0n),
   roundsStarted: t.integer().notNull().default(0),
-  roundsSettled: t.integer().notNull().default(0),
+  roundsEnded: t.integer().notNull().default(0),
   roundsCancelled: t.integer().notNull().default(0),
-  admissions: t.integer().notNull().default(0),
-  pixelsPaid: t.bigint().notNull().default(0n),
+  // Sum of every started round's players.
+  playerEntries: t.integer().notNull().default(0),
+  pixelsCharged: t.bigint().notNull().default(0n),
+  prizes: t.bigint().notNull().default(0n),
+  refunds: t.bigint().notNull().default(0n),
+  // Sponsorship from wallets on v3 (pools moved from v2 are in poolsMigrated).
   pixelsSponsored: t.bigint().notNull().default(0n),
   pixelsDeposited: t.bigint().notNull().default(0n),
   pixelsWithdrawn: t.bigint().notNull().default(0n),
+  pixelsRescued: t.bigint().notNull().default(0n),
+  // Balances and pools moved from v2 at the cutover.
+  balancesMigrated: t.bigint().notNull().default(0n),
+  poolsMigrated: t.bigint().notNull().default(0n),
+  // The storage's purchaseCount: counts imported from v2 plus v3 purchases.
   skinPurchases: t.integer().notNull().default(0),
+  // Pixels of every indexed purchase row, v2 history included.
   skinPixels: t.bigint().notNull().default(0n),
   blockNumber: t.bigint().notNull(),
   timestamp: t.bigint().notNull(),

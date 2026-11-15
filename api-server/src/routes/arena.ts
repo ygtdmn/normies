@@ -4,40 +4,49 @@ import { ARENA_ENABLED } from "../config.js";
 import {
     getArenaActivity,
     getArenaHolder,
-    getArenaLeaderboard,
     getArenaNormie,
     getArenaNormieRounds,
     getArenaNormieSkins,
-    getArenaQueue,
+    getArenaRecords,
+    getArenaRegistered,
     getArenaRound,
     getArenaRoundPlayers,
+    getArenaRoundRefunds,
     getArenaRounds,
     getArenaRoundWinners,
     getArenaSkins,
     getArenaStatus,
-    type ArenaLeaderboardSort,
+    type ArenaRecordSort,
+    type ArenaRegisteredState,
     type ArenaRoundStatus,
 } from "../services/arena-data.js";
 
 const arena = new Hono();
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
-const ROUND_STATUSES: Array<ArenaRoundStatus | "all"> = ["all", "upcoming", "open", "finished", "settled", "cancelled"];
-const LEADERBOARD_SORTS: ArenaLeaderboardSort[] = ["pixels", "wins", "rounds"];
+const ROUND_STATUSES: Array<ArenaRoundStatus | "all"> = ["all", "upcoming", "open", "ended", "cancelled"];
+const REGISTERED_STATES: ArenaRegisteredState[] = ["all", "active", "short"];
+const RECORD_SORTS: ArenaRecordSort[] = ["pixels", "wins", "rounds"];
 const EVENT_KINDS = [
     "deposit",
     "withdraw",
     "rescue",
-    "entry",
-    "credit",
+    "prize",
+    "refund",
     "sponsor",
     "sponsorship-moved",
     "sponsorship-released",
-    "enrolled",
-    "left",
+    "registered",
+    "cleared",
     "agent-linked",
     "skin",
+    "purchases-imported",
+    "migrated",
+    "round-started",
+    "round-ended",
+    "round-cancelled",
 ];
+const SOURCES = ["v2", "v3"];
 
 type Query = { req: { query: (key: string) => string | undefined } };
 
@@ -80,10 +89,11 @@ arena.get("/rounds/:round", async (c) => {
     return data ? c.json(data) : c.json({ error: "Round not found" }, 404);
 });
 
+// A round can hold every registered Normie, so these lists page up to 1000 at a time.
 arena.get("/rounds/:round/players", async (c) => {
     const round = parseRound(c.req.param("round"));
     if (round === undefined) return c.json({ error: "Invalid round" }, 400);
-    const { limit, offset } = parsePagination(c, 300, 300);
+    const { limit, offset } = parsePagination(c, 500, 1000);
     const data = await getArenaRoundPlayers(round, limit, offset);
     return data ? c.json(data) : c.json({ error: "Round not found" }, 404);
 });
@@ -91,14 +101,26 @@ arena.get("/rounds/:round/players", async (c) => {
 arena.get("/rounds/:round/winners", async (c) => {
     const round = parseRound(c.req.param("round"));
     if (round === undefined) return c.json({ error: "Invalid round" }, 400);
-    const { limit, offset } = parsePagination(c, 300, 300);
+    const { limit, offset } = parsePagination(c, 500, 1000);
     const data = await getArenaRoundWinners(round, limit, offset);
     return data ? c.json(data) : c.json({ error: "Round not found" }, 404);
 });
 
-arena.get("/queue", async (c) => {
-    const { limit, offset } = parsePagination(c);
-    return c.json(await getArenaQueue(limit, offset));
+arena.get("/rounds/:round/refunds", async (c) => {
+    const round = parseRound(c.req.param("round"));
+    if (round === undefined) return c.json({ error: "Invalid round" }, 400);
+    const { limit, offset } = parsePagination(c, 500, 1000);
+    const data = await getArenaRoundRefunds(round, limit, offset);
+    return data ? c.json(data) : c.json({ error: "Round not found" }, 404);
+});
+
+arena.get("/registered", async (c) => {
+    const { limit, offset } = parsePagination(c, 100, 1000);
+    const state = c.req.query("state") ?? "all";
+    if (!REGISTERED_STATES.includes(state as ArenaRegisteredState)) {
+        return c.json({ error: `state must be one of ${REGISTERED_STATES.join(", ")}` }, 400);
+    }
+    return c.json(await getArenaRegistered(state as ArenaRegisteredState, limit, offset));
 });
 
 arena.get("/normie/:id", async (c) => {
@@ -133,6 +155,10 @@ arena.get("/activity", async (c) => {
     if (kind !== undefined && !EVENT_KINDS.includes(kind)) {
         return c.json({ error: `kind must be one of ${EVENT_KINDS.join(", ")}` }, 400);
     }
+    const source = c.req.query("source");
+    if (source !== undefined && !SOURCES.includes(source)) {
+        return c.json({ error: `source must be one of ${SOURCES.join(", ")}` }, 400);
+    }
     const roundRaw = c.req.query("round");
     const round = roundRaw === undefined ? undefined : parseRound(roundRaw);
     if (roundRaw !== undefined && round === undefined) return c.json({ error: "Invalid round" }, 400);
@@ -145,7 +171,7 @@ arena.get("/activity", async (c) => {
     }
     const address = c.req.query("address");
     if (address !== undefined && !ADDRESS_RE.test(address)) return c.json({ error: "Invalid Ethereum address" }, 400);
-    return c.json(await getArenaActivity({ kind, round, tokenId, address, limit, offset }));
+    return c.json(await getArenaActivity({ kind, source, round, tokenId, address, limit, offset }));
 });
 
 arena.get("/skins", async (c) => {
@@ -161,13 +187,13 @@ arena.get("/skins/normie/:id", async (c) => {
     return c.json(await getArenaNormieSkins(parsed.tokenId));
 });
 
-arena.get("/leaderboard", async (c) => {
+arena.get("/records", async (c) => {
     const { limit, offset } = parsePagination(c);
     const sort = c.req.query("sort") ?? "pixels";
-    if (!LEADERBOARD_SORTS.includes(sort as ArenaLeaderboardSort)) {
-        return c.json({ error: `sort must be one of ${LEADERBOARD_SORTS.join(", ")}` }, 400);
+    if (!RECORD_SORTS.includes(sort as ArenaRecordSort)) {
+        return c.json({ error: `sort must be one of ${RECORD_SORTS.join(", ")}` }, 400);
     }
-    return c.json(await getArenaLeaderboard(sort as ArenaLeaderboardSort, limit, offset));
+    return c.json(await getArenaRecords(sort as ArenaRecordSort, limit, offset));
 });
 
 export { arena };

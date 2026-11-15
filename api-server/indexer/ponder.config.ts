@@ -138,40 +138,70 @@ const RoyaltiesReleasedEvent = parseAbiItem(
 // ──────────────────────────────────────────────
 //  Normies Arena: NormiesArenaStorage holds the state and emits every Arena event. The logic contracts
 //  (rounds, queue, skins) are replaceable writers and are not indexed.
+//
+//  v3 (lazy charging, no line) is the live Arena. v2 (the ticket line) is indexed for history only: its skin
+//  purchases, deposits, withdrawals, rescues and sponsorships become history rows, never balances or rounds.
+//  The cutover moved every v2 balance, pool, link and purchase count into v3 through v3 events.
 // ──────────────────────────────────────────────
 
 const ArenaStorageEvents = parseAbi([
+  "event Registered(uint256 indexed id, uint256 round)",
   "event Deposited(uint256 indexed id, address indexed from, uint256 amount)",
   "event Withdrawn(uint256 indexed id, address indexed to, uint256 amount)",
+  "event Credited(uint256 indexed round, uint256 indexed id, uint256 amount, bool refund)",
+  "event Cleared(uint256 indexed id, uint256 balance)",
   "event Rescued(uint256 indexed id, address indexed to, uint256 amount)",
-  "event Charged(uint256 indexed round, uint256 indexed id, uint256 amount)",
-  "event Credited(uint256 indexed round, uint256 indexed id, uint256 amount)",
+  "event Leveled(uint256 indexed id, uint256 balance, uint256 level, uint8 state)",
   "event Sponsored(uint256 indexed round, address indexed from, uint256 amount)",
   "event SponsorshipMoved(uint256 indexed from, uint256 indexed to, uint256 amount)",
   "event SponsorshipReleased(uint256 indexed round, address indexed to, uint256 amount)",
-  "event Enrolled(uint256 indexed id, uint64 ticket)",
-  "event EnrollmentPaused(uint256 indexed id, bool needsFunds)",
   "event AgentLinked(uint256 indexed id, uint256 indexed agentId)",
-  "event RulesFixed(uint256 indexed round, uint256 capacity, uint256 price, uint256 winnerBps, bool free)",
-  "event RoundStarted(uint256 indexed round, uint64 ticketCutoff, uint256 at)",
-  "event Admitted(uint256 indexed round, uint256 indexed id)",
-  "event AdmissionsClosed(uint256 indexed round, uint256 participants)",
-  "event RoundFinished(uint256 indexed round, uint256 players, uint256 at)",
-  "event ResultsPosted(uint256 indexed round, bytes32 indexed resultHash)",
-  "event Settled(uint256 indexed round, bytes32 indexed resultHash, uint256 pool)",
-  "event Cancelled(uint256 indexed round, uint256 refunded, uint256 carriedTo)",
+  "event RoundStarted(uint256 indexed round, uint256 price, bool free, uint256 players, uint256 fees, uint256 cumulative, uint256 at)",
+  "event RoundEnded(uint256 indexed round, uint256 paid, uint256 rolled, uint256 at)",
+  "event RoundCancelled(uint256 indexed round, uint256 paid, uint256 rolled, uint256 at)",
+  "event SkinPurchased(uint256 indexed purchaseId, uint256 indexed id, address indexed buyer, uint256 price)",
+  "event PurchasesImported(uint256 indexed id, uint256 count)",
+]);
+
+// Only the v2 events kept as history. Its line, rounds, charges and credits are left out on purpose: the cutover
+// gives v2 a synthetic round 1 (started, charged, finished) that must not show up as a played round.
+const ArenaStorageV2Events = parseAbi([
+  "event Deposited(uint256 indexed id, address indexed from, uint256 amount)",
+  "event Withdrawn(uint256 indexed id, address indexed to, uint256 amount)",
+  "event Rescued(uint256 indexed id, address indexed to, uint256 amount)",
+  "event Sponsored(uint256 indexed round, address indexed from, uint256 amount)",
   "event SkinPurchased(uint256 indexed purchaseId, uint256 indexed id, address indexed buyer, uint256 price)",
 ]);
 
-// OPTIONAL: with no address the contract is left out and src/arena.ts registers no
-// handlers, so the indexer runs as before and the Arena tables stay empty.
-const arenaStorageAddress = process.env.PONDER_ARENA_STORAGE_ADDRESS as `0x${string}` | undefined;
-const arenaContracts = {
+// OPTIONAL: with no address a contract is left out and src/arena.ts registers no handlers for it, so the indexer
+// runs as before and the Arena tables stay empty. New key names on purpose: the v2-era key
+// PONDER_ARENA_STORAGE_ADDRESS is ignored, so an env written for one version can never feed the other's handlers.
+const arenaV3Address = process.env.PONDER_ARENA_V3_STORAGE_ADDRESS as `0x${string}` | undefined;
+const arenaV2Address = process.env.PONDER_ARENA_V2_STORAGE_ADDRESS as `0x${string}` | undefined;
+if (arenaV3Address && arenaV2Address && arenaV3Address.toLowerCase() === arenaV2Address.toLowerCase()) {
+  throw new Error("PONDER_ARENA_V3_STORAGE_ADDRESS and PONDER_ARENA_V2_STORAGE_ADDRESS must differ");
+}
+if (process.env.PONDER_ARENA_STORAGE_ADDRESS) {
+  console.warn(
+    "PONDER_ARENA_STORAGE_ADDRESS is ignored: set PONDER_ARENA_V3_STORAGE_ADDRESS (and PONDER_ARENA_V2_STORAGE_ADDRESS for history)",
+  );
+}
+const arenaV3Contracts = {
   NormiesArenaStorage: {
     abi: ArenaStorageEvents,
     chain: chainName,
-    address: arenaStorageAddress,
-    startBlock: Number(process.env.PONDER_ARENA_START_BLOCK ?? startBlock),
+    address: arenaV3Address,
+    startBlock: Number(process.env.PONDER_ARENA_V3_START_BLOCK ?? startBlock),
+  },
+};
+const arenaV2Contracts = {
+  NormiesArenaStorageV2: {
+    abi: ArenaStorageV2Events,
+    chain: chainName,
+    address: arenaV2Address,
+    startBlock: Number(process.env.PONDER_ARENA_V2_START_BLOCK ?? startBlock),
+    // Optional: the v2 storage is retired after the cutover; capping it stops the scan there.
+    ...(process.env.PONDER_ARENA_V2_END_BLOCK ? { endBlock: Number(process.env.PONDER_ARENA_V2_END_BLOCK) } : {}),
   },
 };
 
@@ -300,7 +330,8 @@ export default createConfig({
       address: requiredEnv("PONDER_ROYALTY_SPLITTER_ADDRESS") as `0x${string}`,
       startBlock: pixelMarketStartBlock,
     },
-    // The cast keeps the handler types when the contract is left out.
-    ...(arenaStorageAddress ? arenaContracts : ({} as typeof arenaContracts)),
+    // The casts keep the handler types when a contract is left out.
+    ...(arenaV3Address ? arenaV3Contracts : ({} as typeof arenaV3Contracts)),
+    ...(arenaV2Address ? arenaV2Contracts : ({} as typeof arenaV2Contracts)),
   },
 });

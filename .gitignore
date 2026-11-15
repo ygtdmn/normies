@@ -18,3 +18,4 @@ broadcast/*/31337/
 
 .env.mainnet
 .env.sepolia
+audits/2026-11-15-arena-v3-audit-tests.tar.gz

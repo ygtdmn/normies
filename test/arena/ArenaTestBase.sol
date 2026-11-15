@@ -98,6 +98,8 @@ abstract contract ArenaTestBase is Test {
     address sponsorWallet = address(0x5B0);
     address treasury = address(0x7EA);
 
+    uint256[] none;
+
     function setUp() public virtual {
         ledger = new ArenaLedgerMock();
         identity = new ArenaIdentityMock();
@@ -121,13 +123,20 @@ abstract contract ArenaTestBase is Test {
         for (uint256 i; i < 5; ++i) {
             ledger.mint([alice, bob, carol, hot, sponsorWallet][i], 100_000);
         }
-        vm.startPrank(sponsorWallet);
-        queue.sponsor(1, 100);
-        queue.sponsor(2, 100);
-        vm.stopPrank();
+        if (sponsorsLaunchRounds()) {
+            vm.startPrank(sponsorWallet);
+            queue.sponsor(1, 100);
+            queue.sponsor(2, 100);
+            vm.stopPrank();
+        }
         arena.setPaused(false);
         queue.setPaused(false);
         skins.setPaused(false);
+    }
+
+    /// @dev Whether setUp sponsors rounds 1 and 2 with 100 each.
+    function sponsorsLaunchRounds() internal virtual returns (bool) {
+        return true;
     }
 
     /// @dev Gives Normie `id` to `who` and binds agent `id` to it on the adapter (not yet linked in the Arena).
@@ -136,41 +145,43 @@ abstract contract ArenaTestBase is Test {
         identity.bind(id, id);
     }
 
-    /// @dev Gives Normie `id` to `who`, links its agent and joins the line with `amount` pixels.
+    /// @dev Gives Normie `id` to `who`, links its agent and registers it with `amount` pixels (join when zero).
     function join(uint256 id, address who, uint256 amount) internal {
         give(id, who);
         vm.prank(who);
         queue.bindAgent(id, id);
         vm.prank(who);
-        queue.deposit(id, amount, true);
+        if (amount == 0) queue.join(id);
+        else queue.deposit(id, amount);
     }
 
-    /// @dev Finishes whatever round is open, then starts each round up to `round`.
-    function openRound(uint256 round) internal {
+    /// @dev Tops up a registered Normie from its holder.
+    function topUp(uint256 id, uint256 amount) internal {
+        vm.prank(identity.holders(id));
+        queue.deposit(id, amount);
+    }
+
+    /// @dev Ends the open round, if any, with no payouts.
+    function endOpen() internal {
         uint256 current = store.currentRound();
-        if (current == round && store.isOpen(round)) return;
-        while (current < round) {
-            if (store.isOpen(current)) arena.finishRound(current);
-            arena.startRound(++current);
-        }
-        assertTrue(store.isOpen(round));
+        if (current != 0 && store.isOpen(current)) arena.endRound(current, none, none, none);
     }
 
-    /// @dev Opens `round` and admits until its admissions close.
-    function admitAll(uint256 round) internal {
-        openRound(round);
-        for (uint256 i; i < 40 && !store.roundOf(round).closed; ++i) {
-            arena.admit(round, arena.maxScan());
+    /// @dev Ends the open round, then starts the next one free (sponsoring it if needed) or at `price`.
+    function next(uint256 price) internal returns (uint256 round) {
+        endOpen();
+        round = store.currentRound() + 1;
+        if (price == 0) {
+            if (!arena.freeRound(round)) arena.setFreeRound(round, true);
+            if (store.poolOf(round) == 0) {
+                vm.prank(sponsorWallet);
+                queue.sponsor(round, 1);
+            }
+        } else {
+            if (arena.freeRound(round)) arena.setFreeRound(round, false);
+            if (arena.entryPrice() != price) arena.setEntryPrice(price);
         }
-        assertTrue(store.roundOf(round).closed);
-    }
-
-    /// @dev Finishes `round`, posts a result and settles it for `winners`.
-    function finishAndSettle(uint256 round, uint256[] memory winners) internal {
-        if (store.isOpen(round)) arena.finishRound(round);
-        bytes32 result = keccak256(abi.encode("result", round));
-        arena.postResults(round, result);
-        arena.settle(round, result, winners);
+        arena.startRound(round);
     }
 
     function ids1(uint256 a) internal pure returns (uint256[] memory r) {
@@ -184,20 +195,15 @@ abstract contract ArenaTestBase is Test {
         r[1] = b;
     }
 
-    function inLine(uint256 id) internal view returns (bool active) {
-        (, active,) = store.enrollment(id);
-    }
-
-    function ticketOf(uint256 id) internal view returns (uint64 ticket) {
-        (ticket,,) = store.enrollment(id);
-    }
-
-    function shortOfFunds(uint256 id) internal view returns (bool needsFunds) {
-        (,, needsFunds) = store.enrollment(id);
+    function ids3(uint256 a, uint256 b, uint256 c) internal pure returns (uint256[] memory r) {
+        r = new uint256[](3);
+        r[0] = a;
+        r[1] = b;
+        r[2] = c;
     }
 
     /// @dev Custody invariant: the storage's ledger balance equals balances plus unpaid pools (no surplus here).
     function assertBacked() internal view {
-        assertEq(ledger.balanceOf(address(store)), store.totalAllocated() + store.totalPooled());
+        assertEq(ledger.balanceOf(address(store)), uint256(store.totalAllocated()) + store.totalPooled());
     }
 }
