@@ -42,7 +42,7 @@ contract NormiesArenaLedgerTest is PixelMarketBase {
 
     function testDepositWithdrawAndCooldown() public {
         vm.prank(user);
-        queue.deposit(1, 10, true);
+        queue.deposit(1, 10);
         assertEq(storageV2.balanceOf(user), 90);
         assertEq(storageV2.balanceOf(address(store)), 10);
         assertEq(storageV2.balanceOf(address(queue)), 0);
@@ -52,10 +52,10 @@ contract NormiesArenaLedgerTest is PixelMarketBase {
         assertEq(storageV2.availableBalance(user), 90);
         vm.prank(user);
         vm.expectRevert();
-        queue.deposit(1, 100, false);
+        queue.deposit(1, 100);
         vm.warp(block.timestamp + 61);
         vm.prank(user);
-        queue.deposit(1, 100, false);
+        queue.deposit(1, 100);
     }
 
     function testSkinPaidThroughALedgerAllowance() public {
@@ -105,9 +105,73 @@ contract NormiesArenaLedgerTest is PixelMarketBase {
         assertLt(used, 14_000_000);
     }
 
+    /// @notice The worst storage batch on the real ledger: MAX_BATCH withdrawals to distinct fresh holders, half of
+    ///         them from short Normies that each dropped out in a different round over 520 rounds. RUN WITH
+    ///         --isolate for the real figure (see test/audit/arena/ArenaGas.t.sol).
+    function testMaxBatchWithdrawGas() public {
+        uint256 n = store.MAX_BATCH();
+        uint256[] memory ids = new uint256[](n);
+        uint256[] memory amounts = new uint256[](n);
+        storageV2.mintTo(user, 1_000_000);
+        for (uint256 i; i < n; ++i) {
+            uint256 id = i + 200;
+            ids[i] = id;
+            amounts[i] = i % 2 == 0 ? 1 : 3;
+            identity.setOwner(id, user);
+            identity.bind(id, id);
+            vm.prank(user);
+            queue.bindAgent(id, id);
+            vm.prank(user);
+            queue.deposit(id, i % 2 == 0 ? 2 * i + 3 : 5000 + i * 16);
+            // Each Normie then changes hands, so every withdrawal pays a fresh holder.
+            identity.setOwner(id, address(uint160(0xF000 + i)));
+            delegateV2.delegateAll(user, address(uint160(0xF000 + i)), true);
+        }
+        arena.setEntryPrice(2);
+        arena.setFreeRound(1, false);
+        arena.setFreeRound(2, false);
+        arena.setPaused(false);
+        for (uint256 r = 1; r <= 520; ++r) {
+            arena.startRound(r);
+            arena.endRound(r, none, none, none);
+        }
+        assertEq(store.stateOf(200), 2);
+        _measure(
+            "MAX_BATCH withdrawBatch, real ledger, fresh holders, half lazily short",
+            user,
+            address(store),
+            abi.encodeCall(store.withdrawBatch, (ids, amounts))
+        );
+    }
+
+    uint256[] none;
+
+    function _measure(string memory name, address caller, address target, bytes memory data) internal {
+        uint256 cap = 16_777_216;
+        uint256 snap = vm.snapshotState();
+        vm.prank(caller);
+        (bool ok,) = target.call{ gas: cap - 21_000 }(data);
+        assertTrue(ok, "must succeed with a gas limit equal to the cap");
+        vm.revertToState(snap);
+        uint256 lo = 1;
+        uint256 hi = cap - 21_000;
+        while (lo < hi) {
+            uint256 mid = (lo + hi) / 2;
+            snap = vm.snapshotState();
+            vm.prank(caller);
+            (ok,) = target.call{ gas: mid }(data);
+            vm.revertToState(snap);
+            if (ok) hi = mid;
+            else lo = mid + 1;
+        }
+        emit log_string(name);
+        emit log_named_uint("  MIN TX GAS LIMIT", lo + 21_000);
+        assertLt(lo + 21_000, cap);
+    }
+
     function testSweepTakesOnlySurplus() public {
         vm.prank(user);
-        queue.deposit(1, 10, true);
+        queue.deposit(1, 10);
         storageV2.mintTo(address(store), 3);
         assertEq(store.surplus(), 3);
         vm.expectRevert(NormiesArenaStorage.InvalidInput.selector);

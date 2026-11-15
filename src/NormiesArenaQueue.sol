@@ -7,17 +7,13 @@ import { ArenaAccess } from "./arena/ArenaAccess.sol";
  * @title NormiesArenaQueue
  * @author Normies by Serc (https://x.com/serc1n)
  * @author Smart Contract by Yigit Duman (https://x.com/yigitduman)
- * @notice Brings pixels into the Arena and manages the line on NormiesArenaStorage: top-ups to a Normie's balance,
- *         joining and leaving the line, and round sponsorship.
+ * @notice Registers Normies in the Arena, brings pixels into their balances, and takes round sponsorship.
  *
- *         A Normie's holder or one of its delegates (see NormiesArenaStorage.holderFor) tops it up, puts it in the
- *         line and takes it out. A top-up moves pixels from the caller's own wallet into the Normie's balance,
- *         which follows the NFT. Joining the line needs the Normie linked to an agent whose adapter binding points
- *         at it. Withdrawals are on the storage.
- *
- *         Line: a Normie in the line keeps its ticket through top-ups and sales. Pausing drops the ticket; joining
- *         again takes a new one at the back. A Normie that left only for lack of funds goes back at the back when
- *         it is topped up.
+ *         A Normie's holder or one of its delegates (see NormiesArenaStorage.holderFor) joins it, with no pixels,
+ *         or tops it up from the caller's own wallet, which also joins it. Both need the Normie linked to an agent
+ *         whose adapter binding points at it. A registered Normie plays every free round and, while active, every paid
+ *         round its balance covers, from the next round started; there is no line and no leaving, only withdrawing the
+ *         balance. The balance follows the NFT. Withdrawals are on the storage.
  *
  *         Pixels move only from msg.sender. Needs a mover role on the pixel ledger and to be an authorized writer
  *         of the storage.
@@ -57,8 +53,7 @@ contract NormiesArenaQueue is ArenaAccess {
     // ──────────────────────────────────────────────
 
     /// @notice Add `amount` pixels from the caller's wallet to `round`'s pool. Owner or SPONSOR_ROLE, for a round
-    ///         above zero that is neither settled nor cancelled, including rounds not yet started. Works while
-    ///         paused.
+    ///         above zero that is neither ended nor cancelled, including rounds not yet started. Works while paused.
     function sponsor(uint256 round, uint256 amount) external onlyOwnerOrRoles(SPONSOR_ROLE) nonReentrant {
         require(round > 0 && amount > 0, InvalidInput());
         pixels.moveBalance(msg.sender, address(store), amount);
@@ -66,34 +61,68 @@ contract NormiesArenaQueue is ArenaAccess {
     }
 
     // ──────────────────────────────────────────────
-    //  Top-ups
+    //  Joining
     // ──────────────────────────────────────────────
 
-    /**
-     * @notice Top up Normie `id` with `amount` pixels from the caller's wallet. The holder or a delegate, while
-     *         running. A Normie that left the line only for lack of funds goes back in at the back.
-     * @param enroll True to also put the Normie in the line at the back if it is not in it (see join). A Normie
-     *               already in the line keeps its ticket either way.
-     */
-    function deposit(uint256 id, uint256 amount, bool enroll) external nonReentrant whenRunning {
-        _deposit(id, amount, enroll);
+    /// @notice Register Normie `id` with no pixels: it plays free rounds, and paid rounds once its balance covers
+    ///         the price. The holder or a delegate, while running. Reverts with InvalidState when it is already
+    ///         registered or its agent link no longer matches.
+    function join(uint256 id) external whenRunning {
+        _join(id);
     }
 
-    /// @notice deposit for several Normies, with one `enroll` choice for all. While running. A single failure
-    ///         reverts the batch.
-    function depositBatch(
-        uint256[] calldata ids,
-        uint256[] calldata amounts,
-        bool enroll
-    ) external nonReentrant whenRunning batch(ids.length) {
-        require(ids.length == amounts.length, InvalidInput());
+    /// @notice join for several Normies. While running. A single failure reverts the batch.
+    function joinBatch(uint256[] calldata ids) external whenRunning batch(ids.length) {
         for (uint256 i; i < ids.length; ++i) {
-            _deposit(ids[i], amounts[i], enroll);
+            _join(ids[i]);
         }
     }
 
-    /// @notice Link each Normie to its agent (see bindAgent), then deposit with `enroll`. While running. A single
-    ///         failure reverts the batch.
+    /// @notice Link each Normie to its agent (see bindAgent), then join it. While running. A single failure reverts
+    ///         the batch.
+    function joinRegisteredBatch(
+        uint256[] calldata ids,
+        uint256[] calldata agentIds
+    ) external whenRunning batch(ids.length) {
+        require(ids.length == agentIds.length, InvalidInput());
+        for (uint256 i; i < ids.length; ++i) {
+            store.holderFor(ids[i], msg.sender);
+            _bindAgent(ids[i], agentIds[i]);
+            store.register(ids[i]);
+        }
+    }
+
+    /// @dev Checks the caller and the agent link, then registers.
+    function _join(uint256 id) private {
+        store.holderFor(id, msg.sender);
+        require(_awake(id), InvalidState());
+        store.register(id);
+    }
+
+    // ──────────────────────────────────────────────
+    //  Top-ups
+    // ──────────────────────────────────────────────
+
+    /// @notice Top up Normie `id` with `amount` pixels from the caller's wallet, registering it if it is not yet.
+    ///         The holder or a delegate, while running. A Normie that sat out for lack of funds plays again from the
+    ///         next round its balance covers.
+    function deposit(uint256 id, uint256 amount) external nonReentrant whenRunning {
+        _deposit(id, amount);
+    }
+
+    /// @notice deposit for several Normies. While running. A single failure reverts the batch.
+    function depositBatch(
+        uint256[] calldata ids,
+        uint256[] calldata amounts
+    ) external nonReentrant whenRunning batch(ids.length) {
+        require(ids.length == amounts.length, InvalidInput());
+        for (uint256 i; i < ids.length; ++i) {
+            _deposit(ids[i], amounts[i]);
+        }
+    }
+
+    /// @notice Link each Normie to its agent (see bindAgent), then deposit. While running. A single failure reverts
+    ///         the batch.
     function depositRegisteredBatch(
         uint256[] calldata ids,
         uint256[] calldata amounts,
@@ -103,82 +132,16 @@ contract NormiesArenaQueue is ArenaAccess {
         for (uint256 i; i < ids.length; ++i) {
             // _deposit checks the caller with holderFor; a refusal reverts the whole call, the link included.
             _bindAgent(ids[i], agentIds[i]);
-            _deposit(ids[i], amounts[i], true);
+            _deposit(ids[i], amounts[i]);
         }
     }
 
-    /// @dev Checks the caller, moves the pixels in, then joins or returns the Normie to the line. Both need the agent
-    ///      link to still match its adapter binding (see _join).
-    function _deposit(uint256 id, uint256 amount, bool enroll) private {
+    /// @dev Checks the caller and the agent link, moves the pixels in and credits them, registering the Normie.
+    function _deposit(uint256 id, uint256 amount) private {
         store.holderFor(id, msg.sender);
         require(amount > 0, InvalidInput());
-        pixels.moveBalance(msg.sender, address(store), amount);
-        store.addBalance(id, msg.sender, amount);
-        (, bool active, bool needsFunds) = store.enrollment(id);
-        if (active) return;
-        if (enroll || needsFunds) _join(id);
-    }
-
-    // ──────────────────────────────────────────────
-    //  Line
-    // ──────────────────────────────────────────────
-
-    /// @notice Put Normie `id` in the line at the back. The holder or a delegate, while running. Moves no pixels:
-    ///         the entry price is charged from the Normie's balance when a round admits it. Reverts with
-    ///         InvalidState when it is already in the line.
-    function resume(uint256 id) external whenRunning {
-        store.holderFor(id, msg.sender);
-        require(!_active(id), InvalidState());
-        _join(id);
-    }
-
-    /// @notice resume for several Normies. While running. A single failure reverts the batch.
-    function resumeBatch(uint256[] calldata ids) external whenRunning batch(ids.length) {
-        for (uint256 i; i < ids.length; ++i) {
-            store.holderFor(ids[i], msg.sender);
-            require(!_active(ids[i]), InvalidState());
-            _join(ids[i]);
-        }
-    }
-
-    /// @notice Link each Normie to its agent (see bindAgent), then resume it. While running. A single failure
-    ///         reverts the batch.
-    function resumeRegisteredBatch(
-        uint256[] calldata ids,
-        uint256[] calldata agentIds
-    ) external whenRunning batch(ids.length) {
-        require(ids.length == agentIds.length, InvalidInput());
-        for (uint256 i; i < ids.length; ++i) {
-            store.holderFor(ids[i], msg.sender);
-            _bindAgent(ids[i], agentIds[i]);
-            require(!_active(ids[i]), InvalidState());
-            _join(ids[i]);
-        }
-    }
-
-    /// @notice Take Normie `id` out of the line. The holder or a delegate. Works while paused. Its ticket is dropped,
-    ///         so joining again puts it at the back. Its balance stays.
-    function pause(uint256 id) public {
-        store.holderFor(id, msg.sender);
-        store.deactivate(id, false);
-    }
-
-    /// @notice pause for several Normies. Reverts entirely if one fails.
-    function pauseBatch(uint256[] calldata ids) external batch(ids.length) {
-        for (uint256 i; i < ids.length; ++i) {
-            pause(ids[i]);
-        }
-    }
-
-    /// @dev Gives the Normie a ticket at the back. Reverts with InvalidState unless it is linked to an agent whose
-    ///      binding still points at it.
-    function _join(uint256 id) private {
         require(_awake(id), InvalidState());
-        store.pushTicket(id);
-    }
-
-    /// @dev Whether the Normie is in the line.
-    function _active(uint256 id) private view returns (bool active) {
-        (, active,) = store.enrollment(id);
+        pixels.moveBalance(msg.sender, address(store), amount);
+        store.deposit(id, msg.sender, amount, true);
     }
 }

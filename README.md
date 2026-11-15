@@ -104,19 +104,27 @@ Burned Normies become #PIXEL, which can sit on a Normie, in a wallet, or in a ma
 ### Arena
 
 Normies pay #PIXEL to play numbered rounds; each round's pool goes to its winners. No rule depends on time: the
-team starts and finishes rounds by number.
+team (through the app's worker) starts and ends rounds by number. v3 (lazy charging, no line) replaces v2 (a ticket
+line with admissions) through a one-off migration; design and runbook in `normies-arena/docs/ARENA-CONTRACTS-V3.md`
+and `normies-arena/docs/ARENA-LAUNCH.md`.
 
-- **NormiesArenaStorage.sol**: holds every Arena pixel and all state (per-Normie balances, the line of tickets,
-  agent links, rounds, skin purchases) and emits every Arena event. Balances are keyed by Normie id, so they follow
-  the NFT. Long-lived; the three contracts below are its authorized writers and can be replaced.
-- **NormiesArena.sol**: rounds. Starts and finishes them, admits Normies from the head of the line, takes results,
-  settles (the pool is split between the winners, a share of the players set by `winnerBps`) and cancels (entries refunded, sponsorship
-  carried to the next round).
-- **NormiesArenaQueue.sol**: top-ups, joining and leaving the line, agent links, and sponsorship from the team's
-  wallet.
+- **NormiesArenaStorage.sol**: holds every Arena pixel and all state (each Normie's state, balance and agent link,
+  rounds and their pools, skin purchases) and emits every Arena event. Balances are keyed by Normie id, so they follow
+  the NFT. Charging is lazy: when a paid round starts, every active registered Normie whose balance covers the price plays
+  and is charged at once; the others sit out until a top-up or a credit (a lower price alone does not bring them back). Withdrawals (holder or delegate, never paused) and
+  `clear` for burned Normies (anyone) live here. Long-lived; the three contracts below are its authorized writers and
+  can be replaced.
+- **NormiesArena.sol**: rounds. `startRound`, `payout` and `endRound` (owner or operator; up to 300 entries per call,
+  refunds credit the round's price, what is left rolls into the next round) and `cancel` (owner or guardian; refunds
+  nobody, rolls the pool forward). Entry price and free rounds (1 and 2 free by default).
+- **NormiesArenaQueue.sol**: joining (registers a Normie, no leave), top-ups, agent links, and sponsorship from the
+  team's wallet.
 - **NormiesArenaSkins.sol**: sells skins for #PIXEL paid straight to the treasury; the purchase is recorded
   against the Normie.
 - **arena/ArenaAccess.sol**: shared base of the three logic contracts (owner, roles, pause).
+- **arena/NormiesArenaMigrator.sol**: the one-off v2 to v3 move (balances, pools, registrations, agent links, skin
+  purchase counts), locked after `finish`. Run with `script/arena-cutover.sh` (Safe batches, `DeployArena`,
+  `MigrateArena`, checks); `script/arena-local.sh up` runs the same cutover on a local fork under the app.
 
 ## Ownership
 
@@ -141,11 +149,12 @@ contracts on Ethereum mainnet. Provides REST endpoints for individual token data
 
 It also serves indexed data from the Ponder indexer in `api-server/indexer/`: canvas history, `/pixels/*` and
 `/market/*` (Pixel Market), `/revshare/*`, `/zombies/*`, `/rarity/*`, `/agents/*` and `/arena/*` (Normies Arena:
-status, rounds, players and winners, the queue, per-Normie and per-holder state, activity, skin purchases and a
-leaderboard). The full list is served at `/docs` and `/llms.txt` (`api-server/src/content/`).
+status, rounds with their players, winners and refunds, registered Normies, per-Normie and per-holder state, activity,
+skin purchases and records). The full list is served at `/docs` and `/llms.txt` (`api-server/src/content/`).
 
-The Arena routes are off until both sides know the storage contract: `ARENA_STORAGE_ADDRESS` for the API and
-`PONDER_ARENA_STORAGE_ADDRESS` (with `PONDER_ARENA_START_BLOCK`) for the indexer.
+The Arena routes are off until both sides know the v3 storage contract: `ARENA_STORAGE_ADDRESS` for the API and
+`PONDER_ARENA_V3_STORAGE_ADDRESS` (with `PONDER_ARENA_V3_START_BLOCK`) for the indexer. The v2 history is indexed
+from `PONDER_ARENA_V2_STORAGE_ADDRESS` and `PONDER_ARENA_V2_START_BLOCK`.
 
 Includes LRU caching, rate limiting, and fallback RPC support. See `api-server/.env.example` for configuration.
 
@@ -179,16 +188,21 @@ pnpm dev
 | NormiesRendererV6      | `0xd6747533697878a6a3a29B5cCf815740BA23998D` |
 | NormiesRevenuePool     | `0x481384812e79bf0d11FC0b1704af445D5F06813c` |
 | NormiesRoyaltySplitter | `0xA68A225f62772E6158f2B5f8afC184AdB69c3282` |
-| NormiesArenaStorage    | `0x980D97E7B77Cd204707daedA6C9E51FbcAE84E1e` |
-| NormiesArena           | `0x6A80F157BFC981098132c344Ee4879f8E8CF1d22` |
-| NormiesArenaQueue      | `0xEAB672382b3d717F84352C0A63ae264C6A31b903` |
-| NormiesArenaSkins      | `0xaF3060dBdb4E789163Babf4AFc3CE1ddAD82a0cB` |
+| NormiesArenaStorage    | `<V3_STORAGE: fill in after deploy>`         |
+| NormiesArena           | `<V3_ARENA: fill in after deploy>`           |
+| NormiesArenaQueue      | `<V3_QUEUE: fill in after deploy>`           |
+| NormiesArenaSkins      | `<V3_SKINS: fill in after deploy>`           |
+| NormiesArenaMigrator   | `<V3_MIGRATOR: fill in after deploy>`        |
 
 The Pixel Market stack was deployed at block 26,122,420 and went live on 5 October 2026. All six are verified on
 Etherscan. The cutover runbook is [PixelMarketUpdate.md](PixelMarketUpdate.md); running the revenue share every month, and its
 incidents, is [RevenueShareRunbook.md](RevenueShareRunbook.md).
 
-The four Arena contracts were deployed at block 26,410,434 and are owned by the Admin Safe.
+The four Arena v3 contracts and the migrator were deployed at block `<V3_BLOCK: fill in after deploy>` and are owned
+by the Admin Safe. The retired v2 contracts (deployed at block 26,410,434; paused and empty since the cutover) are
+NormiesArenaStorage `0x980D97E7B77Cd204707daedA6C9E51FbcAE84E1e`, NormiesArena
+`0x6A80F157BFC981098132c344Ee4879f8E8CF1d22`, NormiesArenaQueue `0xEAB672382b3d717F84352C0A63ae264C6A31b903` and
+NormiesArenaSkins `0xaF3060dBdb4E789163Babf4AFc3CE1ddAD82a0cB`.
 
 ## Security
 

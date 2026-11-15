@@ -2,26 +2,24 @@
 pragma solidity 0.8.33;
 
 import { Vm } from "forge-std/src/Vm.sol";
-import { ArenaAuditBase } from "./ArenaAuditBase.sol";
-import { NormiesArenaStorage } from "../../../src/NormiesArenaStorage.sol";
-import { NormiesArenaQueue } from "../../../src/NormiesArenaQueue.sol";
-import { NormiesArena } from "../../../src/NormiesArena.sol";
-import { NormiesArenaSkins } from "../../../src/NormiesArenaSkins.sol";
+import { ArenaTestBase } from "../../arena/ArenaTestBase.sol";
 
 /**
- * @notice D8: worst-case gas at the sizes the contracts enforce on chain, against the 16,777,216 per-transaction cap.
+ * @notice Worst-case gas at the sizes the contracts enforce on chain, against the 16,777,216 per-transaction cap.
  *
  *         RUN WITH --isolate. In isolation mode every top-level call below is its own transaction: storage starts
- *         cold, each slot's "original value" is its value before that transaction (so a write to a slot changed
- *         earlier in the test is charged in full), and the 21,000 base plus calldata are charged. Calibration
- *         (ArenaGasCalib.t.sol): a call made with {gas: g} runs as a transaction with gas limit g + 21,000.
+ *         cold, each slot's "original value" is its value before that transaction, and the 21,000 base plus
+ *         calldata are charged. A call made with {gas: g} runs as a transaction with gas limit g + 21,000.
  *
  *         Each scenario (a) must succeed with a gas limit of exactly the cap, and (b) reports the smallest gas
- *         limit at which it succeeds, found by binary search. (b) is the number to compare with the cap: the cap
- *         is on the limit, before refunds.
+ *         limit at which it succeeds, found by binary search. (b) is the number to compare with the cap.
+ *
+ *         These use the mock ledger; the real ledger's costs for deposit and withdraw batches are measured in
+ *         NormiesArenaLedger.t.sol.
  */
-contract ArenaGasTest is ArenaAuditBase {
+contract ArenaGasTest is ArenaTestBase {
     uint256 constant BASE = 21_000;
+    uint256 constant GAS_CAP = 16_777_216;
 
     function _measure(string memory name, address caller, address target, bytes memory data) internal {
         uint256 snap = vm.snapshotState();
@@ -44,247 +42,179 @@ contract ArenaGasTest is ArenaAuditBase {
         uint256 minLimit = lo + BASE;
         emit log_string(name);
         emit log_named_uint("  tx gas used (after refund)", g.gasTotalUsed);
-        emit log_named_int("  refund", g.gasRefunded);
         emit log_named_uint("  MIN TX GAS LIMIT", minLimit);
         emit log_named_uint("  headroom under 16,777,216", GAS_CAP - minLimit);
         assertLt(minLimit, GAS_CAP);
     }
 
-    // ───────────── settle / cancel at MAX_CAPACITY, every Normie short and returning to the line ─────────────
+    /// @dev Registers Normie `id` for alice with `amount` pixels, linking its agent directly on the storage.
+    function _quickJoin(uint256 id, uint256 amount) internal {
+        if (ledger.balanceOf(alice) < amount) ledger.mint(alice, amount);
+        identity.setOwner(id, alice);
+        identity.bind(id, id);
+        vm.prank(address(queue));
+        store.linkAgent(id, id);
+        vm.prank(alice);
+        if (amount == 0) queue.join(id);
+        else queue.deposit(id, amount);
+    }
 
-    /// @dev Round 1: paid, 300 players (ids 9700..9999, distinct holders, balance exactly the price), finished with
-    ///      results posted, pool 300 + 77. Round 2 (paid) then takes every one of them out of the line short of funds.
-    function _fullRoundAllShort() internal returns (uint256[] memory winners, bytes32 h) {
-        assertEq(arena.MAX_CAPACITY(), 300);
-        arena.setCapacity(300);
-        arena.setWinnerBps(10_000);
-        arena.setMaxScan(80);
-        arena.setFreeRound(1, false);
-        arena.setFreeRound(2, false);
+    /// @dev Registers Normie `id` with `amount` pixels straight through the writer (the pixels are minted to the
+    ///      storage beforehand), to seed thousands of Normies within the test's gas budget.
+    function _rawJoin(uint256 id, uint256 amount) internal {
+        vm.prank(address(queue));
+        if (amount == 0) store.register(id);
+        else store.deposit(id, alice, amount, true);
+    }
+
+    /// @dev Runs `count` empty paid rounds at price 1.
+    function _emptyRounds(uint256 count) internal {
+        for (uint256 i; i < count; ++i) {
+            next(1);
+        }
+    }
+
+    /// @notice startRound at the highest price, with C misaligned (1 mod 16) and every one of the 10,000 lanes it
+    ///         reads holding a Normie: 626 cold slots.
+    function testGasStartRoundAtMaxPrice() public {
+        next(0);
+        next(0);
+        next(1); // C = 1
+        ledger.mint(address(store), 49_995_000); // sum of 0 .. 9,999
+        for (uint256 i; i < 10_000; ++i) {
+            _rawJoin(i, i); // levels 1 .. 10,000
+        }
+        endOpen();
+        arena.setEntryPrice(10_000);
+        assertEq(arena.previewPlayers(), 0); // balances 0 .. 9,999: all of them drop
+        _measure(
+            "startRound, price 10,000, 626 full lane slots",
+            operator,
+            address(arena),
+            abi.encodeCall(arena.startRound, (4))
+        );
+        arena.startRound(4);
+        assertEq(store.roundOf(4).players, 0);
+        assertEq(store.activeCount(), 0);
+    }
+
+    /// @notice A full endRound: 300 prizes to short Normies that each dropped out in a different round over 520
+    ///         rounds (distinct leftover searches), each prize landing in a fresh lane slot.
+    function testGasEndRoundAt300Entries() public {
+        uint256 n = arena.MAX_PAYOUT_ENTRIES();
+        for (uint256 i; i < n; ++i) {
+            _quickJoin(i, i + 1); // drops at round 4 + i
+        }
+        next(0);
+        next(0);
+        _emptyRounds(520);
+        assertEq(store.activeCount(), 0);
+        endOpen();
+        ledger.mint(sponsorWallet, 1_000_000);
+        uint256 upcoming = store.currentRound() + 1;
         vm.prank(sponsorWallet);
-        queue.sponsor(1, 77);
-        for (uint256 i; i < 300; ++i) {
-            address holder = address(uint160(0x100000 + i));
-            ledger.mintTo(holder, 1);
-            join(9700 + i, holder, 1);
+        queue.sponsor(upcoming, 900_000);
+        uint256 round = next(1);
+        uint256[] memory winners = new uint256[](n);
+        uint256[] memory amounts = new uint256[](n);
+        for (uint256 i; i < n; ++i) {
+            winners[i] = i;
+            amounts[i] = 100 + i * 17;
         }
-        admitAll(1);
-        assertEq(store.playerCount(1), 300);
-        arena.finishRound(1);
-        h = keccak256("r");
-        arena.postResults(1, h);
-        admitAll(2);
-        assertEq(store.playerCount(2), 0);
-        for (uint256 i; i < 300; ++i) {
-            assertTrue(shortOfFunds(9700 + i));
-            assertEq(store.balanceOf(9700 + i), 0);
-        }
-        winners = arena.players(1);
-        assertEq(arena.winnerCountOf(1), 300);
-    }
-
-    function test_gas_settle_300_winners_all_returning() public {
-        (uint256[] memory winners, bytes32 h) = _fullRoundAllShort();
         _measure(
-            "settle: 300 winners, all short, all returning to the line",
-            address(this),
+            "endRound, 300 prizes to short Normies with distinct drop rounds over 520 rounds",
+            operator,
             address(arena),
-            abi.encodeCall(arena.settle, (1, h, winners))
+            abi.encodeCall(arena.endRound, (round, winners, amounts, none))
         );
-        arena.settle(1, h, winners);
-        for (uint256 i; i < 300; ++i) {
-            assertTrue(inLine(9700 + i));
-        }
-        assertBacked();
-    }
-
-    function test_gas_cancel_300_players_all_returning() public {
-        _fullRoundAllShort();
         _measure(
-            "cancel: 300 players, all short, all returning to the line",
-            guardian,
+            "payout, 300 prizes to short Normies with distinct drop rounds over 520 rounds",
+            operator,
             address(arena),
-            abi.encodeCall(arena.cancel, (1))
-        );
-        arena.cancel(1);
-        for (uint256 i; i < 300; ++i) {
-            assertTrue(inLine(9700 + i));
-            assertEq(store.balanceOf(9700 + i), 1);
-        }
-        assertBacked();
-    }
-
-    // ───────────── admit at MAX_SCAN ─────────────
-
-    function _line80(uint256 balance) internal {
-        assertEq(arena.MAX_SCAN(), 80);
-        arena.setCapacity(300);
-        arena.setMaxScan(80);
-        arena.setFreeRound(1, false);
-        for (uint256 i; i < 80; ++i) {
-            address holder = address(uint160(0x100000 + i));
-            ledger.mintTo(holder, balance);
-            join(9900 + i, holder, balance);
-        }
-    }
-
-    function test_gas_admit_80_all_seated_paid() public {
-        _line80(2);
-        vm.prank(operator);
-        arena.startRound(1);
-        _measure(
-            "admit(80): all seated in a paid round", operator, address(arena), abi.encodeCall(arena.admit, (1, 80))
-        );
-        vm.prank(operator);
-        arena.admit(1, 80);
-        assertEq(store.playerCount(1), 80);
-    }
-
-    function test_gas_admit_80_all_short() public {
-        _line80(2);
-        arena.setEntryPrice(5);
-        vm.prank(operator);
-        arena.startRound(1);
-        _measure("admit(80): all short of funds", operator, address(arena), abi.encodeCall(arena.admit, (1, 80)));
-    }
-
-    function test_gas_admit_80_all_burned() public {
-        _line80(2);
-        for (uint256 i; i < 80; ++i) {
-            burnNormie(9900 + i);
-        }
-        vm.prank(operator);
-        arena.startRound(1);
-        _measure("admit(80): all burned", operator, address(arena), abi.encodeCall(arena.admit, (1, 80)));
-    }
-
-    function test_gas_admit_80_all_stale() public {
-        _line80(2);
-        // Every holder pauses and resumes, leaving 80 stale tickets at the head.
-        for (uint256 i; i < 80; ++i) {
-            address holder = address(uint160(0x100000 + i));
-            vm.startPrank(holder);
-            queue.pause(9900 + i);
-            queue.resume(9900 + i);
-            vm.stopPrank();
-        }
-        vm.prank(operator);
-        arena.startRound(1);
-        _measure("admit(80): all stale tickets", operator, address(arena), abi.encodeCall(arena.admit, (1, 80)));
-        vm.prank(operator);
-        arena.admit(1, 80);
-        assertEq(store.playerCount(1), 0);
-    }
-
-    // ───────────── Queue batches at MAX_BATCH ─────────────
-
-    /// @dev 50 fresh Normies, each with its own holder who gave `hot` a v1 wallet-level delegation (the costliest
-    ///      path through holderFor: three v2 reads miss, then v1 falls through token and contract to wallet level).
-    function _fifty(bool link) internal returns (uint256[] memory ids, uint256[] memory amounts) {
-        assertEq(queue.MAX_BATCH(), 50);
-        ids = new uint256[](50);
-        amounts = new uint256[](50);
-        for (uint256 i; i < 50; ++i) {
-            address holder = address(uint160(0x200000 + i));
-            ids[i] = 9900 + i;
-            amounts[i] = 3;
-            give(ids[i], holder);
-            if (link) {
-                vm.prank(holder);
-                queue.bindAgent(ids[i], ids[i]);
-            }
-            regV1.delegateForAll(hot, holder, true);
-        }
-    }
-
-    function test_gas_depositRegisteredBatch_50_by_delegate() public {
-        (uint256[] memory ids, uint256[] memory amounts) = _fifty(false);
-        _measure(
-            "depositRegisteredBatch(50): v1 wallet-level delegate, 50 distinct holders, first link + first deposit",
-            hot,
-            address(queue),
-            abi.encodeCall(queue.depositRegisteredBatch, (ids, amounts, ids))
+            abi.encodeCall(arena.payout, (round, winners, amounts, none))
         );
     }
 
-    function test_gas_depositBatch_50_enroll_by_delegate() public {
-        (uint256[] memory ids, uint256[] memory amounts) = _fifty(true);
-        _measure(
-            "depositBatch(50, enroll): v1 wallet-level delegate, 50 distinct holders",
-            hot,
-            address(queue),
-            abi.encodeCall(queue.depositBatch, (ids, amounts, true))
-        );
-    }
-
-    function test_gas_resumeBatch_50_by_delegate() public {
-        (uint256[] memory ids,) = _fifty(true);
-        _measure("resumeBatch(50)", hot, address(queue), abi.encodeCall(queue.resumeBatch, (ids)));
-    }
-
-    function test_gas_resumeRegisteredBatch_50_by_delegate() public {
-        (uint256[] memory ids,) = _fifty(false);
-        _measure(
-            "resumeRegisteredBatch(50)", hot, address(queue), abi.encodeCall(queue.resumeRegisteredBatch, (ids, ids))
-        );
-    }
-
-    function test_gas_pauseBatch_50_by_delegate() public {
-        (uint256[] memory ids, uint256[] memory amounts) = _fifty(true);
-        vm.prank(hot);
-        queue.depositBatch(ids, amounts, true);
-        _measure("pauseBatch(50)", hot, address(queue), abi.encodeCall(queue.pauseBatch, (ids)));
-    }
-
-    // ───────────── withdrawBatch at MAX_WITHDRAW_BATCH ─────────────
-
-    /// @dev 100 Normies with 100 distinct holders whose ledger wallets have never held a pixel (the delegate paid the
-    ///      top-ups), so each payout writes three fresh ledger slots (balance, locked amount, unlock time).
-    function test_gas_withdrawBatch_100_by_delegate_fresh_holders() public {
-        assertEq(store.MAX_WITHDRAW_BATCH(), 100);
-        uint256[] memory ids = new uint256[](100);
-        uint256[] memory amounts = new uint256[](100);
-        for (uint256 i; i < 100; ++i) {
-            address holder = address(uint160(0x300000 + i));
-            ids[i] = 9900 + i;
-            amounts[i] = 3;
-            give(ids[i], holder);
-            regV1.delegateForAll(hot, holder, true);
-            vm.prank(hot);
-            queue.deposit(ids[i], 3, false);
-            assertEq(ledger.balanceOf(holder), 0);
+    /// @notice 300 refunds in a paid round to cold active players.
+    function testGasEndRoundAt300Refunds() public {
+        uint256 n = arena.MAX_PAYOUT_ENTRIES();
+        for (uint256 i; i < n; ++i) {
+            _quickJoin(i, 1000 + i * 16);
+        }
+        next(0);
+        next(0);
+        uint256 round = next(3);
+        uint256[] memory refundees = new uint256[](n);
+        for (uint256 i; i < n; ++i) {
+            refundees[i] = i;
         }
         _measure(
-            "withdrawBatch(100): v1 wallet-level delegate, 100 distinct fresh holders, real ledger",
-            hot,
+            "endRound, 300 refunds to cold active players",
+            operator,
+            address(arena),
+            abi.encodeCall(arena.endRound, (round, none, none, refundees))
+        );
+    }
+
+    /// @dev Seeds `n` Normies for the batch scenarios: even ids short (each dropping out in a different round,
+    ///      leftover 1), odd ids active with large balances in distinct lane slots. Then 520 rounds at price 2.
+    function _mixedNormies(uint256 n) internal returns (uint256[] memory ids) {
+        ids = new uint256[](n);
+        for (uint256 i; i < n; ++i) {
+            _quickJoin(i, i % 2 == 0 ? 2 * i + 3 : 5000 + i * 16);
+            ids[i] = i;
+        }
+        next(0);
+        next(0);
+        for (uint256 i; i < 520; ++i) {
+            next(2);
+        }
+        assertEq(store.stateOf(0), 2);
+        assertEq(store.stateOf(1), 1);
+    }
+
+    /// @notice clearBatch at MAX_BATCH: burned Normies, half short with distinct drop rounds, half active.
+    function testGasClearBatch() public {
+        uint256[] memory ids = _mixedNormies(store.MAX_BATCH());
+        for (uint256 i; i < ids.length; ++i) {
+            identity.burn(i);
+        }
+        _measure(
+            "clearBatch, 100 burned Normies (half lazily short)",
+            bob,
+            address(store),
+            abi.encodeCall(store.clearBatch, (ids))
+        );
+    }
+
+    /// @notice withdrawBatch at MAX_BATCH (mock ledger): half short with distinct drop rounds, half active moving to
+    ///         fresh lane slots.
+    function testGasWithdrawBatch() public {
+        uint256[] memory ids = _mixedNormies(store.MAX_BATCH());
+        uint256[] memory amounts = new uint256[](ids.length);
+        for (uint256 i; i < ids.length; ++i) {
+            amounts[i] = i % 2 == 0 ? 1 : 2000;
+        }
+        _measure(
+            "withdrawBatch, 100 entries, half lazily short (mock ledger)",
+            alice,
             address(store),
             abi.encodeCall(store.withdrawBatch, (ids, amounts))
         );
-        vm.prank(hot);
-        store.withdrawBatch(ids, amounts);
-        assertEq(ledger.balanceOf(address(uint160(0x300000))), 3);
-        assertBacked();
     }
 
-    // ───────────── deployments ─────────────
-
-    /// @dev Under --isolate each `new` is its own creation transaction; the gasleft difference is its gas.
-    function test_gas_deployments() public {
-        uint256 g = gasleft();
-        NormiesArenaStorage s = new NormiesArenaStorage(
-            address(ledger), address(normies), address(adapter), address(regV2), address(regV1), address(this)
+    /// @notice A single top-up bringing a short Normie back after 520 rounds.
+    function testGasDepositAfterLongShort() public {
+        _quickJoin(1, 1);
+        next(0);
+        next(0);
+        next(2);
+        _emptyRounds(520);
+        _measure(
+            "deposit, short Normie back after 520 rounds (mock ledger)",
+            alice,
+            address(queue),
+            abi.encodeCall(queue.deposit, (1, 5))
         );
-        emit log_named_uint("deploy NormiesArenaStorage", g - gasleft());
-        assertLt(g - gasleft(), GAS_CAP);
-        g = gasleft();
-        new NormiesArena(address(s), address(this));
-        emit log_named_uint("deploy NormiesArena", g - gasleft());
-        assertLt(g - gasleft(), GAS_CAP);
-        g = gasleft();
-        new NormiesArenaQueue(address(s), address(this));
-        emit log_named_uint("deploy NormiesArenaQueue", g - gasleft());
-        g = gasleft();
-        new NormiesArenaSkins(address(s), address(this), treasury);
-        emit log_named_uint("deploy NormiesArenaSkins", g - gasleft());
     }
 }
