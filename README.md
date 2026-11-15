@@ -188,18 +188,18 @@ pnpm dev
 | NormiesRendererV6      | `0xd6747533697878a6a3a29B5cCf815740BA23998D` |
 | NormiesRevenuePool     | `0x481384812e79bf0d11FC0b1704af445D5F06813c` |
 | NormiesRoyaltySplitter | `0xA68A225f62772E6158f2B5f8afC184AdB69c3282` |
-| NormiesArenaStorage    | `<V3_STORAGE: fill in after deploy>`         |
-| NormiesArena           | `<V3_ARENA: fill in after deploy>`           |
-| NormiesArenaQueue      | `<V3_QUEUE: fill in after deploy>`           |
-| NormiesArenaSkins      | `<V3_SKINS: fill in after deploy>`           |
-| NormiesArenaMigrator   | `<V3_MIGRATOR: fill in after deploy>`        |
+| NormiesArenaStorage    | `0x235403069C8516369Eb36d29bb1a498a469Ab9f0` |
+| NormiesArena           | `0x821D175F6b1B271bA3c62E63270157e6Ad48018B` |
+| NormiesArenaQueue      | `0x5E7A4410375Ce710C04957aa9Ae33467ffD1f9d0` |
+| NormiesArenaSkins      | `0x3F298B7b7d5300Aab34a22470b8d1d54b8b30A05` |
+| NormiesArenaMigrator   | `0x16f8620B88cDee0EecF783735f00b7AEACD540Fd` |
 
 The Pixel Market stack was deployed at block 26,122,420 and went live on 5 October 2026. All six are verified on
 Etherscan. The cutover runbook is [PixelMarketUpdate.md](PixelMarketUpdate.md); running the revenue share every month, and its
 incidents, is [RevenueShareRunbook.md](RevenueShareRunbook.md).
 
-The four Arena v3 contracts and the migrator were deployed at block `<V3_BLOCK: fill in after deploy>` and are owned
-by the Admin Safe. The retired v2 contracts (deployed at block 26,410,434; paused and empty since the cutover) are
+The four Arena v3 contracts and the migrator were deployed at block 26,421,432 on 15 November 2026, are verified on
+Etherscan and are owned by the Admin Safe. The retired v2 contracts (deployed at block 26,410,434; paused and empty since the cutover) are
 NormiesArenaStorage `0x980D97E7B77Cd204707daedA6C9E51FbcAE84E1e`, NormiesArena
 `0x6A80F157BFC981098132c344Ee4879f8E8CF1d22`, NormiesArenaQueue `0xEAB672382b3d717F84352C0A63ae264C6A31b903` and
 NormiesArenaSkins `0xaF3060dBdb4E789163Babf4AFc3CE1ddAD82a0cB`.

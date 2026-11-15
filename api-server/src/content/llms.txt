@@ -683,13 +683,13 @@ Pixel Market stack:
   - Holds the holders' half of market fees and royalties and pays it out in epochs with Merkle proofs.
 - NormiesRoyaltySplitter: `0xA68A225f62772E6158f2B5f8afC184AdB69c3282`
   - Royalty receiver: splits royalties between the revenue pool and the team.
-- NormiesArenaStorage: (address added at the v3 launch)
+- NormiesArenaStorage: `0x235403069C8516369Eb36d29bb1a498a469Ab9f0`
   - Holds every Arena pixel and all Arena state: per-Normie balances and states, agent links, rounds, pools and skin purchases. Emits every Arena event.
-- NormiesArena: (address added at the v3 launch)
+- NormiesArena: `0x821D175F6b1B271bA3c62E63270157e6Ad48018B`
   - Rounds: start, pay out, end and cancel.
-- NormiesArenaQueue: (address added at the v3 launch)
+- NormiesArenaQueue: `0x5E7A4410375Ce710C04957aa9Ae33467ffD1f9d0`
   - Registering, top-ups, agent links and sponsorship. Withdrawals go straight to the storage.
-- NormiesArenaSkins: (address added at the v3 launch)
+- NormiesArenaSkins: `0x3F298B7b7d5300Aab34a22470b8d1d54b8b30A05`
   - Skin purchases, paid in #PIXEL.
 - Arena v2 (retired, history only): NormiesArenaStorage `0x980D97E7B77Cd204707daedA6C9E51FbcAE84E1e`, NormiesArena `0x6A80F157BFC981098132c344Ee4879f8E8CF1d22`, NormiesArenaQueue `0xEAB672382b3d717F84352C0A63ae264C6A31b903`, NormiesArenaSkins `0xaF3060dBdb4E789163Babf4AFc3CE1ddAD82a0cB`.
 
