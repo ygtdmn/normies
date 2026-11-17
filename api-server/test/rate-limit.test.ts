@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { parseInternalKeys } from "../src/config.js";
 import { TIERS, TokenBuckets, clientAddress, costOf, ipv6Prefix64, tierOf } from "../src/lib/rate-policy.js";
-import { createRateLimiter, type RateLimiterOptions } from "../src/middleware/rate-limit.js";
+import { createRateLimiter, routeShape, type RateLimiterOptions } from "../src/middleware/rate-limit.js";
 
 const headers = (h: Record<string, string>) => (name: string) => h[name.toLowerCase()];
 const noQuery = () => undefined;
@@ -105,6 +105,7 @@ function harness(mode: RateLimiterOptions["mode"], extra: Partial<RateLimiterOpt
     const app = new Hono();
     app.use("*", limiter.middleware);
     app.get("/cached", (c) => c.json({ ok: true }, 200, { "Cache-Control": "public, max-age=60, s-maxage=300" }));
+    app.get("/history/burns/:id", (c) => c.json({ error: "Not found" }, 404));
     app.get("*", (c) => c.json({ ok: true }));
     const hit = (path = "/x", h: Record<string, string> = {}) =>
         app.request(path, { headers: { "x-real-ip": "198.51.100.5", ...h } });
@@ -199,5 +200,38 @@ describe("legacy window", () => {
         expect(cached.headers.get("X-RateLimit-Remaining")).toBeNull();
         const live = await hit("/x");
         expect(live.headers.get("X-RateLimit-Remaining")).toBe("1");
+    });
+});
+
+describe("top paths", () => {
+    it("folds ids, addresses, names and burn ids into one route", () => {
+        expect(routeShape("/normie/123/image.svg")).toBe("/normie/:n/image.svg");
+        expect(routeShape("/history/burns/2-6")).toBe("/history/burns/:n-:n");
+        expect(routeShape("/holders/0xAbC0000000000000000000000000000000000001")).toBe("/holders/:hex");
+        expect(routeShape("/rarity/holder/vitalik.eth")).toBe("/rarity/holder/:ens");
+        expect(routeShape("/agents/metadata/42.json")).toBe("/agents/metadata/:n.json");
+        expect(routeShape("/market/stats")).toBe("/market/stats");
+    });
+
+    it("counts each internal key's routes, with tokens and the route's own errors", async () => {
+        const { hit, limiter } = harness("shadow", { legacyMax: 10_000 });
+        for (let i = 0; i < 5; i++) await hit(`/history/burns/${i}`, { "x-internal-secret": KEY });
+        await hit("/normie/1/image.svg", { "x-internal-secret": KEY });
+        await hit("/normie/2/image.svg", { "x-internal-secret": KEY });
+        await hit("/normie/images?ids=1,2,3", { origin: "https://www.normies.art" });
+        const { topPaths } = limiter.snapshot();
+        expect(topPaths.site).toEqual([
+            { path: "/history/burns/:n", requests: 5, tokens: 5, errors: 5 },
+            { path: "/normie/:n/image.svg", requests: 2, tokens: 2, errors: 0 },
+        ]);
+        expect(topPaths.website).toEqual([{ path: "/normie/images", requests: 1, tokens: 2, errors: 0 }]);
+    });
+
+    it("keeps a bounded number of routes per group", async () => {
+        const { hit, limiter } = harness("shadow", { legacyMax: 10_000 });
+        for (let i = 0; i < 310; i++) await hit(`/r${i}`, { "x-internal-secret": KEY });
+        const rows = limiter.snapshot().topPaths.site;
+        expect(rows.length).toBe(15);
+        expect(rows[0]).toMatchObject({ path: "(other)", requests: 10 });
     });
 });

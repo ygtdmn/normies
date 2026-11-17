@@ -62,6 +62,12 @@ export interface RateLimitSnapshot {
     topRejected: { client: string; tier: Tier; rejected: number }[];
     /** 429s the legacy window sent this period (legacy and shadow modes). */
     legacyRejected: number;
+    /**
+     * What each internal key, and each other tier as a whole, asked for most this period, by
+     * tokens. Ids, addresses and names in a path are folded (`/normie/:n/image.svg`), so one
+     * route is one row. `errors` counts the route's own 4xx and 5xx answers, not 429s.
+     */
+    topPaths: Record<string, PathCount[]>;
     buckets: number;
     policies: typeof TIERS;
 }
@@ -89,6 +95,31 @@ function isEdgeCacheable(cacheControl: string | null): boolean {
     return sMaxAge !== null && Number(sMaxAge[1]) > 0;
 }
 
+export interface PathCount {
+    path: string;
+    requests: number;
+    tokens: number;
+    errors: number;
+}
+
+/** Distinct route shapes kept per caller group per period; the rest count as "(other)". */
+const MAX_SHAPES = 300;
+
+/** A path with its ids folded: numbers, 0x addresses and hashes, ENS names, burn ids like 2-6. */
+export function routeShape(path: string): string {
+    return path
+        .split("/")
+        .map((part) => {
+            if (/^\d+$/.test(part)) return ":n";
+            if (/^\d+-\d+$/.test(part)) return ":n-:n";
+            if (/^0x[0-9a-fA-F]+$/.test(part)) return ":hex";
+            if (/\.eth$/i.test(part)) return ":ens";
+            if (/^\d+\.(svg|png|json)$/.test(part)) return ":n." + part.split(".").pop();
+            return part;
+        })
+        .join("/");
+}
+
 function emptyCounters(): Record<Tier, TierCounters> {
     const zero = (): TierCounters => ({ requests: 0, tokens: 0, held: 0, rejected: 0 });
     return { internal: zero(), website: zero(), public: zero(), crawler: zero() };
@@ -107,6 +138,24 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
     let internalKeys = new Map<string, { requests: number; tokens: number; rejected: number }>();
     let rejectedBy = new Map<string, { tier: Tier; rejected: number }>();
     let legacyRejected = 0;
+    let paths = new Map<string, Map<string, PathCount>>();
+
+    /** The row for this group and route this period, created on first use. */
+    function pathRow(group: string, path: string): PathCount {
+        let rows = paths.get(group);
+        if (!rows) {
+            rows = new Map();
+            paths.set(group, rows);
+        }
+        let shape = routeShape(path);
+        if (!rows.has(shape) && rows.size >= MAX_SHAPES) shape = "(other)";
+        let row = rows.get(shape);
+        if (!row) {
+            row = { path: shape, requests: 0, tokens: 0, errors: 0 };
+            rows.set(shape, row);
+        }
+        return row;
+    }
 
     function keyName(secret: string | undefined): string | null {
         if (!secret) return null;
@@ -147,6 +196,12 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
                 .slice(0, 15)
                 .map(([client, r]) => ({ client, tier: r.tier, rejected: r.rejected })),
             legacyRejected,
+            topPaths: Object.fromEntries(
+                [...paths].map(([group, rows]) => [
+                    group,
+                    [...rows.values()].sort((a, b) => b.tokens - a.tokens).slice(0, 15).map((row) => ({ ...row })),
+                ]),
+            ),
             buckets: buckets.size,
             policies: TIERS,
         };
@@ -160,6 +215,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
             internalKeys = new Map();
             rejectedBy = new Map();
             legacyRejected = 0;
+            paths = new Map();
             buckets.prune((id) => TIERS[id.slice(0, id.indexOf(":")) as Tier] ?? TIERS.public);
             const cutoff = now() - options.legacyWindowMs;
             for (const [client, stamps] of window) if (!stamps.some((t) => t >= cutoff)) window.delete(client);
@@ -198,12 +254,16 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
 
         let decision: Decision | null = null;
         let bucketId = "";
+        let row: PathCount | null = null;
         if (options.mode !== "legacy") {
             const tier: Tier = service ? "internal" : tierOf(header);
             bucketId = service ? `internal:${service}` : `${tier}:${client}`;
             const cost = costOf(c.req.path, (name) => c.req.query(name));
             decision = buckets.take(bucketId, TIERS[tier], cost);
             record(tier, service ?? client, decision, cost);
+            row = pathRow(service ?? tier, c.req.path);
+            row.requests += 1;
+            row.tokens += cost;
             // Watching only: a "hold" took its tokens, so the queue it simulates stays real, but
             // nothing waits.
             if (options.mode === "shadow" && decision.action === "hold") buckets.release(bucketId);
@@ -219,6 +279,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
                 }
             }
             await next();
+            if (row && c.res.status >= 400) row.errors += 1;
             const allowed = decision;
             editHeaders(c, (headers) => {
                 if (isEdgeCacheable(headers.get("Cache-Control"))) {
@@ -245,6 +306,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
             c.header("X-RateLimit-Remaining", String(verdict.remaining));
         }
         await next();
+        if (row && c.res.status >= 400) row.errors += 1;
         editHeaders(c, (headers) => {
             if (isEdgeCacheable(headers.get("Cache-Control"))) for (const name of RATE_HEADERS) headers.delete(name);
         });
