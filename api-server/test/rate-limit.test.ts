@@ -162,7 +162,7 @@ describe("enforce mode", () => {
         }
         expect(waits).toEqual([]);
         const snap = limiter.snapshot();
-        expect(snap.internalKeys.site).toEqual({ requests: 5_000, tokens: 50_000, rejected: 0 });
+        expect(snap.internalKeys.site).toMatchObject({ requests: 5_000, tokens: 50_000, rejected: 0 });
         expect(snap.tiers.internal).toMatchObject({ requests: 5_000, held: 0, rejected: 0 });
         expect(snap.topPaths.site[0]).toMatchObject({ path: "/normie/all/original/data", requests: 5_000 });
         expect(snap.buckets).toBe(0);
@@ -257,5 +257,22 @@ describe("top paths", () => {
         const rows = limiter.snapshot().topPaths.site;
         expect(rows.length).toBe(15);
         expect(rows[0]).toMatchObject({ path: "(other)", requests: 10 });
+    });
+});
+
+describe("who is behind a key", () => {
+    it("lists each internal key's top user agents and source addresses", async () => {
+        const { hit, limiter } = harness("shadow", { legacyMax: 10_000 });
+        for (let i = 0; i < 3; i++) await hit("/x", { "x-internal-secret": KEY, "user-agent": "node", "x-real-ip": "203.0.113.1" });
+        await hit("/x", { "x-internal-secret": KEY, "user-agent": "Python-urllib/3.12", "x-real-ip": "198.51.100.9" });
+        const site = limiter.snapshot().internalKeys.site;
+        expect(site.agents).toEqual([
+            { value: "node", requests: 3 },
+            { value: "Python-urllib/3.12", requests: 1 },
+        ]);
+        expect(site.addresses).toEqual([
+            { value: "203.0.113.1", requests: 3 },
+            { value: "198.51.100.9", requests: 1 },
+        ]);
     });
 });

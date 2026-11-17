@@ -58,7 +58,11 @@ export interface RateLimitSnapshot {
     since: string;
     /** What the token buckets did (enforce) or would have done (shadow). */
     tiers: Record<Tier, TierCounters>;
-    internalKeys: Record<string, { requests: number; tokens: number; rejected: number }>;
+    /**
+     * Our own services by key name. `agents` and `addresses` (top 5 user agents and source
+     * addresses) tell apart two services sharing one key.
+     */
+    internalKeys: Record<string, InternalKeyCount>;
     /** Callers the buckets rejected most this period, excluding internal keys. */
     topRejected: { client: string; tier: Tier; rejected: number }[];
     /** 429s the legacy window sent this period (legacy and shadow modes). */
@@ -103,6 +107,29 @@ function isEdgeCacheable(headers: Headers): boolean {
     return sMaxAge !== null && Number(sMaxAge[1]) > 0;
 }
 
+interface InternalKeyCount {
+    requests: number;
+    tokens: number;
+    rejected: number;
+    agents: { value: string; requests: number }[];
+    addresses: { value: string; requests: number }[];
+}
+
+/** Distinct user agents or addresses kept per key per period; the rest count as "(other)". */
+const MAX_SOURCES = 50;
+
+function bump(counts: Map<string, number>, value: string) {
+    const key = counts.has(value) || counts.size < MAX_SOURCES ? value : "(other)";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+}
+
+function top(counts: Map<string, number>) {
+    return [...counts]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([value, requests]) => ({ value, requests }));
+}
+
 export interface PathCount {
     path: string;
     requests: number;
@@ -143,7 +170,10 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
 
     let since = now();
     let tiers = emptyCounters();
-    let internalKeys = new Map<string, { requests: number; tokens: number; rejected: number }>();
+    let internalKeys = new Map<
+        string,
+        { requests: number; tokens: number; rejected: number; agents: Map<string, number>; addresses: Map<string, number> }
+    >();
     let rejectedBy = new Map<string, { tier: Tier; rejected: number }>();
     let legacyRejected = 0;
     let paths = new Map<string, Map<string, PathCount>>();
@@ -174,6 +204,14 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         return null;
     }
 
+    function recordInternal(service: string, cost: number, agent: string, address: string) {
+        record("internal", service, "allow", cost);
+        const k = internalKeys.get(service);
+        if (!k) return;
+        bump(k.agents, agent);
+        bump(k.addresses, address);
+    }
+
     function record(tier: Tier, who: string, action: Decision["action"], cost: number) {
         const t = tiers[tier];
         t.requests += 1;
@@ -181,7 +219,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         if (action === "hold") t.held += 1;
         if (action === "reject") t.rejected += 1;
         if (tier === "internal") {
-            const k = internalKeys.get(who) ?? { requests: 0, tokens: 0, rejected: 0 };
+            const k = internalKeys.get(who) ?? { requests: 0, tokens: 0, rejected: 0, agents: new Map(), addresses: new Map() };
             k.requests += 1;
             k.tokens += cost;
             internalKeys.set(who, k);
@@ -197,7 +235,12 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
             mode: options.mode,
             since: new Date(since).toISOString(),
             tiers: structuredClone(tiers),
-            internalKeys: Object.fromEntries(internalKeys),
+            internalKeys: Object.fromEntries(
+                [...internalKeys].map(([name, k]) => [
+                    name,
+                    { requests: k.requests, tokens: k.tokens, rejected: k.rejected, agents: top(k.agents), addresses: top(k.addresses) },
+                ]),
+            ),
             topRejected: [...rejectedBy]
                 .sort((a, b) => b[1].rejected - a[1].rejected)
                 .slice(0, 15)
@@ -267,7 +310,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
             if (service) {
                 // Our own services are never limited: counted by name, so a runaway loop still
                 // shows in the stats, but never held or refused.
-                record("internal", service, "allow", cost);
+                recordInternal(service, cost, (header("user-agent") ?? "(none)").slice(0, 120), client);
             } else {
                 const tier = tierOf(header);
                 bucketId = `${tier}:${client}`;
