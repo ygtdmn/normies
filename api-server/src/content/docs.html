@@ -522,8 +522,8 @@
 
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/history/burns/:commitId</span><span class="response-type">application/json</span>
-            <p class="desc">One burn commitment plus its burned token details.</p>
-            <p class="meta">Parameters: <code>commitId</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+            <p class="desc">One burn commitment plus its burned token details, from either canvas. A bare number tries the newest canvas first, then the older one; <code>1-538</code> (the <code>id</code> every burns list returns) names one exactly. 404 when neither canvas has it.</p>
+            <p class="meta">Parameters: <code>commitId</code> (a number or <code>&lt;version&gt;-&lt;number&gt;</code>). Query: <code>version=1|2</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
         </div>
 
         <div class="endpoint">
@@ -600,7 +600,7 @@
 
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/history/burns/pending/legacy</span><span class="response-type">application/json</span>
-            <p class="desc">Original-canvas commitments never revealed there (that canvas is paused after the Pixel Market cutover). Anyone can replay them through <code>NormiesCanvasV2.revealLegacyBurn</code>. Burn commitments carry <code>contractVersion</code> (1 or 2); <code>/history/burns/:commitId</code> takes <code>?version=</code> because ids restart at 0 on V2.</p>
+            <p class="desc">Original-canvas commitments never revealed there (that canvas is paused after the Pixel Market cutover). Anyone can replay them through <code>NormiesCanvasV2.revealLegacyBurn</code>. Burn commitments carry <code>contractVersion</code> (1 or 2); <code>/history/burns/:commitId</code> takes <code>1-538</code> or <code>?version=</code> because ids restart at 0 on V2.</p>
             <p class="meta">Query: <code>owner</code>, <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
         </div>
 

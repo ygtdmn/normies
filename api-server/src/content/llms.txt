@@ -378,8 +378,9 @@ Half of Pixel Market fees and half of collection royalties go to `NormiesRevenue
   - Cache: `public, max-age=60, s-maxage=300`
 
 - `GET /history/burns/{commitId}`
-  - One burn commitment plus burned token details. Commit ids restart at 0 on the V2 canvas; every commitment carries `contractVersion` (1 or 2).
-  - Query: `version=1|2` (defaults to the newest configured canvas).
+  - One burn commitment plus burned token details, from either canvas. Commit ids restart at 0 on the V2 canvas; every commitment carries `contractVersion` (1 or 2).
+  - `commitId` is a number, or `<version>-<number>` (like `1-538`, the `id` every burns list returns) to name one canvas exactly. A bare number tries the newest canvas first, then the older one; 404 when neither has it.
+  - Query: `version=1|2` pins the canvas for a bare number.
   - Cache: `public, max-age=60, s-maxage=300`
 
 - `GET /history/burns/pending/legacy`

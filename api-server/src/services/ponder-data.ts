@@ -11,6 +11,11 @@ function ponderHeaders(init: Record<string, string>): Record<string, string> {
         : { ...init };
 }
 
+/** True when the indexer answered 404: the thing asked for does not exist (yet). */
+export function isPonderNotFound(err: unknown): boolean {
+    return err instanceof Error && err.message.startsWith("Ponder API 404");
+}
+
 export async function ponderFetch<T>(path: string): Promise<T> {
     let res: Response;
     try {

@@ -22,6 +22,7 @@ import {
     getTransformVersion,
     getCustomizedEvents,
     getStats,
+    isPonderNotFound,
     type TransformData,
 } from "../services/ponder-data.js";
 
@@ -92,13 +93,32 @@ history.get("/burns/pending/legacy", async (c) => {
     return c.json(await getPendingLegacyBurns(owner, limit, offset));
 });
 
-// Commit ids restart at 0 on the V2 canvas; `?version=1|2` picks the generation
-// (defaults to the newest one the indexer is configured with).
+// Both canvases' commitments. Commit ids restart at 0 on the V2 canvas, so a bare number is
+// ambiguous: `1-538` names one exactly (the `id` every burns list returns), `?version=1|2` picks
+// a canvas, and a bare number alone tries the newest canvas first, then the older one. Only an
+// id that is on neither canvas is a 404.
+const COMMIT_ID = /^(?:([12])-)?(\d{1,12})$/;
+const BURN_VERSIONS = [2, 1] as const;
+
 history.get("/burns/:commitId", async (c) => {
-    const version = parseVersionQuery(c);
-    if (version && typeof version === "object") return c.json(version, 400);
-    const commitment = await getBurnCommitment(c.req.param("commitId"), version);
-    return c.json(commitment);
+    const match = COMMIT_ID.exec(c.req.param("commitId"));
+    if (!match) return c.json({ error: "commitId must be a number, or <version>-<number> like 1-538" }, 400);
+    const query = parseVersionQuery(c);
+    if (query && typeof query === "object") return c.json(query, 400);
+    const named = match[1] ? (Number(match[1]) as 1 | 2) : undefined;
+    if (named && query && named !== query) return c.json({ error: `${match[0]} is a V${named} commitment, but version=${query}` }, 400);
+    const commitId = match[2];
+
+    const pinned = named ?? query;
+    if (pinned) return c.json(await getBurnCommitment(commitId, pinned));
+    for (const version of BURN_VERSIONS) {
+        try {
+            return c.json(await getBurnCommitment(commitId, version));
+        } catch (err) {
+            if (!isPonderNotFound(err)) throw err;
+        }
+    }
+    return c.json({ error: "No burn commitment with that id on either canvas" }, 404);
 });
 
 history.get("/burns/address/:address", async (c) => {

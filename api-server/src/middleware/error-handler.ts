@@ -14,6 +14,11 @@ export const errorHandler: ErrorHandler = (err, c) => {
         return c.json({ error: "Token not found or data not set" }, 404);
     }
 
+    // The indexer saying "not found" is a 404 for the caller too, not a broken server.
+    if (message.startsWith("Ponder API 404")) {
+        return c.json({ error: "Not found" }, 404);
+    }
+
     if (message.startsWith("Ponder API")) {
         return c.json({ error: message }, 502);
     }

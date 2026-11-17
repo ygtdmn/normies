@@ -92,8 +92,9 @@ describe("HTTP service lifecycle", () => {
 
     it("prevents caching upstream errors and rate-limit responses", async () => {
         const headers = { "x-forwarded-for": "192.0.2.3" };
+        // The indexer's "not found" is a 404 for the caller, and like any error it is never cached.
         const missing = await fetch(origin + "/history/burned/42", { headers });
-        expect(missing.status).toBe(502);
+        expect(missing.status).toBe(404);
         expect(missing.headers.get("cache-control")).toBe("no-store");
         const limited = await fetch(origin + "/history/burned/42", { headers });
         expect(limited.status).toBe(429);
