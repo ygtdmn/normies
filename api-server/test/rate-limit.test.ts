@@ -138,14 +138,28 @@ describe("enforce mode", () => {
         expect(await res.json()).toMatchObject({ retryAfter: 3 });
     });
 
-    it("gives normies.art pages a bigger bucket and internal keys their own", async () => {
+    it("gives normies.art pages a bigger bucket", async () => {
         const { hit, limiter } = harness("enforce", { sleep: async () => {} });
         for (let i = 0; i < 200; i++) expect((await hit("/x", { origin: "https://www.normies.art" })).status).toBe(200);
-        for (let i = 0; i < 300; i++) expect((await hit("/x", { "x-internal-secret": KEY })).status).toBe(200);
         const snap = limiter.snapshot();
         expect(snap.tiers.website.requests).toBe(200);
-        expect(snap.internalKeys.site.requests).toBe(300);
-        expect(snap.tiers.website.rejected + snap.tiers.internal.rejected).toBe(0);
+        expect(snap.tiers.website.rejected).toBe(0);
+    });
+
+    it("never limits our own services, but counts them by name", async () => {
+        const { hit, limiter, waits } = harness("enforce");
+        // Far past any bucket, all at once, at full cost: every one goes straight through.
+        for (let i = 0; i < 5_000; i++) {
+            const res = await hit("/normie/all/original/data", { "x-internal-secret": KEY });
+            expect(res.status).toBe(200);
+            expect(res.headers.get("RateLimit-Limit")).toBeNull();
+        }
+        expect(waits).toEqual([]);
+        const snap = limiter.snapshot();
+        expect(snap.internalKeys.site).toEqual({ requests: 5_000, tokens: 50_000, rejected: 0 });
+        expect(snap.tiers.internal).toMatchObject({ requests: 5_000, held: 0, rejected: 0 });
+        expect(snap.topPaths.site[0]).toMatchObject({ path: "/normie/all/original/data", requests: 5_000 });
+        expect(snap.buckets).toBe(0);
     });
 
     it("sends RateLimit headers, but none on responses Cloudflare may cache", async () => {

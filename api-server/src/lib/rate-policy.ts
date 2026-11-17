@@ -9,6 +9,8 @@
  */
 
 export type Tier = "internal" | "website" | "public" | "crawler";
+/** The tiers that have a bucket. Internal keys (our own services) are never limited, only counted. */
+export type LimitedTier = Exclude<Tier, "internal">;
 
 export interface TierPolicy {
     /** Tokens a full bucket holds: the largest burst that passes untouched. */
@@ -18,9 +20,7 @@ export interface TierPolicy {
 }
 
 /** Starting points, to be tuned from shadow-mode numbers before enforcing. */
-export const TIERS: Record<Tier, TierPolicy> = {
-    // Per service key. High enough for real work, low enough that a runaway loop shows.
-    internal: { burst: 2_000, perSecond: 50 },
+export const TIERS: Record<LimitedTier, TierPolicy> = {
     // Browsers on normies.art and its subdomains. A soft signal (Origin/Referer can be copied),
     // so it is a bigger bucket per visitor, never an exemption.
     website: { burst: 400, perSecond: 5 },
@@ -84,7 +84,7 @@ export function isFirstPartyHost(host: string | null): boolean {
  * The tier of a caller that did not present an internal key. Every fetch from a page sends
  * `Origin`; an <img> sends `Referer`, which the site's default referrer policy includes.
  */
-export function tierOf(get: (name: string) => string | undefined): Exclude<Tier, "internal"> {
+export function tierOf(get: (name: string) => string | undefined): LimitedTier {
     if (isFirstPartyHost(hostOf(get("origin"))) || isFirstPartyHost(hostOf(get("referer")))) return "website";
     const ua = get("user-agent") ?? "";
     if (!PREVIEW_BOT.test(ua) && CRAWLER.test(ua)) return "crawler";

@@ -14,6 +14,7 @@ import {
     costOf,
     tierOf,
     type Decision,
+    type LimitedTier,
     type Tier,
 } from "../lib/rate-policy.js";
 
@@ -166,19 +167,18 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         return null;
     }
 
-    function record(tier: Tier, who: string, decision: Decision, cost: number) {
+    function record(tier: Tier, who: string, action: Decision["action"], cost: number) {
         const t = tiers[tier];
         t.requests += 1;
         t.tokens += cost;
-        if (decision.action === "hold") t.held += 1;
-        if (decision.action === "reject") t.rejected += 1;
+        if (action === "hold") t.held += 1;
+        if (action === "reject") t.rejected += 1;
         if (tier === "internal") {
             const k = internalKeys.get(who) ?? { requests: 0, tokens: 0, rejected: 0 };
             k.requests += 1;
             k.tokens += cost;
-            if (decision.action === "reject") k.rejected += 1;
             internalKeys.set(who, k);
-        } else if (decision.action === "reject" && (rejectedBy.has(who) || rejectedBy.size < 5_000)) {
+        } else if (action === "reject" && (rejectedBy.has(who) || rejectedBy.size < 5_000)) {
             const r = rejectedBy.get(who) ?? { tier, rejected: 0 };
             r.rejected += 1;
             rejectedBy.set(who, r);
@@ -216,7 +216,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
             rejectedBy = new Map();
             legacyRejected = 0;
             paths = new Map();
-            buckets.prune((id) => TIERS[id.slice(0, id.indexOf(":")) as Tier] ?? TIERS.public);
+            buckets.prune((id) => TIERS[id.slice(0, id.indexOf(":")) as LimitedTier] ?? TIERS.public);
             const cutoff = now() - options.legacyWindowMs;
             for (const [client, stamps] of window) if (!stamps.some((t) => t >= cutoff)) window.delete(client);
         }, options.reportEveryMs).unref();
@@ -256,17 +256,23 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         let bucketId = "";
         let row: PathCount | null = null;
         if (options.mode !== "legacy") {
-            const tier: Tier = service ? "internal" : tierOf(header);
-            bucketId = service ? `internal:${service}` : `${tier}:${client}`;
             const cost = costOf(c.req.path, (name) => c.req.query(name));
-            decision = buckets.take(bucketId, TIERS[tier], cost);
-            record(tier, service ?? client, decision, cost);
-            row = pathRow(service ?? tier, c.req.path);
+            if (service) {
+                // Our own services are never limited: counted by name, so a runaway loop still
+                // shows in the stats, but never held or refused.
+                record("internal", service, "allow", cost);
+            } else {
+                const tier = tierOf(header);
+                bucketId = `${tier}:${client}`;
+                decision = buckets.take(bucketId, TIERS[tier], cost);
+                record(tier, client, decision.action, cost);
+                // Watching only: a "hold" took its tokens, so the queue it simulates stays real,
+                // but nothing waits.
+                if (options.mode === "shadow" && decision.action === "hold") buckets.release(bucketId);
+            }
+            row = pathRow(service ?? tierOf(header), c.req.path);
             row.requests += 1;
             row.tokens += cost;
-            // Watching only: a "hold" took its tokens, so the queue it simulates stays real, but
-            // nothing waits.
-            if (options.mode === "shadow" && decision.action === "hold") buckets.release(bucketId);
         }
 
         if (options.mode === "enforce" && decision) {
