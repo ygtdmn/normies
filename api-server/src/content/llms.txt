@@ -543,7 +543,7 @@ Half of Pixel Market fees and half of collection royalties go to `NormiesRevenue
 
 - `GET /agents/image/{tokenId}`
   - Composited SVG image for an agent.
-  - Cache: `public, max-age=60, s-maxage=60, stale-while-revalidate=300`
+  - Cache: `public, max-age=60, s-maxage=300, stale-while-revalidate=300`
 
 - `GET /agents/binding/{tokenId}`
   - Normies-only ERC-8004 binding lookup for one token.
