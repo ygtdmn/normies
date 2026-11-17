@@ -961,7 +961,7 @@ pixel     = (data[byteIndex] >> bitPos) & 1</code></pre>
 
         <h2>Rate Limiting</h2>
 
-        <p>Requests are rate-limited per IP address using a sliding window.</p>
+        <p>Requests are rate-limited per IP address using a sliding window. IPv6 addresses count per <code>/64</code>. Responses served from the CDN cache do not count.</p>
 
         <table>
             <tr><th>Limit</th><th>Value</th></tr>
@@ -969,11 +969,11 @@ pixel     = (data[byteIndex] >> bitPos) & 1</code></pre>
             <tr><td>Window</td><td>Sliding 60 seconds</td></tr>
         </table>
 
-        <p>Rate limit headers are included in responses:</p>
+        <p>Rate limit headers are included in responses that are not cached at the edge:</p>
         <ul style="margin: 0.5rem 0 0.5rem 1.5rem;">
             <li><code>X-RateLimit-Limit</code> - max requests per window</li>
             <li><code>X-RateLimit-Remaining</code> - remaining requests in the current window</li>
-            <li><code>Retry-After</code> - seconds until retry is allowed, only on <code>429</code></li>
+            <li><code>Retry-After</code> - seconds until your next request will be accepted, only on <code>429</code>. Wait that long and retry; it is usually well under a minute.</li>
         </ul>
 
         <h2>Errors</h2>

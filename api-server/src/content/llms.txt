@@ -36,6 +36,11 @@ Route-family defaults:
 - `/favicon.png` and `/favicon.ico`: `public, max-age=86400`
 - `/agents/*`: set per endpoint.
 
+Rate limit:
+- 60 requests per minute per IP address (IPv6 counts per /64). Responses served from the CDN cache do not count, so cacheable routes are cheap to repeat.
+- A 429 carries `Retry-After`: the seconds until your next request is accepted, usually well under a minute. Wait that long, then retry; do not retry in a loop.
+- Batch where you can: `/normie/images?ids=` returns up to 200 Normies in one request.
+
 Server-side cache defaults:
 - `CACHE_TTL_MS`: 3600000 ms / 3600 s. Bulk token dump cache and positive agent binding cache.
 - `CANVAS_CACHE_TTL_MS`: 60000 ms / 60 s. Canvas transform and transformed-state caches.

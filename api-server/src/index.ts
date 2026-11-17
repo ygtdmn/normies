@@ -4,7 +4,7 @@ import { serve } from "@hono/node-server";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { HOST, PORT, PONDER_API_SECRET, PONDER_API_URL } from "./config.js";
-import { rateLimiter } from "./middleware/rate-limit.js";
+import { rateLimiter, rateLimitStats } from "./middleware/rate-limit.js";
 import { cacheHeaders } from "./middleware/cache-headers.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { normie } from "./routes/normie.js";
@@ -54,6 +54,12 @@ app.get("/ready", async (c) => {
     }
     return c.json({ status: "not ready", release }, 503);
 });
+
+// Agent crawlers probe these on every host (about 2k a day, mostly rate limited). Nothing lives
+// here, so answer before the limiter and spend nobody's budget.
+app.get("/.well-known/*", (c) => c.json({ error: "Not found" }, 404));
+// This period's limiter counters, for internal keys (404 for everyone else).
+app.get("/rate-limit/stats", rateLimitStats);
 
 app.use("*", rateLimiter);
 app.use("/normie/*", cacheHeaders);

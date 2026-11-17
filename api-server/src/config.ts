@@ -67,12 +67,38 @@ export const LISTING_REMOVAL_GRACE = Math.max(1, Number(process.env.LISTING_REMO
 export const OPENSEA_API_KEY = process.env.OPENSEA_API_KEY || undefined;
 export const OPENSEA_COLLECTION_SLUG = process.env.OPENSEA_COLLECTION_SLUG || "normies";
 
-// Rate limiting
-export const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
+// Rate limiting (see src/lib/rate-policy.ts and src/middleware/rate-limit.ts).
+// legacy:  the old 60-a-minute sliding window only.
+// shadow:  the old window still enforces; the tiered token buckets run beside it and only record
+//          what they would do (GET /rate-limit/stats, and a log line every 5 minutes). The default.
+// enforce: the tiered token buckets decide; the old window is off.
+export type RateLimitMode = "legacy" | "shadow" | "enforce";
+const RATE_LIMIT_MODES: readonly RateLimitMode[] = ["legacy", "shadow", "enforce"];
+export const RATE_LIMIT_MODE: RateLimitMode = RATE_LIMIT_MODES.includes(process.env.RATE_LIMIT_MODE as RateLimitMode)
+    ? (process.env.RATE_LIMIT_MODE as RateLimitMode)
+    : "shadow";
+export const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute, legacy window
 export const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX ?? 60);
 
-// Internal bypass secret (unset = bypass disabled)
+// Internal keys, sent in the x-internal-secret header. INTERNAL_SECRET is the original shared
+// key (named "shared"); INTERNAL_KEYS gives each service its own, as "site:<key>,arena:<key>",
+// so each one is counted and capped separately. Unset = no internal access.
 export const INTERNAL_SECRET = process.env.INTERNAL_SECRET || undefined;
+export const INTERNAL_KEYS: ReadonlyMap<string, string> = parseInternalKeys(process.env.INTERNAL_KEYS, INTERNAL_SECRET);
+
+/** secret -> service name. Exported for tests. */
+export function parseInternalKeys(raw: string | undefined, shared: string | undefined): Map<string, string> {
+    const keys = new Map<string, string>();
+    if (shared) keys.set(shared, "shared");
+    for (const entry of (raw ?? "").split(",")) {
+        const at = entry.indexOf(":");
+        if (at <= 0) continue;
+        const name = entry.slice(0, at).trim();
+        const secret = entry.slice(at + 1).trim();
+        if (name && secret.length >= 16) keys.set(secret, name);
+    }
+    return keys;
+}
 
 // Ponder indexer API (required for API server startup)
 if (!process.env.PONDER_API_URL) {
