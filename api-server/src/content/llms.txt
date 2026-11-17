@@ -425,20 +425,20 @@ Half of Pixel Market fees and half of collection royalties go to `NormiesRevenue
 
 - `GET /history/normie/{id}/versions`
   - Transform versions for a token, oldest first, with change count, new pixel count, `gridSize`, `cleared` (an overlay reset), transformer, block, timestamp, and tx hash. `version` numbers match `/history/normie/{id}/version/{version}/*`.
-  - Query: `limit`, `offset`.
+  - Query: `limit`, `offset`, `pixels=1` (adds `pixels`, each version's composited art as the `/version/{version}/pixels` string, so a client can draw thumbnails without one request per version).
   - Cache: `public, max-age=60, s-maxage=300`
 
 - `GET /history/normie/{id}/version/{version}/pixels`
   - Historical composited pixel string for a transform version.
-  - Cache: `public, max-age=60, s-maxage=300`
+  - Cache: `public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800`
 
 - `GET /history/normie/{id}/version/{version}/image.svg`
   - Historical composited SVG for a transform version.
-  - Cache: `public, max-age=60, s-maxage=300`
+  - Cache: `public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800`
 
 - `GET /history/normie/{id}/version/{version}/image.png`
   - Historical composited PNG for a transform version.
-  - Cache: `public, max-age=60, s-maxage=300`
+  - Cache: `public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800`
 
 - `GET /history/stats`
   - Indexer summary counts for burn commitments, burned tokens, transforms, token data, zombies, Legendary Canvas, and total action points, plus `pixelSupply`, `market` totals and `totalCanvasSinks`.

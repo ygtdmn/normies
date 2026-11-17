@@ -577,25 +577,25 @@
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/history/normie/:id/versions</span><span class="response-type">application/json</span>
             <p class="desc">Transform versions for a token with change count, new pixel count, transformer, block, timestamp, and transaction hash.</p>
-            <p class="meta">Parameters: <code>id</code> 0-9999. Query: <code>limit</code>, <code>offset</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+            <p class="meta">Parameters: <code>id</code> 0-9999. Query: <code>limit</code>, <code>offset</code>, <code>pixels=1</code> (adds each version's composited pixel string). Cache: <code>public, max-age=60, s-maxage=300</code></p>
         </div>
 
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/history/normie/:id/version/:version/pixels</span><span class="response-type">text/plain</span>
             <p class="desc">Historical composited pixel string for a transform version.</p>
-            <p class="meta">Parameters: <code>id</code>, zero-based <code>version</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+            <p class="meta">Parameters: <code>id</code>, zero-based <code>version</code>. Cache: <code>public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800</code></p>
         </div>
 
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/history/normie/:id/version/:version/image.svg</span><span class="response-type">image/svg+xml</span>
             <p class="desc">Historical composited SVG for a transform version.</p>
-            <p class="meta">Parameters: <code>id</code>, zero-based <code>version</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+            <p class="meta">Parameters: <code>id</code>, zero-based <code>version</code>. Cache: <code>public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800</code></p>
         </div>
 
         <div class="endpoint">
             <span class="method">GET</span><span class="path">/history/normie/:id/version/:version/image.png</span><span class="response-type">image/png</span>
             <p class="desc">Historical composited PNG for a transform version.</p>
-            <p class="meta">Parameters: <code>id</code>, zero-based <code>version</code>. Cache: <code>public, max-age=60, s-maxage=300</code></p>
+            <p class="meta">Parameters: <code>id</code>, zero-based <code>version</code>. Cache: <code>public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800</code></p>
         </div>
 
         <div class="endpoint">

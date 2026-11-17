@@ -184,6 +184,10 @@ history.get("/normie/:id/versions", async (c) => {
     const result = parseTokenId(c.req.param("id"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const { limit, offset } = parsePagination(c);
+    // `pixels=1` adds each version's composited art (the /version/:v/pixels string). It is already
+    // computed for newPixelCount, and it lets a history strip draw every thumbnail from this one
+    // response instead of one image request per version against the per-IP rate limit.
+    const withPixels = c.req.query("pixels") === "1";
     // Versions are numbered oldest-first (0 = first overlay ever written), so
     // `version` here is exactly what /version/:version/* accepts.
     const transforms = await getTransformHistory(result.tokenId, limit, offset, true);
@@ -191,22 +195,24 @@ history.get("/normie/:id/versions", async (c) => {
     // share a single fetch instead of racing cold-cache reads under Promise.all.
     await getZombieInfo(result.tokenId).catch(() => {});
     const versions = await Promise.all(
-        transforms.map(async (t, i) => ({
-            version: offset + i,
-            changeCount: t.changeCount,
-            // The on-chain `newPixelCount` is counted against the original mint
-            // art even for zombies; recount against the active (zombie/era) base
-            // so the figure matches the actually-rendered image for this version.
-            newPixelCount: t.transformBitmap || t.cleared
-                ? countPixels(await compositeVersion(result.tokenId, t))
-                : t.newPixelCount,
-            gridSize: t.gridSize ?? 40,
-            cleared: t.cleared ?? false,
-            transformer: t.transformer,
-            blockNumber: t.blockNumber,
-            timestamp: t.timestamp,
-            txHash: t.txHash,
-        })),
+        transforms.map(async (t, i) => {
+            const art = t.transformBitmap || t.cleared ? await compositeVersion(result.tokenId, t) : null;
+            return {
+                version: offset + i,
+                changeCount: t.changeCount,
+                // The on-chain `newPixelCount` is counted against the original mint
+                // art even for zombies; recount against the active (zombie/era) base
+                // so the figure matches the actually-rendered image for this version.
+                newPixelCount: art ? countPixels(art) : t.newPixelCount,
+                gridSize: t.gridSize ?? 40,
+                cleared: t.cleared ?? false,
+                transformer: t.transformer,
+                blockNumber: t.blockNumber,
+                timestamp: t.timestamp,
+                txHash: t.txHash,
+                ...(withPixels && art ? { pixels: imageDataToPixelString(art) } : {}),
+            };
+        }),
     );
     return c.json(versions);
 });
