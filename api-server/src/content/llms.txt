@@ -37,8 +37,10 @@ Route-family defaults:
 - `/agents/*`: set per endpoint.
 
 Rate limit:
-- 60 requests per minute per IP address (IPv6 counts per /64). Responses served from the CDN cache do not count, so cacheable routes are cheap to repeat.
-- A 429 carries `Retry-After`: the seconds until your next request is accepted, usually well under a minute. Wait that long, then retry; do not retry in a loop.
+- Each IP address (IPv6 per /64) has a budget: a burst of 120 requests, refilled at 1 per second. Responses served from the CDN cache do not count, so cacheable routes are cheap to repeat.
+- A few heavy routes cost more than 1: `/normie/all/original/data` 10, `/normie/images` 1 plus 1 per 50 ids, `/agents/persona-preview/{id}` 5, a versions list with `pixels=1` 2, holder lookups 2. Bulk crawlers get a smaller budget.
+- Just past the budget, a request waits up to 2 seconds and then runs. Further past it, a 429 carries `Retry-After`: the seconds until your next request is accepted. Wait that long, then retry; do not retry in a loop.
+- Uncached responses carry `RateLimit-Limit` (the burst), `RateLimit-Remaining` and `RateLimit-Reset` (seconds until the bucket is full again).
 - Batch where you can: `/normie/images?ids=` returns up to 200 Normies in one request.
 
 Server-side cache defaults:

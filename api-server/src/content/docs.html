@@ -961,19 +961,23 @@ pixel     = (data[byteIndex] >> bitPos) & 1</code></pre>
 
         <h2>Rate Limiting</h2>
 
-        <p>Requests are rate-limited per IP address using a sliding window. IPv6 addresses count per <code>/64</code>. Responses served from the CDN cache do not count.</p>
+        <p>Each IP address has a budget of requests that refills over time, so a burst passes and only sustained load is limited. IPv6 addresses count per <code>/64</code>. Responses served from the CDN cache do not count.</p>
 
         <table>
             <tr><th>Limit</th><th>Value</th></tr>
-            <tr><td>Requests</td><td>60 per minute by default</td></tr>
-            <tr><td>Window</td><td>Sliding 60 seconds</td></tr>
+            <tr><td>Burst</td><td>120 requests</td></tr>
+            <tr><td>Refill</td><td>1 request per second</td></tr>
+            <tr><td>Heavier routes</td><td><code>/normie/all/original/data</code> 10, <code>/normie/images</code> 1 + 1 per 50 ids, <code>/agents/persona-preview/{id}</code> 5, versions with <code>pixels=1</code> 2, holder lookups 2</td></tr>
         </table>
+
+        <p>Just past the budget, a request waits up to 2 seconds and then runs. Further past it, the API answers <code>429</code>. Bulk crawlers get a smaller budget.</p>
 
         <p>Rate limit headers are included in responses that are not cached at the edge:</p>
         <ul style="margin: 0.5rem 0 0.5rem 1.5rem;">
-            <li><code>X-RateLimit-Limit</code> - max requests per window</li>
-            <li><code>X-RateLimit-Remaining</code> - remaining requests in the current window</li>
-            <li><code>Retry-After</code> - seconds until your next request will be accepted, only on <code>429</code>. Wait that long and retry; it is usually well under a minute.</li>
+            <li><code>RateLimit-Limit</code> - the burst size</li>
+            <li><code>RateLimit-Remaining</code> - requests left right now</li>
+            <li><code>RateLimit-Reset</code> - seconds until the budget is full again</li>
+            <li><code>Retry-After</code> - seconds until your next request will be accepted, only on <code>429</code>. Wait that long and retry.</li>
         </ul>
 
         <h2>Errors</h2>
