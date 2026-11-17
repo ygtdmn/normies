@@ -133,6 +133,7 @@ describe("enforce mode", () => {
         const res = await hit();
         expect(res.status).toBe(429);
         expect(res.headers.get("Retry-After")).toBe("3");
+        expect(res.headers.get("Cache-Control")).toBe("no-store");
         expect(await res.json()).toMatchObject({ retryAfter: 3 });
     });
 

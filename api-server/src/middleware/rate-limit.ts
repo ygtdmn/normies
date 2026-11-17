@@ -169,6 +169,8 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
     function tooMany(c: Context, retryAfterMs: number) {
         const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
         c.header("Retry-After", String(seconds));
+        // One caller's 429 must never be served to others from a cache.
+        c.header("Cache-Control", "no-store");
         return c.json({ error: `Rate limit exceeded. Try again in ${seconds}s.`, retryAfter: seconds }, 429);
     }
 

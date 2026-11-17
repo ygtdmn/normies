@@ -13,6 +13,17 @@ const marketMaxAge = Math.max(1, Math.floor(MARKET_CACHE_TTL_MS / 1000));
 
 export const cacheHeaders: MiddlewareHandler = async (c, next) => {
     await next();
+    // An error is about this moment, not the resource: a cached 500 or 502 would keep failing for
+    // every visitor long after the indexer recovered. A "not found" may be cached briefly.
+    const status = c.res.status;
+    if (status === 404 || status === 410) {
+        c.header("Cache-Control", "public, max-age=30, s-maxage=30");
+        return;
+    }
+    if (status >= 400) {
+        c.header("Cache-Control", "no-store");
+        return;
+    }
     const path = c.req.path;
     if (path.startsWith("/canvas/status")) {
         c.header("Cache-Control", `public, max-age=${canvasStatusMaxAge}, s-maxage=${canvasStatusMaxAge}`);
