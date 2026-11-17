@@ -105,6 +105,12 @@ function harness(mode: RateLimiterOptions["mode"], extra: Partial<RateLimiterOpt
     const app = new Hono();
     app.use("*", limiter.middleware);
     app.get("/cached", (c) => c.json({ ok: true }, 200, { "Cache-Control": "public, max-age=60, s-maxage=300" }));
+    app.get("/cdn-cached", (c) =>
+        c.json({ ok: true }, 200, {
+            "Cache-Control": "public, max-age=60, stale-while-revalidate=86400",
+            "CDN-Cache-Control": "public, max-age=300, stale-while-revalidate=86400",
+        }),
+    );
     app.get("/history/burns/:id", (c) => c.json({ error: "Not found" }, 404));
     app.get("*", (c) => c.json({ ok: true }));
     const hit = (path = "/x", h: Record<string, string> = {}) =>
@@ -170,6 +176,10 @@ describe("enforce mode", () => {
         const cached = await hit("/cached");
         expect(cached.headers.get("RateLimit-Limit")).toBeNull();
         expect(cached.headers.get("RateLimit-Remaining")).toBeNull();
+        // Edge caching declared in CDN-Cache-Control counts too.
+        const cdn = await hit("/cdn-cached");
+        expect(cdn.headers.get("RateLimit-Limit")).toBeNull();
+        expect(cdn.headers.get("RateLimit-Remaining")).toBeNull();
     });
 });
 

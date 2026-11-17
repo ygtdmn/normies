@@ -53,7 +53,10 @@ describe("cache headers for current art", () => {
 
     it("lets the edge serve stale art while it redraws", async () => {
         for (const path of ["/normie/images?ids=1,2", "/normie/7/image.svg", "/normie/7/image.png"]) {
-            expect(await of(path)).toBe("public, max-age=60, s-maxage=300, stale-while-revalidate=86400");
+            const headers = (await art.request(path)).headers;
+            expect(headers.get("Cache-Control")).toBe("public, max-age=60, stale-while-revalidate=86400");
+            // No s-maxage anywhere: Cloudflare refuses to serve stale when it is present.
+            expect(headers.get("CDN-Cache-Control")).toBe("public, max-age=300, stale-while-revalidate=86400");
         }
     });
 

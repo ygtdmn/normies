@@ -90,7 +90,14 @@ const RATE_HEADERS = [
     "RateLimit-Reset",
 ];
 
-function isEdgeCacheable(cacheControl: string | null): boolean {
+/** Whether Cloudflare may keep this response: s-maxage in Cache-Control, or a CDN-Cache-Control max-age. */
+function isEdgeCacheable(headers: Headers): boolean {
+    const cdn = headers.get("CDN-Cache-Control");
+    if (cdn) {
+        const maxAge = /(?:^|[,\s])max-age=(\d+)/.exec(cdn);
+        return /\bpublic\b/.test(cdn) && maxAge !== null && Number(maxAge[1]) > 0;
+    }
+    const cacheControl = headers.get("Cache-Control");
     if (!cacheControl || !/\bpublic\b/.test(cacheControl)) return false;
     const sMaxAge = /s-maxage=(\d+)/.exec(cacheControl);
     return sMaxAge !== null && Number(sMaxAge[1]) > 0;
@@ -288,7 +295,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
             if (row && c.res.status >= 400) row.errors += 1;
             const allowed = decision;
             editHeaders(c, (headers) => {
-                if (isEdgeCacheable(headers.get("Cache-Control"))) {
+                if (isEdgeCacheable(headers)) {
                     for (const name of RATE_HEADERS) headers.delete(name);
                 } else if (allowed.action === "allow") {
                     headers.set("RateLimit-Limit", String(allowed.limit));
@@ -314,7 +321,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         await next();
         if (row && c.res.status >= 400) row.errors += 1;
         editHeaders(c, (headers) => {
-            if (isEdgeCacheable(headers.get("Cache-Control"))) for (const name of RATE_HEADERS) headers.delete(name);
+            if (isEdgeCacheable(headers)) for (const name of RATE_HEADERS) headers.delete(name);
         });
     };
 
