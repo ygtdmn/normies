@@ -30,6 +30,7 @@ Route-family defaults:
 - Any path containing `/canvas/info`: `public, max-age=60, s-maxage=60`
 - Owner and holder paths: `public, max-age=10, s-maxage=10`
 - Paths containing `/original/` or `/traits`: `public, max-age=300, s-maxage=3600`
+- `/history/normie/{id}/version/{version}/*`: `public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800` (a past version does not change)
 - `/history/*`: `public, max-age=60, s-maxage=300`
 - Default `/normie/*`, `/zombies/*`, `/legendary-canvas/*`: `public, max-age=60, s-maxage=300`
 - `/favicon.png` and `/favicon.ico`: `public, max-age=86400`

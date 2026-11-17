@@ -36,6 +36,11 @@ export const cacheHeaders: MiddlewareHandler = async (c, next) => {
     } else if (path.includes("/original/") || path.includes("/traits")) {
         // Immutable original data — long cache
         c.header("Cache-Control", "public, max-age=300, s-maxage=3600");
+    } else if (/^\/history\/normie\/\d+\/version\/\d+\//.test(path)) {
+        // A past version never changes once indexed, and the site's history strips load one image
+        // per version. A long edge TTL keeps those strips off the per-IP rate limit. Kept to a day
+        // (not immutable) so a version caught in a reorg near the tip still corrects itself.
+        c.header("Cache-Control", "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800");
     } else if (path.startsWith("/history/")) {
         // Historical/indexed data — append-only, moderate cache
         c.header("Cache-Control", "public, max-age=60, s-maxage=300");

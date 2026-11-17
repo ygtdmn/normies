@@ -900,6 +900,7 @@
             <tr><td><code>* /canvas/info</code></td><td><code>public, max-age=60, s-maxage=60</code></td><td>Derived from <code>CANVAS_INFO_CACHE_TTL_MS</code>.</td></tr>
             <tr><td>Owner, holder and delegation routes</td><td><code>public, max-age=10, s-maxage=10</code></td><td><code>/normie/:id/owner</code>, <code>/holders/:address</code> and <code>/delegations/:address</code>.</td></tr>
             <tr><td>Original data and traits routes</td><td><code>public, max-age=300, s-maxage=3600</code></td><td>Immutable mint data.</td></tr>
+            <tr><td><code>/history/normie/:id/version/:version/*</code></td><td><code>public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800</code></td><td>A past version does not change once indexed.</td></tr>
             <tr><td><code>/history/*</code></td><td><code>public, max-age=60, s-maxage=300</code></td><td>Indexed append-only history and version rendering.</td></tr>
             <tr><td>Default rendered/indexed routes</td><td><code>public, max-age=60, s-maxage=300</code></td><td>Active images, metadata, zombie aliases, Legendary Canvas, and uncategorized cached routes.</td></tr>
             <tr><td><code>/agents/*</code></td><td>Varies by endpoint</td><td>Agent routes set explicit cache headers per endpoint.</td></tr>
