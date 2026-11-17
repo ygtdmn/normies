@@ -96,9 +96,13 @@ describe("HTTP service lifecycle", () => {
         const missing = await fetch(origin + "/history/burned/42", { headers });
         expect(missing.status).toBe(404);
         expect(missing.headers.get("cache-control")).toBe("no-store");
-        const limited = await fetch(origin + "/history/burned/42", { headers });
+        const limited = await fetch(origin + "/history/burned/42", { headers: { ...headers, origin: "https://www.normies.art" } });
         expect(limited.status).toBe(429);
         expect(limited.headers.get("cache-control")).toBe("no-store");
+        // A page on another origin can only wait out a 429 if it can read how long.
+        expect(limited.headers.get("access-control-allow-origin")).toBe("*");
+        expect(limited.headers.get("access-control-expose-headers")).toContain("Retry-After");
+        expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
     });
 
     it("closes SSE on SIGTERM while an ordinary request finishes", async () => {

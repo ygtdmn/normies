@@ -32,7 +32,9 @@ app.use("*", async (c, next) => {
     if (c.res.status >= 400) c.res.headers.set("Cache-Control", "no-store");
 });
 app.use("*", logger());
-app.use("*", cors());
+// Browsers only let a page read these cross-origin when they are exposed. The site waits out a
+// 429 by Retry-After, so it has to be able to see it.
+app.use("*", cors({ exposeHeaders: ["Retry-After", "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset"] }));
 app.get("/health", (c) => {
     c.header("Cache-Control", "no-store");
     return c.json({ status: "ok" });
