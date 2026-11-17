@@ -47,6 +47,11 @@ export const cacheHeaders: MiddlewareHandler = async (c, next) => {
     } else if (path.includes("/original/") || path.includes("/traits")) {
         // Immutable original data — long cache
         c.header("Cache-Control", "public, max-age=300, s-maxage=3600");
+    } else if (path === "/normie/images" || /^\/normie\/\d+\/image\.(svg|png)$/.test(path)) {
+        // Current art: fresh for 5 minutes, then the edge answers with what it has while it redraws
+        // in the background. A grid never waits on a redraw of 200 SVGs (about a second), and an
+        // edit shows after at most one refresh.
+        c.header("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=86400");
     } else if (/^\/history\/normie\/\d+\/version\/\d+\//.test(path)) {
         // A past version never changes once indexed, and the site's history strips load one image
         // per version. A long edge TTL keeps those strips off the per-IP rate limit. Kept to a day

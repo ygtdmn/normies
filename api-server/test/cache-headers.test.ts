@@ -44,3 +44,22 @@ describe("cache headers for errors", () => {
         }
     });
 });
+
+describe("cache headers for current art", () => {
+    const art = new Hono();
+    art.use("/normie/*", cacheHeaders);
+    art.get("/normie/*", (c) => c.text("ok"));
+    const of = async (path: string) => (await art.request(path)).headers.get("Cache-Control");
+
+    it("lets the edge serve stale art while it redraws", async () => {
+        for (const path of ["/normie/images?ids=1,2", "/normie/7/image.svg", "/normie/7/image.png"]) {
+            expect(await of(path)).toBe("public, max-age=60, s-maxage=300, stale-while-revalidate=86400");
+        }
+    });
+
+    it("leaves other Normie routes on the default", async () => {
+        for (const path of ["/normie/7/metadata", "/normie/7/pixels"]) {
+            expect(await of(path)).toBe("public, max-age=60, s-maxage=300");
+        }
+    });
+});
