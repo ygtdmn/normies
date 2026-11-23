@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
+// Config is evaluated at import time and the chain client needs an RPC; CI has no .env.
+process.env.RPC_URL = "http://rpc.test";
+
 // The indexer's commitments: V2 ids restarted at 0, so 1 exists on both canvases and 538 only on V1.
 const known: Record<string, { id: string; commitId: string; contractVersion: number }> = {
     "2-1": { id: "2-1", commitId: "1", contractVersion: 2 },

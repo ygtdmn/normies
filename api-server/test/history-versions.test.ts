@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+// Config is evaluated at import time and the chain client needs an RPC; CI has no .env.
+process.env.RPC_URL = "http://rpc.test";
+
 // A 40x40 base with only the top-left pixel on, and one version whose overlay flips the next pixel.
 const base = new Uint8Array(200);
 base[0] = 0b1000_0000;
