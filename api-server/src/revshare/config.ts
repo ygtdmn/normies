@@ -6,8 +6,9 @@ import { keccak256, toHex } from "viem";
  *
  *   score = (normiePoints + pixelPoints) x (100 + boostPct)
  *
- * Every pixel a wallet holds weighs the same: on a Normie, in the wallet balance, or escrowed in a listing. A wallet
- * with no Normie scores zero, whatever it holds in pixels (version 4).
+ * Every pixel a wallet holds weighs the same: on a Normie, in the wallet balance, escrowed in a listing, or deposited
+ * in the Normies Arena on one of its Normies (version 5). A wallet with no Normie scores zero, whatever it holds in
+ * pixels (version 4).
  * Changing anything here changes `configHash`, which every posted epoch records on chain.
  */
 export interface RevshareConfig {
@@ -24,10 +25,18 @@ export interface RevshareConfig {
     sampleEntropyBlocks: number;
     /** Addresses that never earn, on top of the protocol's own contracts. Lowercase. */
     excluded: string[];
+    /**
+     * NormiesArenaStorage (v3), lowercase. Since version 5 each live Normie's Arena balance counts for the Normie's
+     * holder at the sample block: the balance follows the Normie and only its holder (or a delegate, paying the
+     * holder) can withdraw it. Pixels a started round charged sit in the round's pool and belong to nobody until
+     * prizes or refunds credit them back to a Normie. Sample blocks before the storage existed read nothing.
+     * Absent in older configs, which never read the Arena, so posted epochs still rebuild the same.
+     */
+    arenaStorage?: string;
 }
 
 export const REVSHARE_CONFIG: RevshareConfig = {
-    version: 4,
+    version: 5,
     brackets: [
         [1, 100],
         [2, 115],
@@ -48,6 +57,8 @@ export const REVSHARE_CONFIG: RevshareConfig = {
     samplesPerDay: 4,
     sampleEntropyBlocks: 8,
     excluded: ["0x0000000000000000000000000000000000000000", "0x000000000000000000000000000000000000dead"],
+    // Mainnet, deployed at block 26421432 (Arena v3 cutover, 15 Nov 2026).
+    arenaStorage: "0x235403069c8516369eb36d29bb1a498a469ab9f0",
 };
 
 /** Keys sorted at every level, so the hash does not depend on how the object was written down. */

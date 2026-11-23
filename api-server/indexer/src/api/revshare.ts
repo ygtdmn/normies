@@ -1,7 +1,7 @@
 import { db } from "ponder:api";
 import schema from "ponder:schema";
 import { Hono } from "hono";
-import { and, asc, between, count, desc, eq, gt, sql } from "ponder";
+import { and, asc, between, count, desc, eq, gt, ne, sql } from "ponder";
 
 // ──────────────────────────────────────────────
 //  Revenue share read API: epochs, claims, totals, and the state snapshot the
@@ -11,6 +11,8 @@ import { and, asc, between, count, desc, eq, gt, sql } from "ponder";
 const app = new Hono();
 const GLOBAL_ID = "global";
 const DEFAULT_REVENUE_SHARE_BPS = 5000;
+/** arena_normie.state of a burned Normie taken out by clear: its balance waits for rescue and belongs to nobody. */
+const ARENA_STATE_CLEARED = 3;
 
 function serializeBigints<T extends Record<string, unknown>>(row: T): Record<string, unknown> {
   const result: Record<string, unknown> = {};
@@ -140,11 +142,12 @@ app.get("/revshare/stats", async (c) => {
 
 /**
  * Everything the score reads, in one compact payload: who holds which Normie, the pixels on each (only tokens that
- * carry any), loose balances and active listings. The API server caches it and scores every wallet from it. Epoch
- * payouts are NOT computed from this: those come from RPC state at the sampled blocks.
+ * carry any), loose balances, active listings and Arena balances (by Normie, not cleared; the score credits them to
+ * the Normie's holder). The API server caches it and scores every wallet from it. Epoch payouts are NOT computed from
+ * this: those come from RPC state at the sampled blocks.
  */
 app.get("/revshare/state", async (c) => {
-  const [owners, tokens, balances, listings] = await Promise.all([
+  const [owners, tokens, balances, listings, arena] = await Promise.all([
     db.select().from(schema.normieOwner).orderBy(asc(schema.normieOwner.tokenId)),
     db
       .select({
@@ -161,12 +164,17 @@ app.get("/revshare/state", async (c) => {
       .select({ seller: schema.marketListing.seller, remaining: schema.marketListing.remaining })
       .from(schema.marketListing)
       .where(and(eq(schema.marketListing.status, "active"), gt(schema.marketListing.remaining, 0))),
+    db
+      .select({ tokenId: schema.arenaNormie.tokenId, balance: schema.arenaNormie.balance })
+      .from(schema.arenaNormie)
+      .where(and(gt(schema.arenaNormie.balance, 0n), ne(schema.arenaNormie.state, ARENA_STATE_CLEARED))),
   ]);
   return c.json({
     owners: owners.map((o) => [o.tokenId.toString(), o.owner]),
     tokens: tokens.map((t) => [t.tokenId.toString(), t.actionPoints.toString()]),
     balances: balances.map((b) => [b.address, b.balance.toString()]),
     listings: listings.map((l) => [l.seller, l.remaining]),
+    arena: arena.map((a) => [a.tokenId.toString(), a.balance.toString()]),
   });
 });
 

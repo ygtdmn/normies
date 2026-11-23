@@ -75,7 +75,7 @@ export async function exclusions(
     config: RevshareConfig,
     blockNumber: bigint,
 ): Promise<string[]> {
-    const own = [addresses.market, addresses.pool, addresses.canvasV2, addresses.pixelStorage, addresses.splitter];
+    const own = [addresses.market, addresses.pool, addresses.canvasV2, addresses.pixelStorage, addresses.splitter, config.arenaStorage];
     return [...new Set([...config.excluded, ...own.filter(Boolean).map((a) => (a as string).toLowerCase())])].sort();
 }
 
@@ -107,7 +107,7 @@ export async function buildEpoch(
     const excludedSet = new Set(excluded);
     const picks = await sampleBlocks(client, fromBlock, toBlock, config);
     const samples = [];
-    for (const block of picks) samples.push(scoreSample(await readState(client, addresses, block), excludedSet, config));
+    for (const block of picks) samples.push(scoreSample(await readState(client, addresses, block, config), excludedSet, config));
 
     const { payouts, total } = buildPayouts(samples, amount);
     const { root, leaves } = buildTree(epochId, payouts);

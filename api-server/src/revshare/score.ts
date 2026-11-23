@@ -4,7 +4,10 @@ export interface WalletState {
     address: string;
     /** Live Normies the wallet owns. */
     tokens: number;
-    /** Every pixel the wallet holds: on its Normies, in its balance, and escrowed in its active listings. */
+    /**
+     * Every pixel the wallet holds: on its Normies, in its balance, escrowed in its active listings, and (config
+     * version 5 on) deposited in the Arena on its Normies.
+     */
     pixels: bigint;
 }
 

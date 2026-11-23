@@ -74,6 +74,8 @@ interface StateResponse {
     tokens: [string, string][];
     balances: [string, string][];
     listings: [string, number][];
+    /** [tokenId, Arena balance]. Missing from an indexer that predates it. */
+    arena?: [string, string][];
 }
 
 interface LiveScores {
@@ -85,7 +87,14 @@ interface LiveScores {
 let live: LiveScores | null = null;
 let liveInFlight: Promise<LiveScores> | null = null;
 async function excludedAddresses(): Promise<Set<string>> {
-    const own = [MARKET_ADDRESS, REVENUE_POOL_ADDRESS, CANVAS_V2_ADDRESS, CANVAS_STORAGE_V2_ADDRESS, ROYALTY_SPLITTER_ADDRESS];
+    const own = [
+        MARKET_ADDRESS,
+        REVENUE_POOL_ADDRESS,
+        CANVAS_V2_ADDRESS,
+        CANVAS_STORAGE_V2_ADDRESS,
+        ROYALTY_SPLITTER_ADDRESS,
+        REVSHARE_CONFIG.arenaStorage,
+    ];
     return new Set([...REVSHARE_CONFIG.excluded, ...own.filter(Boolean).map((a) => (a as string).toLowerCase())]);
 }
 
@@ -102,10 +111,12 @@ async function computeLive(): Promise<LiveScores> {
         return w;
     };
     const attached = new Map(state.tokens.map(([id, amount]) => [id, BigInt(amount)]));
+    // Arena balances follow the Normie, so they count for its holder (as in the epoch snapshot, config version 5).
+    const arena = REVSHARE_CONFIG.arenaStorage ? new Map((state.arena ?? []).map(([id, amount]) => [id, BigInt(amount)])) : new Map<string, bigint>();
     for (const [tokenId, owner] of state.owners) {
         const w = wallet(owner);
         w.tokens += 1;
-        w.pixels += attached.get(tokenId) ?? 0n;
+        w.pixels += (attached.get(tokenId) ?? 0n) + (arena.get(tokenId) ?? 0n);
     }
     for (const [address, balance] of state.balances) wallet(address).pixels += BigInt(balance);
     for (const [seller, remaining] of state.listings) wallet(seller).pixels += BigInt(remaining);

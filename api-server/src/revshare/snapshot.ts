@@ -1,10 +1,11 @@
 import { type PublicClient, parseAbi } from "viem";
+import { REVSHARE_CONFIG, type RevshareConfig } from "./config.js";
 import type { WalletState } from "./score.js";
 
 /**
  * The state the score reads, taken straight from an RPC node at one block: who holds which Normie, what is attached
- * to each, every wallet's balance, and what sellers have escrowed in active listings. Nothing comes from our
- * indexer, so anyone with an archive node gets the same answer.
+ * to each, every wallet's balance, what sellers have escrowed in active listings and (config version 5 on) what each
+ * Normie holds in the Arena. Nothing comes from our indexer, so anyone with an archive node gets the same answer.
  */
 export interface SnapshotAddresses {
     normies: `0x${string}`;
@@ -26,6 +27,8 @@ const marketAbi = parseAbi([
     "function getListing(uint256 listingId) view returns (Listing)",
 ]);
 const STATUS_ACTIVE = 1;
+/** NormiesArenaStorage v3: a Normie's balance now, net of every started round's price it paid. */
+const arenaAbi = parseAbi(["function balanceOf(uint256 id) view returns (uint256)"]);
 
 /** Calls per eth_call, and how many eth_calls are in flight at once. Small enough for a public archive node. */
 const CALLS_PER_CHUNK = 400;
@@ -64,6 +67,7 @@ export async function readState(
     client: PublicClient,
     addresses: SnapshotAddresses,
     blockNumber: bigint,
+    config: RevshareConfig = REVSHARE_CONFIG,
 ): Promise<WalletState[]> {
     const ids = Array.from({ length: TOTAL_TOKEN_IDS }, (_, i) => BigInt(i));
 
@@ -98,6 +102,20 @@ export async function readState(
         w.tokens += 1;
         w.pixels += attached[i];
     });
+
+    // Arena deposits follow the Normie: its holder is the only one paid on withdraw, so the balance is theirs until a
+    // started round charges it into the pool. Burned Normies are not in `live` (their balance waits for rescue).
+    const arena = config.arenaStorage as `0x${string}` | undefined;
+    if (arena && (await client.getCode({ address: arena, blockNumber }))) {
+        const deposits = await chunkedMulticall<bigint>(
+            client,
+            live.map(({ tokenId }) => ({ address: arena, abi: arenaAbi, functionName: "balanceOf", args: [BigInt(tokenId)] })),
+            { blockNumber, allowFailure: false },
+        );
+        live.forEach(({ owner }, i) => {
+            if (deposits[i] > 0n) wallet(owner).pixels += deposits[i];
+        });
+    }
 
     // Wallet balances of every Normie holder. A wallet without a Normie scores zero, so nobody else is read.
     const holders = [...wallets.keys()];
