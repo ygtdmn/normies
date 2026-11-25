@@ -59,7 +59,7 @@ flag and roles).
 | Pixel ledger `NormiesCanvasStorageV2` | `0x96F2DA32Bb9D429d59ac13dB469f4950cBe02084` |
 | `NormiesArenaStorage` | `0x235403069C8516369Eb36d29bb1a498a469Ab9f0` |
 | `NormiesCanvasV2` | `0xF14f2852e1fD6A4108156054AF49B3915dc40E2e` |
-| `NormiesPixelGifts` | fill in after step 2 |
+| `NormiesPixelGifts` (deployed 25 Nov 2026, block 26,495,208, wired the same day) | `0x0309407B7D56a99f32d4Ceb67e21bC1803b5aA8e` |
 | Gifter wallet (also the Arena queue's sponsor wallet) | `0x8a8035F056af830B7205c58c1dC037f826fc2B92` |
 
 ## Before you start
@@ -86,7 +86,7 @@ ARENA_STORAGE=0x235403069C8516369Eb36d29bb1a498a469Ab9f0 PIXEL_GIFTS_ADMIN=0xAF8
 ### 2. Note the addresses
 
 ```bash
-export GIFTS=<address from the deploy>
+export GIFTS=0x0309407B7D56a99f32d4Ceb67e21bC1803b5aA8e
 ```
 
 ```bash
@@ -154,7 +154,6 @@ cast call 0x235403069C8516369Eb36d29bb1a498a469Ab9f0 'balanceOf(uint256)(uint256
 
 ### 7. After it is live
 
-- Add `NormiesPixelGifts` to the address table in `README.md`.
 - Add it to `api-server/src/watch/contracts.ts` so the watcher names it in Discord.
 
 ## Reverts the gifter may see

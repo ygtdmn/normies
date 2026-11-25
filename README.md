@@ -193,6 +193,7 @@ pnpm dev
 | NormiesArenaQueue      | `0x5E7A4410375Ce710C04957aa9Ae33467ffD1f9d0` |
 | NormiesArenaSkins      | `0x3F298B7b7d5300Aab34a22470b8d1d54b8b30A05` |
 | NormiesArenaMigrator   | `0x16f8620B88cDee0EecF783735f00b7AEACD540Fd` |
+| NormiesPixelGifts      | `0x0309407B7D56a99f32d4Ceb67e21bC1803b5aA8e` |
 
 The Pixel Market stack was deployed at block 26,122,420 and went live on 5 October 2026. All six are verified on
 Etherscan. The cutover runbook is [PixelMarketUpdate.md](PixelMarketUpdate.md); running the revenue share every month, and its
