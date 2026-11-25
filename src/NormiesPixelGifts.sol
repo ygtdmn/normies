@@ -11,29 +11,9 @@ import { Lifebuoy } from "solady/utils/Lifebuoy.sol";
  * @title NormiesPixelGifts
  * @author Normies by Serc (https://x.com/serc1n)
  * @author Smart Contract by Yigit Duman (https://x.com/yigitduman)
- * @notice Lets a wallet the owner picked give away pixels from its own wallet balance, with no listing on the Pixel
- *         Market: no price, no fee. Three places a gift can land:
- *
- *           a wallet           giftToWallet   the receiver's wallet balance, cooling down like bought pixels
- *           a Normie's canvas  giftToNormie   the pixels attached to the Normie, as if its holder had deposited them
- *           a Normie's Arena   giftToArena    the Normie's Arena balance
- *
- *         Only GIFTER_ROLE can give, and only the caller's own pixels: no function takes a `from`, and no allowance
- *         is ever used. Everyone else keeps moving pixels between wallets through the market.
- *
- *         A gift to a Normie belongs to the Normie, whoever holds it: the holder withdraws it from the canvas or
- *         from the Arena as usual, and the giver cannot take it back. Burned Normies are refused. An Arena gift
- *         never registers a Normie (one that has not joined keeps the pixels and brings them along when its holder
- *         joins) and does not check the agent link; a registered Normie that sat out for lack of funds plays again
- *         from the next round its balance covers.
- *
- *         A wallet gift is refused for a receiver that holds a mover role on the ledger (the market, the canvas,
- *         the Arena): pixels sent there would belong to no one.
- *
- *         Needs ROLE_CANVAS on the pixel ledger (attaching pixels to a Normie is a canvas-role call) and to be an
- *         authorized writer of the Arena storage. Holds no pixels. ETH or tokens sent to it by mistake can be
- *         recovered with solady's Lifebuoy: by the owner, and by the deployer until it locks its own access with
- *         lockRescue(1).
+ * @notice Lets a GIFTER_ROLE wallet give away its own wallet pixels with no market listing: to a wallet, to a
+ *         Normie's canvas balance, or to a Normie's Arena balance. Needs ROLE_CANVAS on the pixel ledger and to be
+ *         an authorized writer of the Arena storage. Holds no pixels.
  */
 contract NormiesPixelGifts is NormiesAccess, ReentrancyGuard, Lifebuoy {
     /// @notice A zero address or amount, a receiver that is the caller or a ledger mover, a Normie id out of range,
